@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 
+use crate::audio::{GunKind, SfxEvent};
 use crate::city::{Lcg, MAP_HALF, Obstacles};
 use crate::player::{PLAYER_RADIUS, Player, resolve_collisions, spawn_point};
 
@@ -172,6 +173,7 @@ fn move_enemies(
     time: Res<Time>,
     obstacles: Res<Obstacles>,
     mut state: ResMut<GameState>,
+    mut sfx: MessageWriter<SfxEvent>,
     player: Single<&Transform, (With<Player>, Without<Enemy>)>,
     mut enemies: Query<(&Enemy, &mut Transform)>,
 ) {
@@ -204,6 +206,13 @@ fn move_enemies(
         t.translation.x = next.x;
         t.translation.z = next.y;
     }
+    if damage > 0.0 {
+        sfx.write(if state.hp - damage <= 0.0 {
+            SfxEvent::Death { dist: 0.0 }
+        } else {
+            SfxEvent::Hurt { dist: 0.0 }
+        });
+    }
     state.hp = (state.hp - damage).max(0.0);
     if state.hp <= 0.0 {
         state.over = true;
@@ -215,6 +224,7 @@ fn auto_fire(
     time: Res<Time>,
     assets: Res<CombatAssets>,
     mut state: ResMut<GameState>,
+    mut sfx: MessageWriter<SfxEvent>,
     player: Single<&Transform, With<Player>>,
     enemies: Query<&Transform, With<Enemy>>,
 ) {
@@ -239,6 +249,11 @@ fn auto_fire(
         return;
     };
     state.fire_timer = FIRE_INTERVAL;
+    sfx.write(SfxEvent::Gunshot {
+        kind: GunKind::Rifle,
+        dist: 0.0,
+        indoor: false,
+    });
     let dir = (Vec3::new(target.x, muzzle.y, target.z) - muzzle).normalize_or_zero();
     commands.spawn((
         Bullet {
@@ -256,6 +271,7 @@ fn move_bullets(
     time: Res<Time>,
     obstacles: Res<Obstacles>,
     mut state: ResMut<GameState>,
+    mut sfx: MessageWriter<SfxEvent>,
     mut bullets: Query<(Entity, &mut Bullet, &mut Transform), Without<Enemy>>,
     mut enemies: Query<(Entity, &mut Enemy, &Transform)>,
 ) {
@@ -276,6 +292,7 @@ fn move_bullets(
                     if enemy.hp <= 0 {
                         commands.entity(ee).despawn();
                         state.kills += 1;
+                        sfx.write(SfxEvent::Death { dist: 6.0 });
                     }
                     dead = true;
                     break;
