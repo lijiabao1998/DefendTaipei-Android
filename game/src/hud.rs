@@ -1,10 +1,11 @@
-//! Heads-up display: HP bar, kills / wave / time, control hint.
-//! Title, victory, and defeat screens live in `ui`.
+//! Heads-up display: HP bar, kills, reclaimed districts, control hint.
+//! Title, prologue, and endings are drawn by the UI plugin. Game flow owns the state.
 
 use bevy::prelude::*;
 
 use crate::combat::GameState;
 use crate::game_flow::Campaign;
+use crate::story::WANHUA_DISTRICTS;
 
 #[derive(Component)]
 struct StatsText;
@@ -21,13 +22,14 @@ impl Plugin for HudPlugin {
     }
 }
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let face = asset_server.load("fonts/NotoSansTC-Subset.otf");
     let font = |size: f32| TextFont {
+        font: bevy::text::FontSource::Handle(face.clone()),
         font_size: FontSize::Px(size),
         ..default()
     };
 
-    // Top-left panel
     commands
         .spawn((
             Node {
@@ -44,7 +46,7 @@ fn spawn_hud(mut commands: Commands) {
         ))
         .with_children(|p| {
             p.spawn((
-                Text::new("DEFEND TAIPEI  |  Wanhua"),
+                Text::new("保衛台北  |  萬華"),
                 font(16.0),
                 TextColor(Color::srgb(1.0, 0.85, 0.3)),
             ));
@@ -75,7 +77,6 @@ fn spawn_hud(mut commands: Commands) {
             ));
         });
 
-    // Bottom hint
     let hint = if cfg!(target_os = "android") {
         "左側搖桿移動・直向「打」射擊・「蹲」長按撤退"
     } else {
@@ -103,12 +104,15 @@ fn update_hud(
     if !state.is_changed() && !campaign.is_changed() {
         return;
     }
-    let districts = if campaign.reclaimed.is_empty() {
-        "已奪回 0".to_string()
-    } else {
-        format!("已奪回 {}", campaign.reclaimed.join("、"))
-    };
-    stats.0 = format!("HP {:>3.0}   擊倒 {}   {districts}", state.hp, state.kills);
+    let hint = campaign.reclaimed.last().map(String::as_str).unwrap_or("—");
+    stats.0 = format!(
+        "HP {:>3.0}   擊倒 {}   已奪回 {}/{}   {}",
+        state.hp,
+        state.kills,
+        campaign.reclaimed.len(),
+        WANHUA_DISTRICTS.len(),
+        hint
+    );
     let frac = (state.hp / 100.0).clamp(0.0, 1.0);
     fill.0.width = percent(frac * 100.0);
     fill.1.0 = Color::srgb(0.9 - 0.6 * frac, 0.25 + 0.6 * frac, 0.3);

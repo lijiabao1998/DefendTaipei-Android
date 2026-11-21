@@ -5,6 +5,7 @@
 
 use bevy::{prelude::*, window::PrimaryWindow};
 
+use crate::audio::SfxEvent;
 use crate::combat::GameState;
 use crate::game_flow::{Campaign, Ending, GameFlow, RestartGame, SkipPrologue, StartGame};
 use crate::i18n::{Language, UiFont, tr};
@@ -305,6 +306,7 @@ pub(super) fn title_clicks(
     mut lang: ResMut<Language>,
     mut selected: ResMut<SelectedRole>,
     mut start_event: MessageWriter<StartGame>,
+    mut sfx: MessageWriter<SfxEvent>,
     mut roles: Query<(&RoleButton, &mut BackgroundColor)>,
     mut genders: Query<(&GenderButton, &mut BackgroundColor), Without<RoleButton>>,
 ) {
@@ -315,23 +317,34 @@ pub(super) fn title_clicks(
         return;
     };
     let layout = title_layout(Vec2::new(window.width(), window.height()));
+    let mut pressed = false;
     for point in just_pressed(window.cursor_position(), &mouse, &touches) {
         if layout.male.contains(point) {
             selected.gender = Gender::Male;
+            pressed = true;
         } else if layout.female.contains(point) {
             selected.gender = Gender::Female;
+            pressed = true;
         } else if layout.lang_zh.contains(point) {
             *lang = Language::ZhTw;
+            pressed = true;
         } else if layout.lang_en.contains(point) {
             *lang = Language::En;
+            pressed = true;
         } else if let Some(index) = layout.roles.iter().position(|rect| rect.contains(point)) {
             selected.id = ROLES[index].id;
+            pressed = true;
         } else if layout.start.contains(point) {
             start_event.write(StartGame);
+            pressed = true;
         }
     }
     if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
         start_event.write(StartGame);
+        pressed = true;
+    }
+    if pressed {
+        sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
     for (button, mut color) in &mut roles {
         color.0 = if ROLES[button.0].id == selected.id {
@@ -355,6 +368,7 @@ pub(super) fn death_clicks(
     keys: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     mut restart: MessageWriter<RestartGame>,
+    mut sfx: MessageWriter<SfxEvent>,
 ) {
     if !matches!(flow.get(), GameFlow::GameOver(_)) {
         return;
@@ -365,6 +379,7 @@ pub(super) fn death_clicks(
         touches.iter_just_pressed().next().is_some() || mouse.just_pressed(MouseButton::Left);
     if tapped || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::KeyR]) {
         restart.write(RestartGame);
+        sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
 }
 
@@ -374,6 +389,7 @@ pub(super) fn prologue_clicks(
     keys: Res<ButtonInput<KeyCode>>,
     touches: Res<Touches>,
     mut skip: MessageWriter<SkipPrologue>,
+    mut sfx: MessageWriter<SfxEvent>,
 ) {
     if !matches!(flow.get(), GameFlow::Prologue) {
         return;
@@ -382,6 +398,7 @@ pub(super) fn prologue_clicks(
         touches.iter_just_pressed().next().is_some() || mouse.just_pressed(MouseButton::Left);
     if tapped || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::Escape]) {
         skip.write(SkipPrologue);
+        sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
 }
 

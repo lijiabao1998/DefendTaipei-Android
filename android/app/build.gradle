@@ -37,6 +37,12 @@ android {
     buildFeatures {
         prefab true
     }
+    sourceSets {
+        main {
+            // Repo-root assets/ (audio and the UI font). Android reads the APK asset root.
+            assets.srcDirs += files('../../assets')
+        }
+    }
     // Rust code is built separately by cargo-ndk into app/src/main/jniLibs (see README / CI).
 }
 

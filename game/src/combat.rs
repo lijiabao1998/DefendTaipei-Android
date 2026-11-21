@@ -3,26 +3,22 @@
 
 use bevy::prelude::*;
 
-use crate::city::{Lcg, MAP_HALF, Obstacles};
+use crate::audio::{GunKind, SfxEvent};
+use crate::city::Obstacles;
 use crate::player::{PLAYER_RADIUS, Player, resolve_collisions, spawn_point};
 
 const ENEMY_RADIUS: f32 = 0.45;
 const FIRE_RANGE: f32 = 15.0;
 const FIRE_INTERVAL: f32 = 0.22;
 const BULLET_SPEED: f32 = 45.0;
-const WAVE_SECONDS: f32 = 25.0;
 
 #[derive(Resource)]
 pub struct GameState {
     pub hp: f32,
     pub kills: u32,
-    pub wave: u32,
     pub over: bool,
     pub survived: f32,
-    wave_timer: f32,
-    spawn_timer: f32,
     fire_timer: f32,
-    rng: Lcg,
 }
 
 impl Default for GameState {
@@ -30,21 +26,55 @@ impl Default for GameState {
         Self {
             hp: 100.0,
             kills: 0,
-            wave: 1,
             over: false,
             survived: 0.0,
-            wave_timer: 0.0,
-            spawn_timer: 1.5,
             fire_timer: 0.0,
-            rng: Lcg(0xdefe_17a1),
         }
     }
 }
+
+/// Occupation units the original actually places: street patrols (`spawnSoldiers`),
+/// the night half of that set, district garrisons, and the four armor models on main roads.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EnemyKind {
+    Patrol,
+    NightPatrol,
+    Garrison,
+    Zbl08,
+    Zbd05,
+    Mengshi,
+    Ztd05,
+}
+
+/// Ask combat to place one hostile. Game flow (and later the map) sends this.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct SpawnEnemy {
+    pub pos: Vec3,
+    pub kind: EnemyKind,
+}
+
+/// A hostile reached 0 HP. `kind` is the unit that died.
+#[allow(dead_code)]
+#[derive(Message, Clone, Copy, Debug)]
+pub struct EnemyDied {
+    pub kind: EnemyKind,
+    pub pos: Vec3,
+}
+
+/// The player's HP reached 0.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct PlayerDied;
+
+/// Clear enemies and bullets and restore the player. Fired on a new run.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct ResetCombat;
 
 #[derive(Component)]
 pub struct Enemy {
     hp: i32,
     speed: f32,
+    pub kind: EnemyKind,
 }
 
 #[derive(Component)]
@@ -66,16 +96,19 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameState>()
+            .add_message::<SpawnEnemy>()
+            .add_message::<EnemyDied>()
+            .add_message::<PlayerDied>()
+            .add_message::<ResetCombat>()
             .add_systems(Startup, load_assets)
             .add_systems(
                 Update,
                 (
-                    tick_waves,
-                    spawn_enemies,
+                    apply_spawns,
                     move_enemies,
                     auto_fire,
                     move_bullets,
-                    restart,
+                    apply_reset,
                 )
                     .chain()
                     .after(crate::player::MoveSet),
@@ -105,66 +138,33 @@ fn load_assets(
     });
 }
 
-fn tick_waves(time: Res<Time>, mut state: ResMut<GameState>) {
-    if state.over {
-        return;
-    }
-    let dt = time.delta_secs();
-    state.survived += dt;
-    state.wave_timer += dt;
-    if state.wave_timer >= WAVE_SECONDS {
-        state.wave_timer = 0.0;
-        state.wave += 1;
+fn stats_for(kind: EnemyKind) -> (i32, f32) {
+    match kind {
+        EnemyKind::Patrol => (3, 3.4),
+        EnemyKind::NightPatrol => (3, 3.8),
+        EnemyKind::Garrison => (6, 2.2),
+        EnemyKind::Zbl08 | EnemyKind::Zbd05 | EnemyKind::Mengshi | EnemyKind::Ztd05 => (12, 2.0),
     }
 }
 
-fn spawn_enemies(
+/// Placeholder body for [`SpawnEnemy`]. Real soldiers and armor belong to combat.
+fn apply_spawns(
     mut commands: Commands,
-    time: Res<Time>,
     assets: Res<CombatAssets>,
-    obstacles: Res<Obstacles>,
-    mut state: ResMut<GameState>,
-    player: Single<&Transform, With<Player>>,
-    enemies: Query<(), With<Enemy>>,
+    mut spawns: MessageReader<SpawnEnemy>,
 ) {
-    if state.over {
-        return;
-    }
-    state.spawn_timer -= time.delta_secs();
-    if state.spawn_timer > 0.0 {
-        return;
-    }
-    let wave = state.wave as f32;
-    state.spawn_timer = (2.2 - wave * 0.25).max(0.45);
-    let cap = 6 + state.wave as usize * 4;
-    if enemies.iter().count() >= cap {
-        return;
-    }
-    let burst = 1 + state.wave / 2;
-    let p = player.translation.xz();
-    for _ in 0..burst {
-        // Try a few ring positions just outside the visible area that are on a street.
-        for _ in 0..12 {
-            let a = state.rng.range(0.0, std::f32::consts::TAU);
-            let r = state.rng.range(26.0, 34.0);
-            let c = p + Vec2::from_angle(a) * r;
-            if c.abs().max_element() > MAP_HALF - 1.0
-                || obstacles.0.iter().any(|o| o.contains(c, 0.8))
-            {
-                continue;
-            }
-            let speed = 3.2 + wave * 0.35 + state.rng.range(-0.4, 0.6);
-            commands.spawn((
-                Enemy {
-                    hp: 2 + (state.wave as i32) / 3,
-                    speed,
-                },
-                Mesh3d(assets.enemy_mesh.clone()),
-                MeshMaterial3d(assets.enemy_mat.clone()),
-                Transform::from_xyz(c.x, 0.9, c.y),
-            ));
-            break;
-        }
+    for spawn in spawns.read() {
+        let (hp, speed) = stats_for(spawn.kind);
+        commands.spawn((
+            Enemy {
+                hp,
+                speed,
+                kind: spawn.kind,
+            },
+            Mesh3d(assets.enemy_mesh.clone()),
+            MeshMaterial3d(assets.enemy_mat.clone()),
+            Transform::from_translation(spawn.pos),
+        ));
     }
 }
 
@@ -172,6 +172,8 @@ fn move_enemies(
     time: Res<Time>,
     obstacles: Res<Obstacles>,
     mut state: ResMut<GameState>,
+    mut deaths: MessageWriter<PlayerDied>,
+    mut sfx: MessageWriter<SfxEvent>,
     player: Single<&Transform, (With<Player>, Without<Enemy>)>,
     mut enemies: Query<(&Enemy, &mut Transform)>,
 ) {
@@ -204,9 +206,17 @@ fn move_enemies(
         t.translation.x = next.x;
         t.translation.z = next.y;
     }
+    if damage > 0.0 {
+        sfx.write(if state.hp - damage <= 0.0 {
+            SfxEvent::Death { dist: 0.0 }
+        } else {
+            SfxEvent::Hurt { dist: 0.0 }
+        });
+    }
     state.hp = (state.hp - damage).max(0.0);
-    if state.hp <= 0.0 {
+    if state.hp <= 0.0 && !state.over {
         state.over = true;
+        deaths.write(PlayerDied);
     }
 }
 
@@ -215,6 +225,7 @@ fn auto_fire(
     time: Res<Time>,
     assets: Res<CombatAssets>,
     mut state: ResMut<GameState>,
+    mut sfx: MessageWriter<SfxEvent>,
     player: Single<&Transform, With<Player>>,
     enemies: Query<&Transform, With<Enemy>>,
 ) {
@@ -239,6 +250,11 @@ fn auto_fire(
         return;
     };
     state.fire_timer = FIRE_INTERVAL;
+    sfx.write(SfxEvent::Gunshot {
+        kind: GunKind::Rifle,
+        dist: 0.0,
+        indoor: false,
+    });
     let dir = (Vec3::new(target.x, muzzle.y, target.z) - muzzle).normalize_or_zero();
     commands.spawn((
         Bullet {
@@ -256,6 +272,8 @@ fn move_bullets(
     time: Res<Time>,
     obstacles: Res<Obstacles>,
     mut state: ResMut<GameState>,
+    mut died: MessageWriter<EnemyDied>,
+    mut sfx: MessageWriter<SfxEvent>,
     mut bullets: Query<(Entity, &mut Bullet, &mut Transform), Without<Enemy>>,
     mut enemies: Query<(Entity, &mut Enemy, &Transform)>,
 ) {
@@ -274,8 +292,13 @@ fn move_bullets(
                 {
                     enemy.hp -= 1;
                     if enemy.hp <= 0 {
+                        died.write(EnemyDied {
+                            kind: enemy.kind,
+                            pos: et.translation,
+                        });
                         commands.entity(ee).despawn();
                         state.kills += 1;
+                        sfx.write(SfxEvent::Death { dist: 6.0 });
                     }
                     dead = true;
                     break;
@@ -288,27 +311,20 @@ fn move_bullets(
     }
 }
 
-fn restart(
+fn apply_reset(
     mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    touches: Res<Touches>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    mut resets: MessageReader<ResetCombat>,
     mut state: ResMut<GameState>,
     mut player: Single<&mut Transform, With<Player>>,
     enemies: Query<Entity, With<Enemy>>,
     bullets: Query<Entity, With<Bullet>>,
 ) {
-    if !state.over {
+    if resets.is_empty() {
         return;
     }
-    let pressed = keys.any_just_pressed([KeyCode::KeyR, KeyCode::Space, KeyCode::Enter])
-        || touches.any_just_pressed()
-        || mouse.just_pressed(MouseButton::Left);
-    if !pressed {
-        return;
-    }
-    for e in enemies.iter().chain(bullets.iter()) {
-        commands.entity(e).despawn();
+    resets.clear();
+    for entity in enemies.iter().chain(bullets.iter()) {
+        commands.entity(entity).despawn();
     }
     *state = GameState::default();
     player.translation = spawn_point();

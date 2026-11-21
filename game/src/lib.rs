@@ -5,15 +5,17 @@
 
 use bevy::{prelude::*, window::WindowMode};
 
+mod audio;
 mod camera;
 mod city;
 mod combat;
-pub mod game_flow;
+mod game_flow;
 mod hud;
 pub mod i18n;
 pub mod input;
 mod player;
 pub mod roles;
+mod story;
 mod touch;
 pub mod ui;
 
@@ -34,10 +36,21 @@ pub fn run() {
     };
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(window),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(window),
+                    ..default()
+                })
+                // The crate lives in `game/`; audio and the UI font live in the repo-root `assets/`.
+                // `cargo run` sets CARGO_MANIFEST_DIR to `game/`. Android ignores this and
+                // reads the APK asset root. Override with BEVY_ASSET_ROOT when launching
+                // the binary directly.
+                .set(bevy::asset::AssetPlugin {
+                    file_path: "../assets".to_string(),
+                    ..default()
+                }),
+        )
         .insert_resource(ClearColor(Color::srgb(0.60, 0.64, 0.67)))
         .insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.81, 0.89, 1.0),
@@ -49,10 +62,11 @@ pub fn run() {
             player::PlayerPlugin,
             camera::CameraPlugin,
             i18n::I18nPlugin,
-            game_flow::GameFlowPlugin,
             input::InputPlugin,
             touch::TouchPlugin,
             combat::CombatPlugin,
+            game_flow::GameFlowPlugin,
+            audio::AudioPlugin,
             hud::HudPlugin,
             ui::FlowUiPlugin,
         ))
