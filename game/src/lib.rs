@@ -8,8 +8,10 @@ use bevy::{prelude::*, window::WindowMode};
 mod camera;
 mod city;
 mod combat;
+mod game_flow;
 mod hud;
 mod player;
+mod story;
 mod touch;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
@@ -29,10 +31,18 @@ pub fn run() {
     };
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(window),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(window),
+                    ..default()
+                })
+                // Crate dir is `game/`; shared files live in the repo-root `assets/`.
+                .set(bevy::asset::AssetPlugin {
+                    file_path: "../assets".to_string(),
+                    ..default()
+                }),
+        )
         .insert_resource(ClearColor(Color::srgb(0.60, 0.64, 0.67)))
         .insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.81, 0.89, 1.0),
@@ -45,6 +55,7 @@ pub fn run() {
             camera::CameraPlugin,
             touch::TouchPlugin,
             combat::CombatPlugin,
+            game_flow::GameFlowPlugin,
             hud::HudPlugin,
         ))
         .run();

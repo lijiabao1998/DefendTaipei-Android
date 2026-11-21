@@ -3,6 +3,8 @@
 use bevy::prelude::*;
 
 use crate::combat::GameState;
+use crate::game_flow::Campaign;
+use crate::story::WANHUA_DISTRICTS;
 
 #[derive(Component)]
 struct StatsText;
@@ -22,8 +24,10 @@ impl Plugin for HudPlugin {
     }
 }
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let face = asset_server.load("fonts/NotoSansTC-Subset.otf");
     let font = |size: f32| TextFont {
+        font: bevy::text::FontSource::Handle(face.clone()),
         font_size: FontSize::Px(size),
         ..default()
     };
@@ -125,40 +129,24 @@ fn spawn_hud(mut commands: Commands) {
 
 fn update_hud(
     state: Res<GameState>,
+    campaign: Res<Campaign>,
     mut stats: Single<&mut Text, (With<StatsText>, Without<Banner>)>,
     mut fill: Single<(&mut Node, &mut BackgroundColor), With<HpFill>>,
-    mut banner: Single<(&mut Visibility, &Children), With<Banner>>,
-    mut texts: Query<&mut Text, (Without<StatsText>, Without<HpFill>)>,
+    mut banner: Single<&mut Visibility, With<Banner>>,
 ) {
-    if !state.is_changed() {
+    if !state.is_changed() && !campaign.is_changed() {
         return;
     }
     stats.0 = format!(
-        "HP {:>3.0}   Kills {}   Wave {}   {:>3.0}s",
-        state.hp, state.kills, state.wave, state.survived
+        "HP {:>3.0}   擊倒 {}   已奪回 {}/{}",
+        state.hp,
+        state.kills,
+        campaign.reclaimed.len(),
+        WANHUA_DISTRICTS.len()
     );
     let frac = (state.hp / 100.0).clamp(0.0, 1.0);
     fill.0.width = percent(frac * 100.0);
     fill.1.0 = Color::srgb(0.9 - 0.6 * frac, 0.25 + 0.6 * frac, 0.3);
-
-    let (vis, children) = &mut *banner;
-    **vis = if state.over {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    if state.over
-        && let Some(&child) = children.first()
-        && let Ok(mut t) = texts.get_mut(child)
-    {
-        let again = if cfg!(target_os = "android") {
-            "Tap to retry"
-        } else {
-            "R / click to retry"
-        };
-        t.0 = format!(
-            "Wanhua has fallen\n{:.0}s | {} kills | wave {}\n{again}",
-            state.survived, state.kills, state.wave
-        );
-    }
+    // Title, prologue, and endings are drawn by GameFlow. This banner stays hidden.
+    **banner = Visibility::Hidden;
 }
