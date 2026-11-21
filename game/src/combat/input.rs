@@ -8,7 +8,6 @@
 
 use bevy::{prelude::*, window::PrimaryWindow};
 
-use super::tuning::MUZZLE_HEIGHT;
 use crate::camera::GameCamera;
 use crate::player::{Player, screen_to_ground};
 
@@ -16,10 +15,11 @@ use crate::player::{Player, screen_to_ground};
 pub struct CombatInput {
     /// Manual aim direction on the ground plane (world x, z). `None` = no manual aim.
     pub aim: Option<Vec2>,
-    /// Trigger held. With `aim` set, fires along it; without, fires at the nearest enemy.
+    /// Trigger held (original: mouse click / the 打 button). With `aim` set, fires along it;
+    /// without, at the nearest soldier in sight within 25 m, else straight ahead.
     pub fire: bool,
-    /// When the trigger is not held, fire at the nearest enemy in range automatically.
-    /// Default on (phones have no fire button yet).
+    /// TEMPORARY until the touch fire button lands: fire back at the nearest soldier in
+    /// sight within 25 m that is already in combat with the player. F toggles it on desktop.
     pub auto_fire: bool,
 }
 
@@ -71,7 +71,7 @@ pub(super) fn desktop_mouse_input(
     let Ok(ray) = cam.viewport_to_world(cam_gt, cursor) else {
         return;
     };
-    let plane_y = Vec3::Y * MUZZLE_HEIGHT;
+    let plane_y = Vec3::ZERO; // original: ray onto the ground plane (aimPt)
     if let Some(d) = ray.intersect_plane(plane_y, InfinitePlane3d::new(Vec3::Y)) {
         let hit = ray.get_point(d).xz();
         let dir = hit - player.translation.xz();

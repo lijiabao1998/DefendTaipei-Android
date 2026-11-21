@@ -1,181 +1,200 @@
-//! Combat: player health, rifle + projectiles, enemy spawning / AI / death,
-//! wave pacing and win / lose.
+//! Combat & enemies — port of the original defendtaipei combat
+//! (`src/core/main.ts` soldier loop / playerAttack / damageSol / grenades,
+//! `src/npc/squadai.ts`, gun stats from `src/systems/items.ts` + `src/npc/firearms.ts`).
 //!
-//! Public API for the rest of the game (see the PR description for details):
-//! - Messages written by combat: [`EnemyDied`], [`PlayerDied`], [`WaveStarted`],
-//!   [`WaveCleared`]. Combat also sets `GameFlow::Won` (all waves cleared) and
-//!   `GameFlow::Lost` (player died); see `crate::flow`.
-//! - Messages read by combat: [`SpawnEnemy`] (spawn one enemy), [`ResetCombat`]
-//!   (clear the field, full HP, back to wave 1).
-//! - [`spawn_enemy`] for direct spawning with `Commands`.
-//! - [`CombatInput`] (aim / fire), written in [`CombatInputSet`].
-//! - [`GameState`] (HP, kills, wave, over / won) for the HUD.
-//! - All tuning numbers live in [`tuning`].
+//! Public API (see the PR description):
+//! - Messages read: [`SpawnEnemy`], [`ResetCombat`].
+//! - Messages written: [`EnemyDied`], [`PlayerDied`], [`PlayerHit`], [`Gunshot`], [`Callout`].
+//! - [`spawn_enemy`] / [`spawn_enemy_with_route`] for direct spawning.
+//! - [`CombatInput`] (aim / fire), [`CombatEnv`] (night, rain), [`PlayerStance`].
+//! - [`CombatWorldRes`] / [`world::CombatWorld`]: line of sight, cover, buildings (map owner plugs in).
+//! - [`GameState`]: HP, bleeding, kills, … for the HUD.
+//! - Character visuals: [`standin`] (swap for the real rig).
 
 use bevy::prelude::*;
 
-use crate::city::{Lcg, MAP_HALF, Obstacles};
-use crate::flow::GameFlow;
-use crate::player::{PLAYER_RADIUS, Player, resolve_collisions, spawn_point};
+use crate::city::{Lcg, Obstacles};
+use crate::player::{Player, resolve_collisions, spawn_point};
 
+pub mod driver;
 pub mod input;
-pub mod logic;
+pub mod soldier;
+pub mod squad;
+pub mod standin;
 pub mod tuning;
+pub mod world;
 
 pub use input::{CombatInput, CombatInputSet};
-use logic::{
-    HitResult, Vitals, WaveDirector, damage_hp, nearest_in_range, segment_distance, separation,
-};
+pub use soldier::{SolState, Soldier};
+pub use world::{CombatWorld, CombatWorldRes};
+
+use soldier::{Ctx, PlayerMark};
 use tuning::*;
 
 // ── Public types ────────────────────────────────────────────────────────
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Enemy unit types (original `Sol` variants in main.ts `spawnSoldiers` / district tiles).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum EnemyKind {
-    /// Fast, fragile melee rusher.
-    Rusher,
-    /// Slow, tough, hits hard.
-    Brute,
+    /// 解放軍 patrol soldier (day and night).
+    #[default]
+    PlaSoldier,
+    /// 解放軍 night patrol: only out at night (`Sol.night`).
+    PlaNightPatrol,
+    /// 解放軍 sentry holding a post (`Sol.post`): does not answer the radio.
+    PlaSentry,
 }
 
-/// Combat / run state shown by the HUD.
+/// Player combat state shown by the HUD.
 #[derive(Resource, Debug, Clone)]
 pub struct GameState {
     pub hp: f32,
-    /// Seconds of post-hit invulnerability left.
-    pub invuln: f32,
+    pub bleed: bool,
+    /// Seconds of hit stagger left (original `player.stun`; movement slow-down not wired yet).
+    pub stun: f32,
     pub kills: u32,
-    /// 1-based current wave.
+    /// TEMPORARY (driver): escalation step shown by the skeleton HUD.
     pub wave: u32,
-    pub total_waves: u32,
-    /// Player is dead (lost).
+    /// Player is dead.
     pub over: bool,
-    /// All waves cleared (won).
-    pub won: bool,
     pub survived: f32,
 }
 
 impl Default for GameState {
     fn default() -> Self {
-        let v = Vitals::full();
         Self {
-            hp: v.hp,
-            invuln: v.invuln,
+            hp: PLAYER_MAX_HP,
+            bleed: false,
+            stun: 0.0,
             kills: 0,
             wave: 1,
-            total_waves: WAVES.len() as u32,
             over: false,
-            won: false,
             survived: 0.0,
         }
     }
 }
 
-impl GameState {
-    fn running(&self) -> bool {
-        !self.over && !self.won
-    }
+/// World conditions the soldiers react to (night: shorter sight, night patrols; rain: shorter sight / hearing).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct CombatEnv {
+    pub night: bool,
+    /// 0..1
+    pub rain: f32,
 }
 
+/// What the player is doing that changes how soldiers see / hit them (written by the
+/// player / input owners; all false until those features are ported).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PlayerStance {
+    pub sneak: bool,
+    /// In cover (soldiers hit ×0.5).
+    pub cover: bool,
+    /// Low cover, crouched (aim height 0.75 m).
+    pub low_cover: bool,
+    /// Torch on (seen ×2 at night).
+    pub light: bool,
+    /// Inside a building (seen at ×0.6 range).
+    pub inside: bool,
+}
+
+/// A 解放軍 soldier. The AI state is the ported `Sol`.
 #[derive(Component, Debug)]
-pub struct Enemy {
+pub struct Enemy(pub Soldier);
+
+/// A dead soldier's body (cleared after `BODY_SECS`).
+#[derive(Component)]
+pub struct Body {
     pub kind: EnemyKind,
-    pub hp: i32,
-    flash: f32,
-}
-
-#[derive(Component)]
-pub struct Bullet {
-    vel: Vec3,
-    life: f32,
-}
-
-/// Enemy that was killed and is playing its short death shrink.
-#[derive(Component)]
-pub struct Dying {
     t: f32,
-}
-
-/// Shared meshes / materials: every enemy of a kind uses the same handles
-/// so they batch cheaply on mobile.
-#[derive(Resource, Clone)]
-pub struct CombatAssets {
-    pub rusher_mesh: Handle<Mesh>,
-    pub rusher_mat: Handle<StandardMaterial>,
-    pub brute_mesh: Handle<Mesh>,
-    pub brute_mat: Handle<StandardMaterial>,
-    pub flash_mat: Handle<StandardMaterial>,
-    pub bullet_mesh: Handle<Mesh>,
-    pub bullet_mat: Handle<StandardMaterial>,
-}
-
-impl CombatAssets {
-    fn mesh(&self, kind: EnemyKind) -> Handle<Mesh> {
-        match kind {
-            EnemyKind::Rusher => self.rusher_mesh.clone(),
-            EnemyKind::Brute => self.brute_mesh.clone(),
-        }
-    }
-    fn mat(&self, kind: EnemyKind) -> Handle<StandardMaterial> {
-        match kind {
-            EnemyKind::Rusher => self.rusher_mat.clone(),
-            EnemyKind::Brute => self.brute_mat.clone(),
-        }
-    }
 }
 
 // ── Messages ────────────────────────────────────────────────────────────
 
-/// Request: spawn one enemy at a ground position (x, z). Capped at `MAX_ENEMIES`.
+/// Request: spawn one enemy standing at `pos` (y ignored). Patrols a short route through `pos`.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct SpawnEnemy {
-    pub pos: Vec2,
+    pub pos: Vec3,
     pub kind: EnemyKind,
 }
 
-/// An enemy was killed (written exactly once per enemy).
+/// An enemy was killed (exactly once per enemy). `by_player`: the player's shot.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct EnemyDied {
     pub entity: Entity,
     pub kind: EnemyKind,
-    pub pos: Vec2,
+    pub pos: Vec3,
+    pub by_player: bool,
 }
 
-/// The player's HP reached 0 (written once per death).
+/// The player's HP reached 0 (once per life).
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq)]
+pub struct PlayerDied;
+
+/// The player was hurt (for the red flash / HUD log / audio).
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct PlayerDied {
-    pub pos: Vec2,
+pub struct PlayerHit {
+    pub dmg: f32,
+    pub cause: HitCause,
+    /// This hit started bleeding.
+    pub bleed: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HitCause {
+    Rifle,
+    RifleButt,
+    Grenade,
+}
+
+/// A gun went off (audio owner plays it).
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct WaveStarted {
-    pub wave: u32,
-    pub total: u32,
+pub struct Gunshot {
+    pub pos: Vec3,
+    pub by_player: bool,
+    pub fam: GunFam,
 }
 
+/// A soldier shouted / radioed (original `callout` / `radio` log lines, Traditional Chinese).
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct WaveCleared {
-    pub wave: u32,
-    pub total: u32,
+pub struct Callout {
+    pub pos: Vec3,
+    pub text: &'static str,
 }
 
-/// Request: despawn all enemies / bullets, restore player HP and position,
-/// back to wave 1. `RestartGame` (flow) writes this; it is handled in every state.
+/// Request: despawn all enemies, bodies, tracers and grenades, restore the player's HP
+/// (and position). Restart buttons / game flow write this.
 #[derive(Message, Clone, Copy, Debug, Default, PartialEq)]
 pub struct ResetCombat;
 
 // ── Internal resources ──────────────────────────────────────────────────
 
-#[derive(Resource, Default)]
-struct Waves(WaveDirector);
+#[derive(Resource)]
+pub struct PlayerGun {
+    pub gun: &'static Gun,
+    cd: f32,
+}
 
+impl Default for PlayerGun {
+    fn default() -> Self {
+        Self {
+            gun: gun(PLAYER_START_GUN).expect("start gun"),
+            cd: 0.0,
+        }
+    }
+}
+
+/// Global AI timers (radio / grenade cooldowns, camping detector).
 #[derive(Resource, Default)]
-struct Weapon {
-    cooldown: f32,
+struct AiTimers {
+    radio_cd: f32,
+    gren_cd: f32,
+    camp_t: f32,
+    camp_at: Vec2,
+    next_id: u32,
 }
 
 #[derive(Resource)]
-struct CombatRng(Lcg);
+pub struct CombatRng(pub Lcg);
 
 impl Default for CombatRng {
     fn default() -> Self {
@@ -183,7 +202,26 @@ impl Default for CombatRng {
     }
 }
 
-/// All combat gameplay systems (they run after player movement).
+#[derive(Component)]
+struct Grenade {
+    from: Vec2,
+    to: Vec2,
+    t: f32,
+    fuse: f32,
+    landed: bool,
+}
+
+/// Short-lived effect entity (tracer, blast, grenade warning ring) despawned after `t`.
+#[derive(Component)]
+pub struct Fx {
+    pub t: f32,
+    pub grow: f32,
+}
+
+#[derive(Component)]
+struct GrenadeWarn(Entity);
+
+/// All combat gameplay systems (they run after player movement and combat input).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CombatSet;
 
@@ -193,16 +231,19 @@ impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameState>()
             .init_resource::<CombatInput>()
-            .init_resource::<Waves>()
-            .init_resource::<Weapon>()
+            .init_resource::<CombatEnv>()
+            .init_resource::<PlayerStance>()
+            .init_resource::<CombatWorldRes>()
+            .init_resource::<PlayerGun>()
+            .init_resource::<AiTimers>()
             .init_resource::<CombatRng>()
             .add_message::<SpawnEnemy>()
             .add_message::<EnemyDied>()
             .add_message::<PlayerDied>()
-            .add_message::<WaveStarted>()
-            .add_message::<WaveCleared>()
+            .add_message::<PlayerHit>()
+            .add_message::<Gunshot>()
+            .add_message::<Callout>()
             .add_message::<ResetCombat>()
-            .add_systems(Startup, load_assets)
             .configure_sets(
                 Update,
                 (
@@ -210,99 +251,81 @@ impl Plugin for CombatPlugin {
                     CombatSet.after(CombatInputSet),
                 ),
             )
-            .add_systems(OnEnter(GameFlow::Won), mark_won)
             .add_systems(
                 Update,
                 (
                     apply_reset,
-                    (
-                        run_waves,
-                        handle_spawn_requests,
-                        move_enemies,
-                        contact_damage,
-                        fire_weapon,
-                        move_bullets,
-                    )
-                        .chain()
-                        .run_if(in_state(GameFlow::Playing)),
-                    (tick_enemy_flash, tick_dying, blink_player),
+                    handle_spawn_requests,
+                    assign_squads,
+                    soldiers_think,
+                    grenades,
+                    player_fire,
+                    player_vitals,
+                    tick_bodies,
                 )
                     .chain()
                     .in_set(CombatSet),
-            );
+            )
+            .add_plugins((standin::StandinPlugin, driver::TempDriverPlugin));
         #[cfg(not(target_os = "android"))]
         app.add_systems(Update, input::desktop_mouse_input.in_set(CombatInputSet));
     }
 }
 
-fn load_assets(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let mut mat = |c: [f32; 3]| {
-        materials.add(StandardMaterial {
-            base_color: Color::srgb(c[0], c[1], c[2]),
-            perceptual_roughness: 0.7,
-            ..default()
-        })
-    };
-    let rusher_mat = mat(RUSHER.color);
-    let brute_mat = mat(BRUTE.color);
-    let flash_mat = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        unlit: true,
-        ..default()
-    });
-    let bullet_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.9, 0.4),
-        emissive: LinearRgba::rgb(4.0, 3.0, 0.8),
-        unlit: true,
-        ..default()
-    });
-    commands.insert_resource(CombatAssets {
-        rusher_mesh: meshes.add(Capsule3d::new(RUSHER.radius, RUSHER.height)),
-        rusher_mat,
-        brute_mesh: meshes.add(Capsule3d::new(BRUTE.radius, BRUTE.height)),
-        brute_mat,
-        flash_mat,
-        bullet_mesh: meshes.add(Sphere::new(BULLET_RADIUS).mesh().ico(1).unwrap()),
-        bullet_mat,
-    });
+// ── Spawning ────────────────────────────────────────────────────────────
+
+/// Spawns one enemy at ground point `pos` (x, z) patrolling a short line through it.
+pub fn spawn_enemy(commands: &mut Commands, id: u32, pos: Vec2, kind: EnemyKind) -> Entity {
+    let a = (id as f32 * 2.399).rem_euclid(std::f32::consts::TAU);
+    let off = Vec2::from_angle(a) * 8.0;
+    spawn_enemy_with_route(commands, id, pos, kind, vec![pos, pos + off, pos - off])
 }
 
-/// Spawns one enemy of `kind` standing at ground position `pos` (x, z).
-pub fn spawn_enemy(
+/// Spawns one enemy at `pos` patrolling `route` back and forth (original: a piece of road).
+/// Visuals are attached by the stand-in renderer (or the real rig) on `Added<Enemy>`.
+pub fn spawn_enemy_with_route(
     commands: &mut Commands,
-    assets: &CombatAssets,
+    id: u32,
     pos: Vec2,
     kind: EnemyKind,
+    route: Vec<Vec2>,
 ) -> Entity {
-    let s = stats(kind);
+    let s = Soldier::new(id, kind, pos, route);
     commands
         .spawn((
-            Enemy {
-                kind,
-                hp: s.hp,
-                flash: 0.0,
-            },
-            Mesh3d(assets.mesh(kind)),
-            MeshMaterial3d(assets.mat(kind)),
-            Transform::from_xyz(pos.x, s.height * 0.5 + s.radius, pos.y),
+            Enemy(s),
+            Transform::from_xyz(pos.x, 0.0, pos.y),
+            Visibility::default(),
         ))
         .id()
 }
 
-// ── Systems ─────────────────────────────────────────────────────────────
+fn handle_spawn_requests(
+    mut commands: Commands,
+    mut requests: MessageReader<SpawnEnemy>,
+    mut timers: ResMut<AiTimers>,
+    enemies: Query<(), With<Enemy>>,
+) {
+    let mut alive = enemies.iter().count();
+    for req in requests.read() {
+        if alive >= MAX_SOLDIERS {
+            continue;
+        }
+        let id = timers.next_id;
+        timers.next_id += 1;
+        spawn_enemy(&mut commands, id, req.pos.xz(), req.kind);
+        alive += 1;
+    }
+}
 
 fn apply_reset(
     mut commands: Commands,
     mut requests: MessageReader<ResetCombat>,
     mut state: ResMut<GameState>,
-    mut waves: ResMut<Waves>,
-    mut weapon: ResMut<Weapon>,
+    mut gun: ResMut<PlayerGun>,
+    mut timers: ResMut<AiTimers>,
     mut player: Query<(&mut Transform, &mut Visibility), With<Player>>,
-    field: Query<Entity, Or<(With<Enemy>, With<Bullet>, With<Dying>)>>,
+    field: Query<Entity, Or<(With<Enemy>, With<Body>, With<Fx>, With<Grenade>)>>,
 ) {
     if requests.read().count() == 0 {
         return;
@@ -311,341 +334,578 @@ fn apply_reset(
         commands.entity(e).despawn();
     }
     *state = GameState::default();
-    *waves = Waves::default();
-    *weapon = Weapon::default();
+    gun.cd = 0.0;
+    let next_id = timers.next_id;
+    *timers = AiTimers {
+        next_id,
+        ..default()
+    };
     for (mut t, mut vis) in &mut player {
         t.translation = spawn_point();
         *vis = Visibility::Inherited;
     }
 }
 
-/// Picks a street position on a ring just outside the view around the player.
-fn find_spawn_pos(rng: &mut Lcg, around: Vec2, obstacles: &Obstacles) -> Vec2 {
-    let mut fallback = around;
-    for _ in 0..16 {
-        let a = rng.range(0.0, std::f32::consts::TAU);
-        let r = rng.range(SPAWN_RING_MIN, SPAWN_RING_MAX);
-        let c = around + Vec2::from_angle(a) * r;
-        fallback = c;
-        if c.abs().max_element() > MAP_HALF - 1.0 || obstacles.0.iter().any(|o| o.contains(c, 0.8))
-        {
-            continue;
-        }
-        return c;
+// ── Soldier AI ──────────────────────────────────────────────────────────
+
+/// v22.11 squads re-formed every frame from soldiers in combat (sorted by id).
+fn assign_squads(
+    env: Res<CombatEnv>,
+    mut enemies: Query<&mut Enemy>,
+    mut callouts: MessageWriter<Callout>,
+) {
+    let cs: Vec<(u32, Vec2)> = enemies
+        .iter()
+        .filter(|e| e.0.state == SolState::Combat && e.0.active(env.night))
+        .map(|e| (e.0.id, e.0.pos))
+        .collect();
+    if cs.is_empty() {
+        return;
     }
-    resolve_collisions(fallback, BRUTE.radius, obstacles)
+    for g in squad::squads(&cs) {
+        for mut e in &mut enemies {
+            let s = &mut e.0;
+            let Some(i) = g.iter().position(|&id| id == s.id) else {
+                continue;
+            };
+            let role = squad::role_of(i, g.len());
+            if role.is_flank() && s.role != role && s.flank_t.is_none() {
+                s.flank_t = Some(FLANK_T);
+                callouts.write(Callout {
+                    pos: Vec3::new(s.pos.x, 1.8, s.pos.y),
+                    text: if role == squad::Role::FlankL {
+                        "左翼包抄！"
+                    } else {
+                        "右翼包抄！"
+                    },
+                });
+            }
+            s.role = role;
+            s.slot = i;
+            s.sq_n = g.len();
+        }
+    }
 }
 
-fn run_waves(
+fn player_mark(pos: Vec2, alive: bool, st: &PlayerStance, firing: bool) -> PlayerMark {
+    PlayerMark {
+        pos,
+        alive,
+        sneak: st.sneak,
+        cover: st.cover,
+        light: st.light,
+        inside: st.inside,
+        aim_h: if st.low_cover && !firing {
+            0.75
+        } else if st.sneak {
+            0.9
+        } else {
+            1.25
+        },
+    }
+}
+
+fn soldiers_think(
+    mut commands: Commands,
     time: Res<Time>,
-    obstacles: Res<Obstacles>,
+    env: Res<CombatEnv>,
+    stance: Res<PlayerStance>,
+    world: Res<CombatWorldRes>,
+    obstacles: Option<Res<Obstacles>>,
+    gun: Res<PlayerGun>,
     mut state: ResMut<GameState>,
-    mut waves: ResMut<Waves>,
+    mut timers: ResMut<AiTimers>,
     mut rng: ResMut<CombatRng>,
-    player: Query<&Transform, With<Player>>,
-    enemies: Query<(), With<Enemy>>,
-    mut spawn: MessageWriter<SpawnEnemy>,
-    mut started: MessageWriter<WaveStarted>,
-    mut cleared: MessageWriter<WaveCleared>,
-    mut next: ResMut<NextState<GameFlow>>,
+    mut player: Query<&mut Transform, (With<Player>, Without<Enemy>)>,
+    mut enemies: Query<(&mut Enemy, &mut Transform)>,
+    mut hits: MessageWriter<PlayerHit>,
+    mut shots: MessageWriter<Gunshot>,
+    mut callouts: MessageWriter<Callout>,
 ) {
-    if !state.running() {
+    let dt = time.delta_secs();
+    timers.radio_cd -= dt;
+    let Ok(mut ptf) = player.single_mut() else {
+        return;
+    };
+    let pp = ptf.translation.xz();
+    let c = Ctx {
+        dt,
+        night: env.night,
+        rain: env.rain,
+        player: player_mark(pp, !state.over, &stance, gun.cd > 0.05),
+        world: world.0.as_ref(),
+    };
+    let mut spotted: Vec<(u32, Vec2, Vec2)> = Vec::new();
+    let mut noises: Vec<(Vec2, f32)> = Vec::new();
+    for (mut e, mut tf) in &mut enemies {
+        let s = &mut e.0;
+        if !s.alive() || !s.active(env.night) {
+            continue;
+        }
+        let out = soldier::tick(s, &c, &mut rng.0);
+        if let Some(obs) = obstacles.as_deref() {
+            s.pos = resolve_collisions(s.pos, SOLDIER_RADIUS, obs);
+        }
+        tf.translation.x = s.pos.x;
+        tf.translation.z = s.pos.y;
+        let at3 = |p: Vec2, y: f32| Vec3::new(p.x, y, p.y);
+        if let Some(sh) = out.shot {
+            shots.write(Gunshot {
+                pos: at3(sh.from, 1.4),
+                by_player: false,
+                fam: gun_fam(s.weapon),
+            });
+            noises.push((s.pos, NOISE_SOL_SHOT));
+            tracer(&mut commands, at3(sh.from, TRACER_H), at3(sh.to, TRACER_H));
+            if sh.hit && !state.over {
+                state.hp -= sh.dmg;
+                state.stun = 0.35;
+                let new_bleed = sh.bleed && !state.bleed;
+                state.bleed |= sh.bleed;
+                hits.write(PlayerHit {
+                    dmg: sh.dmg,
+                    cause: HitCause::Rifle,
+                    bleed: new_bleed,
+                });
+            }
+        }
+        if let Some(dmg) = out.melee_dmg
+            && !state.over
+        {
+            state.hp -= dmg;
+            state.stun = 0.45;
+            let away = (pp - s.pos).normalize_or_zero() * MELEE_KNOCKBACK;
+            let kb = pp + away;
+            let kb = obstacles.as_deref().map_or(kb, |o| {
+                resolve_collisions(kb, crate::player::PLAYER_RADIUS, o)
+            });
+            ptf.translation.x = kb.x;
+            ptf.translation.z = kb.y;
+            hits.write(PlayerHit {
+                dmg,
+                cause: HitCause::RifleButt,
+                bleed: false,
+            });
+            callouts.write(Callout {
+                pos: at3(pp, 1.8),
+                text: "你被槍托擊中！",
+            });
+        }
+        if let Some(p) = out.spotted {
+            spotted.push((s.id, s.pos, p));
+            noises.push((s.pos, NOISE_SPOTTED));
+        }
+        if out.search_callout {
+            callouts.write(Callout {
+                pos: at3(s.pos, 1.8),
+                text: "分散搜索！",
+            });
+        }
+        if out.retreat_callout {
+            callouts.write(Callout {
+                pos: at3(s.pos, 1.8),
+                text: "我中彈了，掩護我！",
+            });
+        }
+    }
+    for (id, from, p) in spotted {
+        if timers.radio_cd <= 0.0 {
+            timers.radio_cd = RADIO_CD;
+            let n = soldier::radio(
+                enemies.iter_mut().map(|(e, _)| &mut e.into_inner().0),
+                p,
+                from,
+                id,
+                env.night,
+            );
+            callouts.write(Callout {
+                pos: Vec3::new(from.x, 1.8, from.y),
+                text: if n > 0 {
+                    "（無線電）「發現目標，請求支援！」——附近士兵正趕來"
+                } else {
+                    "（無線電）「發現目標，請求支援！」"
+                },
+            });
+        }
+    }
+    for (at, r) in noises {
+        soldier::noise(
+            enemies.iter_mut().map(|(e, _)| &mut e.into_inner().0),
+            at,
+            r,
+            env.rain,
+            env.night,
+            &mut rng.0,
+        );
+    }
+}
+
+fn gun_fam(id: &str) -> GunFam {
+    gun(id).map_or(GunFam::Rifle, |g| g.fam)
+}
+
+/// Grenades (squadai.ts / main.ts `updateGrenades`): a squad that knows roughly where a
+/// player is camping out of sight lobs one; it lands, warns, and goes off after the fuse.
+fn grenades(
+    mut commands: Commands,
+    time: Res<Time>,
+    env: Res<CombatEnv>,
+    world: Res<CombatWorldRes>,
+    fx: Option<Res<standin::CombatFxAssets>>,
+    mut state: ResMut<GameState>,
+    mut timers: ResMut<AiTimers>,
+    mut enemies: Query<(Entity, &mut Enemy, &Transform), Without<Grenade>>,
+    mut grens: Query<(Entity, &mut Grenade, &mut Transform, Option<&GrenadeWarn>)>,
+    player: Query<&Transform, (With<Player>, Without<Enemy>, Without<Grenade>)>,
+    mut hits: MessageWriter<PlayerHit>,
+    mut died: MessageWriter<EnemyDied>,
+    mut callouts: MessageWriter<Callout>,
+    mut rng: ResMut<CombatRng>,
+) {
+    let dt = time.delta_secs();
+    let Ok(ptf) = player.single() else { return };
+    let pp = ptf.translation.xz();
+    timers.gren_cd -= dt;
+    if pp.distance(timers.camp_at) > 2.5 {
+        timers.camp_at = pp;
+        timers.camp_t = 0.0;
+    }
+    let near = |q: Option<Vec2>| q.is_some_and(|q| q.distance(pp) < 5.0);
+    let mut any_aiming = false;
+    let mut thrower: Option<Entity> = None;
+    let mut hunters = 0;
+    for (ent, e, _) in &enemies {
+        let s = &e.0;
+        let hunting = s.alive()
+            && s.active(env.night)
+            && ((s.state == SolState::Combat && near(s.last_seen))
+                || (s.state == SolState::Investigate && s.alert >= 0.5 && near(s.target)));
+        if !hunting {
+            continue;
+        }
+        hunters += 1;
+        any_aiming |= s.aiming;
+        let d = s.pos.distance(pp);
+        if thrower.is_none() && d > GREN_MIN && d < GREN_MAX && s.stun <= 0.0 && s.retreat_t <= 0.0
+        {
+            thrower = Some(ent);
+        }
+    }
+    if hunters > 0 && !any_aiming && !state.over {
+        timers.camp_t += dt;
+    } else {
+        timers.camp_t = (timers.camp_t - dt * 2.0).max(0.0);
+    }
+    if timers.camp_t > GREN_CAMP
+        && timers.gren_cd <= 0.0
+        && let Some(th) = thrower
+        && let Ok((_, mut e, _)) = enemies.get_mut(th)
+    {
+        let s = &mut e.0;
+        let lk = s.last_seen.or(s.target).unwrap_or(pp);
+        s.last_seen = Some(lk);
+        timers.gren_cd = GREN_CD;
+        timers.camp_t = 0.0;
+        // lands near the last-known spot with a small deterministic scatter
+        let j = (s.id as i32 * 37 + 11) % 7;
+        let to = lk + Vec2::new(((j % 3) - 1) as f32 * 0.9, ((j / 3) - 1) as f32 * 0.9);
+        let mut g = commands.spawn((
+            Grenade {
+                from: s.pos,
+                to,
+                t: 0.0,
+                fuse: GREN_FUSE,
+                landed: false,
+            },
+            Transform::from_xyz(s.pos.x, 1.6, s.pos.y),
+            Visibility::default(),
+        ));
+        if let Some(fx) = fx.as_deref() {
+            g.insert((
+                Mesh3d(fx.grenade_mesh.clone()),
+                MeshMaterial3d(fx.grenade_mat.clone()),
+            ));
+        }
+        callouts.write(Callout {
+            pos: Vec3::new(s.pos.x, 1.8, s.pos.y),
+            text: "手榴彈！",
+        });
+    }
+    for (ge, mut g, mut tf, warn) in &mut grens {
+        if !g.landed {
+            g.t += dt;
+            let u = (g.t / GREN_FLIGHT).min(1.0);
+            let p = g.from + (g.to - g.from) * u;
+            tf.translation = Vec3::new(p.x, 1.6 + 4.0 * u * (1.0 - u) - 1.5 * u, p.y);
+            if u >= 1.0 {
+                g.landed = true;
+                if let Some(fx) = fx.as_deref() {
+                    let w = standin::spawn_grenade_warn(&mut commands, fx, g.to);
+                    commands.entity(ge).insert(GrenadeWarn(w));
+                }
+            }
+            continue;
+        }
+        g.fuse -= dt;
+        if g.fuse > 0.0 {
+            continue;
+        }
+        commands.entity(ge).despawn();
+        if let Some(w) = warn {
+            commands.entity(w.0).despawn();
+        }
+        if let Some(fx) = fx.as_deref() {
+            standin::spawn_blast(&mut commands, fx, g.to);
+        }
+        let p = g.to;
+        for (ent, mut e, tf) in &mut enemies {
+            let s = &mut e.0;
+            let d = s.pos.distance(p);
+            if s.alive() && d < GREN_WOUND && soldier::damage(s, squad::grenade_dmg(d), p) {
+                commands.entity(ent).insert(Body {
+                    kind: s.kind,
+                    t: BODY_SECS,
+                });
+                died.write(EnemyDied {
+                    entity: ent,
+                    kind: s.kind,
+                    pos: tf.translation,
+                    by_player: false,
+                });
+            }
+        }
+        soldier::noise(
+            enemies.iter_mut().map(|(_, e, _)| &mut e.into_inner().0),
+            p,
+            NOISE_GRENADE,
+            env.rain,
+            env.night,
+            &mut rng.0,
+        );
+        let dp = pp.distance(p);
+        let mut dmg = squad::grenade_dmg(dp);
+        if dmg <= 0.0 || state.over {
+            continue;
+        }
+        if world.0.cover_near(pp, 1.2) && dp > 1.5 {
+            dmg *= 0.6;
+        }
+        state.hp -= dmg;
+        let new_bleed = dmg > 15.0 && !state.bleed;
+        state.bleed |= new_bleed;
+        hits.write(PlayerHit {
+            dmg,
+            cause: HitCause::Grenade,
+            bleed: new_bleed,
+        });
+    }
+}
+
+// ── Player shooting (playerAttack) ──────────────────────────────────────
+
+/// The nearest live soldier in sight within `r` (main.ts `nearestFoe`).
+fn nearest_foe<'a>(
+    p: Vec2,
+    r: f32,
+    world: &dyn CombatWorld,
+    night: bool,
+    soldiers: impl Iterator<Item = &'a Soldier>,
+) -> Option<Vec2> {
+    let mut best = None;
+    let mut bd = r;
+    for s in soldiers {
+        if !s.alive() || !s.active(night) {
+            continue;
+        }
+        let d = s.pos.distance(p);
+        if d < bd && world.shot_ray(p, s.pos, 1.6, 1.6, 0.0) >= 1.0 {
+            best = Some(s.pos);
+            bd = d;
+        }
+    }
+    best
+}
+
+fn player_fire(
+    mut commands: Commands,
+    time: Res<Time>,
+    input: Res<CombatInput>,
+    env: Res<CombatEnv>,
+    world: Res<CombatWorldRes>,
+    mut gun: ResMut<PlayerGun>,
+    mut state: ResMut<GameState>,
+    mut rng: ResMut<CombatRng>,
+    player: Query<&Transform, (With<Player>, Without<Enemy>)>,
+    mut enemies: Query<(Entity, &mut Enemy, &Transform)>,
+    mut died: MessageWriter<EnemyDied>,
+    mut shots: MessageWriter<Gunshot>,
+) {
+    gun.cd = (gun.cd - time.delta_secs()).max(0.0);
+    let Ok(ptf) = player.single() else { return };
+    if state.over || gun.cd > 0.0 {
+        return;
+    }
+    let p0 = ptf.translation.xz();
+    let w = world.0.as_ref();
+    let foe = |only_fighting: bool| {
+        nearest_foe(
+            p0,
+            AUTO_AIM_RANGE,
+            w,
+            env.night,
+            enemies
+                .iter()
+                .map(|(_, e, _)| &e.0)
+                .filter(|s| !only_fighting || s.state == SolState::Combat),
+        )
+    };
+    let aim_pt = if input.fire {
+        match input.aim {
+            Some(a) => Some(p0 + a * 5.0),
+            None => Some(foe(false).unwrap_or_else(|| {
+                // no one in sight: straight ahead (local −Z is forward on the player)
+                let f = ptf.forward();
+                p0 + Vec2::new(f.x, f.z) * 5.0
+            })),
+        }
+    } else if input.auto_fire {
+        // TEMPORARY stand-in for holding 打: only answers soldiers already fighting the
+        // player, so the auto-fire does not snipe unaware patrols (stealth still matters).
+        foe(true)
+    } else {
+        None
+    };
+    let Some(aim_pt) = aim_pt else { return };
+    let dir = (aim_pt - p0).normalize_or_zero();
+    if dir == Vec2::ZERO {
+        return;
+    }
+    let g = gun.gun;
+    gun.cd = g.cd;
+    shots.write(Gunshot {
+        pos: ptf.translation + Vec3::Y * SHOT_FROM_H,
+        by_player: true,
+        fam: g.fam,
+    });
+    // v21.4 the round stops at the first wall / cover it meets (aimed at chest height)
+    let mut hd = g.range * w.shot_ray(p0, p0 + dir * g.range, SHOT_FROM_H, SHOT_TO_H, 1.0);
+    let mut hit: Option<Entity> = None;
+    for (ent, e, _) in &enemies {
+        let s = &e.0;
+        if !s.alive() {
+            continue;
+        }
+        let to = s.pos - p0;
+        let t = to.dot(dir);
+        if t < 0.0 || t > hd {
+            continue;
+        }
+        let perp = (to - dir * t).length();
+        let th = if s.crouch {
+            SHOT_TO_H_CROUCH
+        } else {
+            SHOT_TO_H
+        };
+        if perp < SHOT_HIT_RADIUS && w.shot_ray(p0, s.pos, SHOT_FROM_H, th, 1.0) >= 1.0 {
+            hit = Some(ent);
+            hd = t;
+        }
+    }
+    let end = p0 + dir * hd;
+    tracer(
+        &mut commands,
+        Vec3::new(p0.x, TRACER_H, p0.y),
+        Vec3::new(end.x, TRACER_H, end.y),
+    );
+    if let Some(ent) = hit
+        && let Ok((_, mut e, tf)) = enemies.get_mut(ent)
+    {
+        let dmg = g.dmg * (0.8 + rng.0.next_f32() * 0.4);
+        if soldier::damage(&mut e.0, dmg, p0) {
+            state.kills += 1;
+            commands.entity(ent).insert(Body {
+                kind: e.0.kind,
+                t: BODY_SECS,
+            });
+            died.write(EnemyDied {
+                entity: ent,
+                kind: e.0.kind,
+                pos: tf.translation,
+                by_player: true,
+            });
+        }
+    }
+    // the shot is heard (gun noise radius)
+    soldier::noise(
+        enemies.iter_mut().map(|(_, e, _)| &mut e.into_inner().0),
+        p0,
+        g.noise,
+        env.rain,
+        env.night,
+        &mut rng.0,
+    );
+}
+
+/// Spawns a tracer line from `a` to `b` (main.ts `tracer`, 0.08 s).
+pub fn tracer(commands: &mut Commands, a: Vec3, b: Vec3) {
+    let len = a.distance(b);
+    if len < 0.05 {
+        return;
+    }
+    commands.spawn((
+        standin::TracerFx,
+        Fx {
+            t: TRACER_SECS,
+            grow: 0.0,
+        },
+        Transform::from_translation((a + b) / 2.0)
+            .looking_at(b, Vec3::Y)
+            .with_scale(Vec3::new(0.035, 0.035, len)),
+        Visibility::default(),
+    ));
+}
+
+fn player_vitals(
+    time: Res<Time>,
+    mut state: ResMut<GameState>,
+    mut died: MessageWriter<PlayerDied>,
+) {
+    if state.over {
         return;
     }
     let dt = time.delta_secs();
     state.survived += dt;
-    let total = waves.0.total_waves();
-    let tick = waves.0.tick(dt, enemies.iter().count());
-    if let Some(kind) = tick.spawn {
-        let around = player
-            .iter()
-            .next()
-            .map_or(Vec2::ZERO, |t| t.translation.xz());
-        let pos = find_spawn_pos(&mut rng.0, around, &obstacles);
-        spawn.write(SpawnEnemy { pos, kind });
+    state.stun = (state.stun - dt).max(0.0);
+    if state.bleed {
+        state.hp -= dt * BLEED_PER_SEC;
     }
-    if let Some(wave) = tick.started {
-        state.wave = wave;
-        started.write(WaveStarted { wave, total });
-    }
-    if let Some(wave) = tick.cleared {
-        cleared.write(WaveCleared { wave, total });
-    }
-    if tick.won {
-        state.won = true;
-        next.set(GameFlow::Won);
-    }
-}
-
-fn handle_spawn_requests(
-    mut commands: Commands,
-    mut requests: MessageReader<SpawnEnemy>,
-    assets: Option<Res<CombatAssets>>,
-    enemies: Query<(), With<Enemy>>,
-) {
-    let Some(assets) = assets else {
-        requests.clear();
-        return;
-    };
-    let mut alive = enemies.iter().count();
-    for req in requests.read() {
-        if alive >= MAX_ENEMIES {
-            continue;
-        }
-        spawn_enemy(&mut commands, &assets, req.pos, req.kind);
-        alive += 1;
-    }
-}
-
-fn move_enemies(
-    time: Res<Time>,
-    obstacles: Res<Obstacles>,
-    state: Res<GameState>,
-    player: Single<&Transform, (With<Player>, Without<Enemy>)>,
-    mut enemies: Query<(&Enemy, &mut Transform)>,
-) {
-    if !state.running() {
-        return;
-    }
-    let dt = time.delta_secs();
-    let p = player.translation.xz();
-    // Snapshot for the separation pass (n ≤ MAX_ENEMIES, so O(n²) is fine).
-    let snapshot: Vec<(Vec2, f32)> = enemies
-        .iter()
-        .map(|(e, t)| (t.translation.xz(), stats(e.kind).radius))
-        .collect();
-    for (i, (enemy, mut t)) in enemies.iter_mut().enumerate() {
-        let s = stats(enemy.kind);
-        let e = t.translation.xz();
-        let to = p - e;
-        let dist = to.length();
-        let touching = dist < PLAYER_RADIUS + s.radius + CONTACT_SLOP;
-        let chase = if touching {
-            Vec2::ZERO
-        } else {
-            to / dist.max(1e-4)
-        };
-        let others = snapshot
-            .iter()
-            .enumerate()
-            .filter(|(j, _)| *j != i)
-            .map(|(_, o)| *o);
-        let steer = (chase + separation(e, s.radius, others)).clamp_length_max(1.0);
-        if steer.length_squared() < 1e-6 {
-            continue;
-        }
-        let next = resolve_collisions(e + steer * s.speed * dt, s.radius, &obstacles);
-        t.translation.x = next.x;
-        t.translation.z = next.y;
-    }
-}
-
-fn contact_damage(
-    time: Res<Time>,
-    mut state: ResMut<GameState>,
-    player: Single<&Transform, With<Player>>,
-    enemies: Query<(&Enemy, &Transform), Without<Player>>,
-    mut died: MessageWriter<PlayerDied>,
-    mut next: ResMut<NextState<GameFlow>>,
-) {
-    if !state.running() {
-        return;
-    }
-    let mut v = Vitals {
-        hp: state.hp,
-        invuln: state.invuln,
-    };
-    v.tick(time.delta_secs());
-    let p = player.translation.xz();
-    let dmg = enemies
-        .iter()
-        .filter(|(e, t)| {
-            e.hp > 0
-                && t.translation.xz().distance(p)
-                    < PLAYER_RADIUS + stats(e.kind).radius + CONTACT_SLOP
-        })
-        .map(|(e, _)| stats(e.kind).contact_damage)
-        .fold(0.0, f32::max);
-    let result = v.take_hit(dmg);
-    if state.hp != v.hp || state.invuln != v.invuln {
-        state.hp = v.hp;
-        state.invuln = v.invuln;
-    }
-    if result == HitResult::Killed {
+    if state.hp <= 0.0 {
+        state.hp = 0.0;
         state.over = true;
-        died.write(PlayerDied { pos: p });
-        next.set(GameFlow::Lost);
+        died.write(PlayerDied);
     }
 }
 
-fn fire_weapon(
+fn tick_bodies(
     mut commands: Commands,
     time: Res<Time>,
-    assets: Option<Res<CombatAssets>>,
-    input: Res<CombatInput>,
-    state: Res<GameState>,
-    mut weapon: ResMut<Weapon>,
-    player: Single<&Transform, With<Player>>,
-    enemies: Query<&Transform, With<Enemy>>,
-    bullets: Query<(), With<Bullet>>,
-) {
-    weapon.cooldown = (weapon.cooldown - time.delta_secs()).max(0.0);
-    let Some(assets) = assets else { return };
-    if !state.running() || weapon.cooldown > 0.0 || bullets.iter().count() >= MAX_BULLETS {
-        return;
-    }
-    let origin = player.translation.xz();
-    let nearest = || {
-        nearest_in_range(
-            origin,
-            FIRE_RANGE,
-            enemies.iter().map(|t| t.translation.xz()),
-        )
-    };
-    let dir = if input.fire {
-        input
-            .aim
-            .or_else(|| nearest().map(|t| (t - origin).normalize_or_zero()))
-    } else if input.auto_fire {
-        nearest().map(|t| (t - origin).normalize_or_zero())
-    } else {
-        None
-    };
-    let Some(dir) = dir.filter(|d| d.length_squared() > 0.5) else {
-        return;
-    };
-    weapon.cooldown = FIRE_INTERVAL;
-    let dir = Vec3::new(dir.x, 0.0, dir.y);
-    let muzzle = Vec3::new(origin.x, MUZZLE_HEIGHT, origin.y) + dir * 0.6;
-    commands.spawn((
-        Bullet {
-            vel: dir * BULLET_SPEED,
-            life: FIRE_RANGE / BULLET_SPEED + 0.1,
-        },
-        Mesh3d(assets.bullet_mesh.clone()),
-        MeshMaterial3d(assets.bullet_mat.clone()),
-        Transform::from_translation(muzzle),
-        bevy::light::NotShadowCaster,
-    ));
-}
-
-fn move_bullets(
-    mut commands: Commands,
-    time: Res<Time>,
-    obstacles: Res<Obstacles>,
-    mut state: ResMut<GameState>,
-    mut bullets: Query<(Entity, &mut Bullet, &mut Transform), Without<Enemy>>,
-    mut enemies: Query<(Entity, &mut Enemy, &Transform)>,
-    mut died: MessageWriter<EnemyDied>,
+    mut bodies: Query<(Entity, &mut Body)>,
+    mut fx: Query<(Entity, &mut Fx, &mut Transform)>,
 ) {
     let dt = time.delta_secs();
-    for (be, mut b, mut t) in &mut bullets {
-        let prev = t.translation.xz();
-        t.translation += b.vel * dt;
-        b.life -= dt;
-        let p = t.translation.xz();
-        let mut spent = b.life <= 0.0 || obstacles.0.iter().any(|o| o.contains(p, 0.0));
-        if !spent {
-            for (ee, mut enemy, et) in &mut enemies {
-                let r = stats(enemy.kind).radius + BULLET_RADIUS;
-                // Swept test so fast bullets cannot skip a target on slow frames.
-                if enemy.hp <= 0 || segment_distance(prev, p, et.translation.xz()) >= r {
-                    continue;
-                }
-                spent = true;
-                match damage_hp(&mut enemy.hp, BULLET_DAMAGE) {
-                    HitResult::Hurt => enemy.flash = HIT_FLASH_SECS,
-                    HitResult::Killed => {
-                        state.kills += 1;
-                        died.write(EnemyDied {
-                            entity: ee,
-                            kind: enemy.kind,
-                            pos: et.translation.xz(),
-                        });
-                        commands
-                            .entity(ee)
-                            .remove::<Enemy>()
-                            .insert(Dying { t: DEATH_FX_SECS });
-                    }
-                    HitResult::Ignored => {}
-                }
-                break;
-            }
-        }
-        if spent {
-            commands.entity(be).despawn();
-        }
-    }
-}
-
-fn tick_enemy_flash(
-    time: Res<Time>,
-    assets: Option<Res<CombatAssets>>,
-    mut enemies: Query<(&mut Enemy, &mut MeshMaterial3d<StandardMaterial>)>,
-) {
-    let Some(assets) = assets else { return };
-    let dt = time.delta_secs();
-    for (mut e, mut mat) in &mut enemies {
-        if e.flash <= 0.0 {
-            continue;
-        }
-        e.flash -= dt;
-        let want = if e.flash > 0.0 {
-            assets.flash_mat.clone()
-        } else {
-            assets.mat(e.kind)
-        };
-        if mat.0 != want {
-            mat.0 = want;
-        }
-    }
-}
-
-fn tick_dying(
-    mut commands: Commands,
-    time: Res<Time>,
-    assets: Option<Res<CombatAssets>>,
-    mut dying: Query<(
-        Entity,
-        &mut Dying,
-        &mut Transform,
-        Option<&mut MeshMaterial3d<StandardMaterial>>,
-    )>,
-) {
-    for (e, mut d, mut t, mat) in &mut dying {
-        d.t -= time.delta_secs();
-        if d.t <= 0.0 {
+    for (e, mut b) in &mut bodies {
+        b.t -= dt;
+        if b.t <= 0.0 {
             commands.entity(e).despawn();
-            continue;
         }
-        // Flash white and shrink into the ground.
-        if let (Some(assets), Some(mut mat)) = (assets.as_ref(), mat)
-            && mat.0 != assets.flash_mat
-        {
-            mat.0 = assets.flash_mat.clone();
-        }
-        let k = (d.t / DEATH_FX_SECS).clamp(0.05, 1.0);
-        t.scale = Vec3::new(1.0 + (1.0 - k) * 0.4, k, 1.0 + (1.0 - k) * 0.4);
     }
-}
-
-/// Keeps `GameState::won` in sync if something else moved the flow to Won.
-fn mark_won(mut state: ResMut<GameState>) {
-    state.won = true;
-}
-
-/// Blinks the player while invulnerable after a hit.
-fn blink_player(state: Res<GameState>, mut player: Query<&mut Visibility, With<Player>>) {
-    let want = if state.invuln > 0.0
-        && state.running()
-        && ((state.invuln * PLAYER_BLINK_HZ * 2.0) as i32) % 2 == 1
-    {
-        Visibility::Hidden
-    } else {
-        Visibility::Inherited
-    };
-    for mut vis in &mut player {
-        vis.set_if_neq(want);
+    for (e, mut f, mut t) in &mut fx {
+        f.t -= dt;
+        if f.t <= 0.0 {
+            commands.entity(e).despawn();
+        } else if f.grow > 0.0 {
+            t.scale *= 1.0 + f.grow * dt;
+        }
     }
 }
 

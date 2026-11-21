@@ -5,12 +5,9 @@
 
 use bevy::{prelude::*, window::WindowMode};
 
-pub use flow::GameFlow;
-
 mod camera;
 mod city;
 pub mod combat;
-pub mod flow;
 mod hud;
 mod player;
 mod touch;
@@ -47,7 +44,6 @@ pub fn run() {
             player::PlayerPlugin,
             camera::CameraPlugin,
             touch::TouchPlugin,
-            flow::FlowPlugin,
             combat::CombatPlugin,
             hud::HudPlugin,
         ))

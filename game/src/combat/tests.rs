@@ -1,35 +1,31 @@
-//! ECS-level tests: run combat systems in a headless `App` (no window / renderer)
-//! and check the messages they write.
+//! ECS-level tests: combat systems in a headless `App` (no window / renderer).
 
 use std::time::Duration;
 
 use bevy::ecs::message::{MessageCursor, Messages};
-use bevy::state::app::StatesPlugin;
 
 use super::*;
-use crate::flow::{FlowPlugin, GameFlow, RestartGame};
 
 fn test_app() -> App {
     let mut app = App::new();
-    app.add_plugins(StatesPlugin)
-        .insert_state(GameFlow::Playing)
-        .init_resource::<Time>()
-        .init_resource::<Obstacles>()
+    app.init_resource::<Time>()
         .init_resource::<GameState>()
-        .init_resource::<Waves>()
-        .init_resource::<Weapon>()
+        .init_resource::<CombatInput>()
+        .init_resource::<CombatEnv>()
+        .init_resource::<PlayerStance>()
+        .init_resource::<CombatWorldRes>()
+        .init_resource::<PlayerGun>()
+        .init_resource::<AiTimers>()
         .init_resource::<CombatRng>()
         .add_message::<SpawnEnemy>()
         .add_message::<EnemyDied>()
         .add_message::<PlayerDied>()
-        .add_message::<WaveStarted>()
-        .add_message::<WaveCleared>()
+        .add_message::<PlayerHit>()
+        .add_message::<Gunshot>()
+        .add_message::<Callout>()
         .add_message::<ResetCombat>();
-    app.world_mut().spawn((
-        Player,
-        Transform::from_xyz(0.0, 0.0, 0.0),
-        Visibility::default(),
-    ));
+    app.world_mut()
+        .spawn((Player, Transform::default(), Visibility::default()));
     app
 }
 
@@ -40,171 +36,159 @@ fn step(app: &mut App, secs: f32) {
     app.update();
 }
 
-/// Counts new messages of type `M` since the cursor was last read.
 fn drain<M: Message + Clone>(app: &App, cursor: &mut MessageCursor<M>) -> Vec<M> {
     let msgs = app.world().resource::<Messages<M>>();
     cursor.read(msgs).cloned().collect()
 }
 
-fn enemy(kind: EnemyKind, hp: i32, at: Vec2) -> impl Bundle {
-    (
-        Enemy {
-            kind,
-            hp,
-            flash: 0.0,
-        },
-        Transform::from_xyz(at.x, 1.0, at.y),
-    )
-}
-
-fn bullet_at(at: Vec2) -> impl Bundle {
-    (
-        Bullet {
-            vel: Vec3::X,
-            life: 1.0,
-        },
-        Transform::from_xyz(at.x, MUZZLE_HEIGHT, at.y),
-    )
-}
-
-#[test]
-fn killing_bullet_writes_enemy_died_once_and_counts_kill() {
-    let mut app = test_app();
-    app.add_systems(Update, move_bullets);
-    let pos = Vec2::new(5.0, 5.0);
-    let e = app.world_mut().spawn(enemy(EnemyKind::Rusher, 1, pos)).id();
-    // Two bullets on the same enemy in one frame: only one kill.
-    app.world_mut().spawn(bullet_at(pos));
-    app.world_mut().spawn(bullet_at(pos));
-    let mut c = MessageCursor::<EnemyDied>::default();
-
-    step(&mut app, 0.0);
-    let died = drain(&app, &mut c);
-    assert_eq!(died.len(), 1);
-    assert_eq!(died[0].entity, e);
-    assert_eq!(died[0].kind, EnemyKind::Rusher);
-    assert_eq!(app.world().resource::<GameState>().kills, 1);
-    // Enemy is now dying (no longer an `Enemy`), bullets are gone.
-    assert!(app.world().get::<Enemy>(e).is_none());
-    assert!(app.world().get::<Dying>(e).is_some());
-
-    step(&mut app, 0.0);
-    assert!(drain(&app, &mut c).is_empty());
-}
-
-#[test]
-fn non_lethal_hit_flashes_without_message() {
-    let mut app = test_app();
-    app.add_systems(Update, move_bullets);
-    let pos = Vec2::new(-3.0, 2.0);
-    let e = app
-        .world_mut()
-        .spawn(enemy(EnemyKind::Brute, BRUTE.hp, pos))
-        .id();
-    app.world_mut().spawn(bullet_at(pos));
-    let mut c = MessageCursor::<EnemyDied>::default();
-    step(&mut app, 0.0);
-    assert!(drain(&app, &mut c).is_empty());
-    let en = app.world().get::<Enemy>(e).unwrap();
-    assert_eq!(en.hp, BRUTE.hp - BULLET_DAMAGE);
-    assert!(en.flash > 0.0);
-}
-
-#[test]
-fn contact_kills_player_writes_player_died_once_and_enters_lost() {
-    let mut app = test_app();
-    app.add_systems(Update, contact_damage);
-    app.world_mut().resource_mut::<GameState>().hp = 5.0;
+fn soldier_at(app: &mut App, id: u32, pos: Vec2) -> Entity {
+    let mut s = Soldier::new(id, EnemyKind::PlaSoldier, pos, vec![]);
+    // face the player at the origin
+    s.dir = (-pos.y).atan2(-pos.x);
     app.world_mut()
-        .spawn(enemy(EnemyKind::Brute, BRUTE.hp, Vec2::new(0.3, 0.0)));
-    let mut died = MessageCursor::<PlayerDied>::default();
+        .spawn((Enemy(s), Transform::from_xyz(pos.x, 0.0, pos.y)))
+        .id()
+}
 
-    let mut n_died = 0;
-    for _ in 0..5 {
+#[test]
+fn player_shot_kills_soldier_once() {
+    let mut app = test_app();
+    app.add_systems(Update, player_fire);
+    let e = soldier_at(&mut app, 0, Vec2::new(10.0, 0.0));
+    {
+        let mut en = app.world_mut().get_mut::<Enemy>(e).unwrap();
+        en.0.hp = 10.0;
+        en.0.state = SolState::Combat;
+    }
+    let mut died = MessageCursor::<EnemyDied>::default();
+    let mut shots = MessageCursor::<Gunshot>::default();
+    let (mut n, mut n_shots) = (0, 0);
+    for _ in 0..10 {
+        step(&mut app, 0.2);
+        n += drain(&app, &mut died).len();
+        n_shots += drain(&app, &mut shots).len();
+    }
+    assert_eq!(n, 1, "EnemyDied exactly once");
+    assert_eq!(n_shots, 1, "auto-fire stops once the target is down");
+    assert_eq!(app.world().resource::<GameState>().kills, 1);
+    let s = &app.world().get::<Enemy>(e).unwrap().0;
+    assert_eq!(s.state, SolState::Dead);
+    assert!(app.world().get::<Body>(e).is_some());
+}
+
+#[test]
+fn non_lethal_shot_provokes_soldier() {
+    let mut app = test_app();
+    app.add_systems(Update, player_fire);
+    let e = soldier_at(&mut app, 0, Vec2::new(10.0, 0.0));
+    // holding 打 (fire without aim): nearest soldier in sight, even an unaware one
+    app.world_mut().resource_mut::<CombatInput>().fire = true;
+    step(&mut app, 0.01);
+    let s = &app.world().get::<Enemy>(e).unwrap().0;
+    let rifle = gun("rifle").unwrap();
+    assert!(
+        s.hp <= SOLDIER_HP - rifle.dmg * 0.8 + 1e-3 && s.hp >= SOLDIER_HP - rifle.dmg * 1.2 - 1e-3
+    );
+    assert_eq!(s.state, SolState::Combat);
+    assert_eq!(s.last_seen, Some(Vec2::ZERO));
+}
+
+#[test]
+fn auto_fire_ignores_far_or_unaware_soldiers() {
+    let mut app = test_app();
+    app.add_systems(Update, player_fire);
+    let far = soldier_at(&mut app, 0, Vec2::new(30.0, 0.0));
+    app.world_mut().get_mut::<Enemy>(far).unwrap().0.state = SolState::Combat;
+    let unaware = soldier_at(&mut app, 1, Vec2::new(0.0, 10.0));
+    let mut shots = MessageCursor::<Gunshot>::default();
+    step(&mut app, 0.2);
+    assert!(drain(&app, &mut shots).is_empty());
+    assert_eq!(app.world().get::<Enemy>(far).unwrap().0.hp, SOLDIER_HP);
+    assert_eq!(app.world().get::<Enemy>(unaware).unwrap().0.hp, SOLDIER_HP);
+}
+
+#[test]
+fn soldiers_kill_player_and_player_died_once() {
+    let mut app = test_app();
+    app.add_systems(Update, (soldiers_think, player_vitals).chain());
+    app.world_mut().resource_mut::<GameState>().hp = 25.0;
+    for i in 0..3 {
+        let e = soldier_at(&mut app, i, Vec2::new(6.0, i as f32 * 2.0 - 2.0));
+        let mut en = app.world_mut().get_mut::<Enemy>(e).unwrap();
+        en.0.state = SolState::Combat;
+        en.0.alert = 1.0;
+    }
+    let mut died = MessageCursor::<PlayerDied>::default();
+    let mut hits = MessageCursor::<PlayerHit>::default();
+    let (mut n_died, mut n_hits) = (0, 0);
+    for _ in 0..600 {
         step(&mut app, 0.1);
         n_died += drain(&app, &mut died).len();
+        n_hits += drain(&app, &mut hits).len();
     }
-    assert_eq!(n_died, 1);
-    assert_eq!(
-        *app.world().resource::<State<GameFlow>>().get(),
-        GameFlow::Lost
-    );
-    let s = app.world().resource::<GameState>();
-    assert!(s.over);
-    assert_eq!(s.hp, 0.0);
+    assert_eq!(n_died, 1, "PlayerDied exactly once");
+    assert!(n_hits >= 1);
+    let st = app.world().resource::<GameState>();
+    assert!(st.over);
+    assert_eq!(st.hp, 0.0);
 }
 
 #[test]
-fn contact_respects_invulnerability() {
+fn bleeding_drains_hp() {
     let mut app = test_app();
-    app.add_systems(Update, contact_damage);
-    app.world_mut()
-        .spawn(enemy(EnemyKind::Rusher, RUSHER.hp, Vec2::new(0.3, 0.0)));
-    step(&mut app, 0.01);
-    let hp1 = app.world().resource::<GameState>().hp;
-    assert_eq!(hp1, PLAYER_MAX_HP - RUSHER.contact_damage);
-    // Within the i-frame window: no more damage.
-    step(&mut app, PLAYER_INVULN_SECS * 0.5);
-    assert_eq!(app.world().resource::<GameState>().hp, hp1);
-    // After it: hit again.
-    step(&mut app, PLAYER_INVULN_SECS);
-    assert_eq!(
-        app.world().resource::<GameState>().hp,
-        PLAYER_MAX_HP - 2.0 * RUSHER.contact_damage
-    );
+    app.add_systems(Update, player_vitals);
+    app.world_mut().resource_mut::<GameState>().bleed = true;
+    step(&mut app, 10.0);
+    let hp = app.world().resource::<GameState>().hp;
+    assert!((hp - (PLAYER_MAX_HP - 10.0 * BLEED_PER_SEC)).abs() < 1e-3);
 }
 
 #[test]
-fn waves_run_to_won_state() {
+fn spawn_message_spawns_soldier() {
     let mut app = test_app();
-    // Nobody actually spawns the requested enemies, so every wave clears at once.
-    app.add_systems(Update, run_waves);
-    let mut started = MessageCursor::<WaveStarted>::default();
-    let mut spawns = MessageCursor::<SpawnEnemy>::default();
-    let (mut n_started, mut n_spawn) = (vec![], 0);
-    for _ in 0..3000 {
-        step(&mut app, 0.1);
-        n_started.extend(drain(&app, &mut started).into_iter().map(|w| w.wave));
-        n_spawn += drain(&app, &mut spawns).len();
-    }
-    let expected: u32 = WAVES.iter().map(|w| w.rushers + w.brutes).sum();
-    assert_eq!(n_started, (1..=WAVES.len() as u32).collect::<Vec<_>>());
-    assert_eq!(n_spawn as u32, expected);
+    app.add_systems(Update, handle_spawn_requests);
+    app.world_mut().write_message(SpawnEnemy {
+        pos: Vec3::new(4.0, 0.0, -3.0),
+        kind: EnemyKind::PlaSentry,
+    });
+    step(&mut app, 0.016);
+    let w = app.world_mut();
+    let list: Vec<_> = w
+        .query::<&Enemy>()
+        .iter(w)
+        .map(|e| (e.0.kind, e.0.pos, e.0.post))
+        .collect();
     assert_eq!(
-        *app.world().resource::<State<GameFlow>>().get(),
-        GameFlow::Won
+        list,
+        vec![(
+            EnemyKind::PlaSentry,
+            Vec2::new(4.0, -3.0),
+            Some(Vec2::new(4.0, -3.0))
+        )]
     );
-    let s = app.world().resource::<GameState>();
-    assert!(s.won && !s.over);
-    assert_eq!(s.wave, WAVES.len() as u32);
 }
 
 #[test]
 fn reset_clears_field_and_restores_player() {
     let mut app = test_app();
     app.add_systems(Update, apply_reset);
-    app.world_mut()
-        .spawn(enemy(EnemyKind::Rusher, 2, Vec2::ONE));
-    app.world_mut()
-        .spawn(enemy(EnemyKind::Brute, 7, Vec2::NEG_ONE));
-    app.world_mut().spawn(bullet_at(Vec2::ZERO));
+    soldier_at(&mut app, 0, Vec2::ONE);
+    soldier_at(&mut app, 1, Vec2::NEG_ONE);
     {
         let mut s = app.world_mut().resource_mut::<GameState>();
         s.hp = 0.0;
         s.over = true;
-        s.kills = 12;
-        s.wave = 3;
+        s.bleed = true;
+        s.kills = 4;
     }
     app.world_mut().write_message(ResetCombat);
     step(&mut app, 0.016);
-
     let w = app.world_mut();
     assert_eq!(w.query_filtered::<(), With<Enemy>>().iter(w).count(), 0);
-    assert_eq!(w.query_filtered::<(), With<Bullet>>().iter(w).count(), 0);
     let s = w.resource::<GameState>();
     assert_eq!(s.hp, PLAYER_MAX_HP);
-    assert!(!s.over && !s.won);
-    assert_eq!((s.kills, s.wave), (0, 1));
+    assert!(!s.over && !s.bleed);
+    assert_eq!(s.kills, 0);
     let p = w
         .query_filtered::<&Transform, With<Player>>()
         .single(w)
@@ -213,55 +197,27 @@ fn reset_clears_field_and_restores_player() {
 }
 
 #[test]
-fn flow_title_auto_starts_then_restarts_after_loss() {
-    let mut app = App::new();
-    app.add_plugins((StatesPlugin, FlowPlugin))
-        .init_resource::<Time>()
-        .add_message::<ResetCombat>();
-    let mut resets = MessageCursor::<ResetCombat>::default();
-    let flow = |app: &App| *app.world().resource::<State<GameFlow>>().get();
-    assert_eq!(flow(&app), GameFlow::Title);
-    step(&mut app, 0.1);
-    step(&mut app, 0.1);
-    assert_eq!(
-        flow(&app),
-        GameFlow::Playing,
-        "AUTO_FLOW_TEMP skips the title"
-    );
-
-    app.world_mut()
-        .resource_mut::<NextState<GameFlow>>()
-        .set(GameFlow::Lost);
-    step(&mut app, 0.0);
-    assert_eq!(flow(&app), GameFlow::Lost);
-    let mut t = 0.0;
-    while flow(&app) == GameFlow::Lost {
-        step(&mut app, 0.1);
-        t += 0.1;
-        assert!(t < 30.0, "should auto-restart");
+fn squads_assign_roles_and_flank_callouts() {
+    let mut app = test_app();
+    app.add_systems(Update, assign_squads);
+    for i in 0..3 {
+        let e = soldier_at(&mut app, i, Vec2::new(10.0 + i as f32, 0.0));
+        app.world_mut().get_mut::<Enemy>(e).unwrap().0.state = SolState::Combat;
     }
-    assert_eq!(flow(&app), GameFlow::Playing);
-    assert!(t >= crate::flow::AUTO_RESTART_SECS_TEMP - 0.11);
-    assert_eq!(drain(&app, &mut resets).len(), 1);
-}
-
-#[test]
-fn restart_button_resets_and_plays() {
-    let mut app = App::new();
-    app.add_plugins((StatesPlugin, FlowPlugin))
-        .init_resource::<Time>()
-        .add_message::<ResetCombat>();
-    app.world_mut()
-        .resource_mut::<NextState<GameFlow>>()
-        .set(GameFlow::Won);
-    step(&mut app, 0.0);
-    let mut resets = MessageCursor::<ResetCombat>::default();
-    app.world_mut().write_message(RestartGame);
-    step(&mut app, 0.0);
-    step(&mut app, 0.0);
-    assert_eq!(drain(&app, &mut resets).len(), 1);
-    assert_eq!(
-        *app.world().resource::<State<GameFlow>>().get(),
-        GameFlow::Playing
-    );
+    let mut calls = MessageCursor::<Callout>::default();
+    step(&mut app, 0.016);
+    let w = app.world_mut();
+    let mut roles: Vec<_> = w
+        .query::<&Enemy>()
+        .iter(w)
+        .map(|e| (e.0.id, e.0.role))
+        .collect();
+    roles.sort_by_key(|r| r.0);
+    use squad::Role::*;
+    assert_eq!(roles, vec![(0, Suppress), (1, FlankL), (2, FlankR)]);
+    let texts: Vec<_> = drain(&app, &mut calls)
+        .into_iter()
+        .map(|c| c.text)
+        .collect();
+    assert_eq!(texts, vec!["左翼包抄！", "右翼包抄！"]);
 }
