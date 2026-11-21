@@ -190,10 +190,9 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            chmod +x scripts/emulator-smoke.sh
-            SMOKE_SECS=45 SMOKE_OUT=emulator-smoke \
-              ./scripts/emulator-smoke.sh DefendTaipei-x86_64-debug.apk
+          # android-emulator-runner runs each line as its own `sh -c`, so keep
+          # this as a single line (no backslash continuations).
+          script: chmod +x scripts/emulator-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
 
       - name: Upload smoke artifacts
         if: always()
