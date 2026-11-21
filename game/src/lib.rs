@@ -5,6 +5,7 @@
 
 use bevy::{prelude::*, window::WindowMode};
 
+mod audio;
 mod camera;
 mod city;
 mod combat;
@@ -45,6 +46,7 @@ pub fn run() {
             camera::CameraPlugin,
             touch::TouchPlugin,
             combat::CombatPlugin,
+            audio::AudioPlugin,
             hud::HudPlugin,
         ))
         .run();
