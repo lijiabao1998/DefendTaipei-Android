@@ -1,0 +1,51 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'tw.lijiabao.defendtaipei'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "tw.lijiabao.defendtaipei"
+        minSdk 31
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+        // set up targets
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packaging {
+        jniLibs {
+            // Compress the ~100 MB Rust library inside the APK (much smaller download).
+            useLegacyPackaging true
+        }
+    }
+    buildFeatures {
+        prefab true
+    }
+    // Rust code is built separately by cargo-ndk into app/src/main/jniLibs (see README / CI).
+}
+
+dependencies {
+
+    implementation libs.appcompat
+    implementation libs.material
+    implementation libs.games.activity
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+}

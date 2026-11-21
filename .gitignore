@@ -11,3 +11,9 @@ build/
 # Signing keys (never commit)
 *.jks
 *.keystore
+
+# Native libraries produced by cargo-ndk (built in CI / locally, not committed)
+android/app/src/main/jniLibs/
+.cxx/
+.idea/
+.DS_Store
