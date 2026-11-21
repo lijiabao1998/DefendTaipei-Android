@@ -1,17 +1,16 @@
-//! Heads-up display: HP bar, kills / wave / time, game-over banner, control hint.
+//! Heads-up display: HP bar, kills / wave / time, control hint.
+//! Title, victory, and defeat screens live in `ui`.
 
 use bevy::prelude::*;
 
 use crate::combat::GameState;
+use crate::game_flow::Campaign;
 
 #[derive(Component)]
 struct StatsText;
 
 #[derive(Component)]
 struct HpFill;
-
-#[derive(Component)]
-struct Banner;
 
 pub struct HudPlugin;
 
@@ -78,9 +77,9 @@ fn spawn_hud(mut commands: Commands) {
 
     // Bottom hint
     let hint = if cfg!(target_os = "android") {
-        "Drag left side to move  |  pinch to zoom  |  auto-fire"
+        "左側搖桿移動・直向「打」射擊・「蹲」長按撤退"
     } else {
-        "WASD / arrows to move  |  wheel to zoom  |  auto-fire"
+        "WASD／左側搖桿移動・直向「打」射擊・「蹲」長按撤退"
     };
     commands.spawn((
         Node {
@@ -93,72 +92,24 @@ fn spawn_hud(mut commands: Commands) {
         font(13.0),
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
     ));
-
-    // Centered game-over banner
-    commands
-        .spawn((
-            Banner,
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                height: percent(100),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            Visibility::Hidden,
-            GlobalZIndex(20),
-        ))
-        .with_child((
-            Node {
-                padding: UiRect::all(px(18)),
-                border_radius: BorderRadius::all(px(10)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-            Text::new(""),
-            font(24.0),
-            TextColor(Color::WHITE),
-            TextLayout::justify(Justify::Center),
-        ));
 }
 
 fn update_hud(
     state: Res<GameState>,
-    mut stats: Single<&mut Text, (With<StatsText>, Without<Banner>)>,
+    campaign: Res<Campaign>,
+    mut stats: Single<&mut Text, With<StatsText>>,
     mut fill: Single<(&mut Node, &mut BackgroundColor), With<HpFill>>,
-    mut banner: Single<(&mut Visibility, &Children), With<Banner>>,
-    mut texts: Query<&mut Text, (Without<StatsText>, Without<HpFill>)>,
 ) {
-    if !state.is_changed() {
+    if !state.is_changed() && !campaign.is_changed() {
         return;
     }
-    stats.0 = format!(
-        "HP {:>3.0}   Kills {}   Wave {}   {:>3.0}s",
-        state.hp, state.kills, state.wave, state.survived
-    );
+    let districts = if campaign.reclaimed.is_empty() {
+        "已奪回 0".to_string()
+    } else {
+        format!("已奪回 {}", campaign.reclaimed.join("、"))
+    };
+    stats.0 = format!("HP {:>3.0}   擊倒 {}   {districts}", state.hp, state.kills);
     let frac = (state.hp / 100.0).clamp(0.0, 1.0);
     fill.0.width = percent(frac * 100.0);
     fill.1.0 = Color::srgb(0.9 - 0.6 * frac, 0.25 + 0.6 * frac, 0.3);
-
-    let (vis, children) = &mut *banner;
-    **vis = if state.over {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    if state.over
-        && let Some(&child) = children.first()
-        && let Ok(mut t) = texts.get_mut(child)
-    {
-        let again = if cfg!(target_os = "android") {
-            "Tap to retry"
-        } else {
-            "R / click to retry"
-        };
-        t.0 = format!(
-            "Wanhua has fallen\n{:.0}s | {} kills | wave {}\n{again}",
-            state.survived, state.kills, state.wave
-        );
-    }
 }

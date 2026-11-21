@@ -8,14 +8,19 @@ use bevy::{prelude::*, window::WindowMode};
 mod camera;
 mod city;
 mod combat;
+pub mod game_flow;
 mod hud;
+pub mod i18n;
+pub mod input;
 mod player;
+pub mod roles;
 mod touch;
+pub mod ui;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
 pub fn run() {
     let window = Window {
-        title: "Defend Taipei — Wanhua slice".into(),
+        title: "保衛台北 Defend Taipei".into(),
         // Phones run fullscreen; desktop opens a resizable landscape window you can
         // drag into a portrait shape to test the phone layout.
         mode: if cfg!(target_os = "android") {
@@ -43,9 +48,13 @@ pub fn run() {
             city::CityPlugin,
             player::PlayerPlugin,
             camera::CameraPlugin,
+            i18n::I18nPlugin,
+            game_flow::GameFlowPlugin,
+            input::InputPlugin,
             touch::TouchPlugin,
             combat::CombatPlugin,
             hud::HudPlugin,
+            ui::FlowUiPlugin,
         ))
         .run();
 }
