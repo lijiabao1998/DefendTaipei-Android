@@ -10,7 +10,8 @@ fn test_app() -> App {
     let mut app = App::new();
     app.init_resource::<Time>()
         .init_resource::<GameState>()
-        .init_resource::<CombatInput>()
+        .init_resource::<WeaponInput>()
+        .init_resource::<AutoFire>()
         .init_resource::<CombatEnv>()
         .init_resource::<PlayerStance>()
         .init_resource::<CombatWorldRes>()
@@ -82,7 +83,7 @@ fn non_lethal_shot_provokes_soldier() {
     app.add_systems(Update, player_fire);
     let e = soldier_at(&mut app, 0, Vec2::new(10.0, 0.0));
     // holding 打 (fire without aim): nearest soldier in sight, even an unaware one
-    app.world_mut().resource_mut::<CombatInput>().fire = true;
+    app.world_mut().resource_mut::<WeaponInput>().fire = true;
     step(&mut app, 0.01);
     let s = &app.world().get::<Enemy>(e).unwrap().0;
     let rifle = gun("rifle").unwrap();

@@ -6,7 +6,7 @@
 //! - Messages read: [`SpawnEnemy`], [`ResetCombat`].
 //! - Messages written: [`EnemyDied`], [`PlayerDied`], [`PlayerHit`], [`Gunshot`], [`Callout`].
 //! - [`spawn_enemy`] / [`spawn_enemy_with_route`] for direct spawning.
-//! - [`CombatInput`] (aim / fire), [`CombatEnv`] (night, rain), [`PlayerStance`].
+//! - [`WeaponInput`] (aim / fire / crouch; becomes `PlayerInput` after PR #6), [`AutoFire`], [`CombatEnv`] (night, rain), [`PlayerStance`].
 //! - [`CombatWorldRes`] / [`world::CombatWorld`]: line of sight, cover, buildings (map owner plugs in).
 //! - [`GameState`]: HP, bleeding, kills, … for the HUD.
 //! - Character visuals: [`standin`] (swap for the real rig).
@@ -16,7 +16,6 @@ use bevy::prelude::*;
 use crate::city::{Lcg, Obstacles};
 use crate::player::{Player, resolve_collisions, spawn_point};
 
-pub mod driver;
 pub mod input;
 pub mod sfx;
 pub mod soldier;
@@ -25,7 +24,7 @@ pub mod standin;
 pub mod tuning;
 pub mod world;
 
-pub use input::{CombatInput, CombatInputSet};
+pub use input::{AutoFire, CombatInput, CombatInputSet, WeaponInput};
 pub use soldier::{SolState, Soldier};
 pub use world::{CombatWorld, CombatWorldRes};
 
@@ -70,10 +69,9 @@ pub struct GameState {
     /// Seconds of hit stagger left (original `player.stun`; movement slow-down not wired yet).
     pub stun: f32,
     pub kills: u32,
-    /// TEMPORARY (driver): escalation step shown by the skeleton HUD.
-    pub wave: u32,
-    /// Player is dead.
+    /// Player is dead, or `game_flow::sync_over` says the run is not live.
     pub over: bool,
+    /// Seconds in play; `game_flow::occupation_pressure` advances it.
     pub survived: f32,
 }
 
@@ -84,7 +82,6 @@ impl Default for GameState {
             bleed: false,
             stun: 0.0,
             kills: 0,
-            wave: 1,
             over: false,
             survived: 0.0,
         }
@@ -246,7 +243,8 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<GameState>()
-            .init_resource::<CombatInput>()
+            .init_resource::<WeaponInput>()
+            .init_resource::<AutoFire>()
             .init_resource::<CombatEnv>()
             .init_resource::<PlayerStance>()
             .init_resource::<CombatWorldRes>()
@@ -272,6 +270,7 @@ impl Plugin for CombatPlugin {
                 Update,
                 (
                     apply_reset,
+                    input::sync_stance,
                     handle_spawn_requests,
                     assign_squads,
                     soldiers_think,
@@ -284,7 +283,7 @@ impl Plugin for CombatPlugin {
                     .chain()
                     .in_set(CombatSet),
             )
-            .add_plugins((standin::StandinPlugin, driver::TempDriverPlugin));
+            .add_plugins(standin::StandinPlugin);
         #[cfg(not(target_os = "android"))]
         app.add_systems(Update, input::desktop_mouse_input.in_set(CombatInputSet));
     }
@@ -758,7 +757,8 @@ fn nearest_foe<'a>(
 fn player_fire(
     mut commands: Commands,
     time: Res<Time>,
-    input: Res<CombatInput>,
+    input: Res<WeaponInput>,
+    auto: Res<AutoFire>,
     env: Res<CombatEnv>,
     world: Res<CombatWorldRes>,
     mut gun: ResMut<PlayerGun>,
@@ -789,7 +789,7 @@ fn player_fire(
         )
     };
     let aim_pt = if input.fire {
-        match input.aim {
+        match input.aim.try_normalize() {
             Some(a) => Some(p0 + a * 5.0),
             None => Some(foe(false).unwrap_or_else(|| {
                 // no one in sight: straight ahead (local −Z is forward on the player)
@@ -797,7 +797,7 @@ fn player_fire(
                 p0 + Vec2::new(f.x, f.z) * 5.0
             })),
         }
-    } else if input.auto_fire {
+    } else if auto.0 {
         // TEMPORARY stand-in for holding 打: only answers soldiers already fighting the
         // player, so the auto-fire does not snipe unaware patrols (stealth still matters).
         foe(true)
@@ -901,7 +901,6 @@ fn player_vitals(
         return;
     }
     let dt = time.delta_secs();
-    state.survived += dt;
     state.stun = (state.stun - dt).max(0.0);
     if state.bleed {
         state.hp -= dt * BLEED_PER_SEC;

@@ -9,8 +9,10 @@ mod audio;
 mod camera;
 mod city;
 pub mod combat;
+pub mod game_flow;
 mod hud;
 mod player;
+mod story;
 mod touch;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
@@ -36,7 +38,7 @@ pub fn run() {
                     primary_window: Some(window),
                     ..default()
                 })
-                // The crate lives in `game/`; the shared folder is the repo-root `assets/`.
+                // The crate lives in `game/`; audio and the UI font live in the repo-root `assets/`.
                 // `cargo run` sets CARGO_MANIFEST_DIR to `game/`. Android ignores this and
                 // reads the APK asset root. Override with BEVY_ASSET_ROOT when launching
                 // the binary directly.
@@ -57,6 +59,7 @@ pub fn run() {
             camera::CameraPlugin,
             touch::TouchPlugin,
             combat::CombatPlugin,
+            game_flow::GameFlowPlugin,
             audio::AudioPlugin,
             hud::HudPlugin,
         ))

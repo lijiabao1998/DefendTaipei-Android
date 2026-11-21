@@ -17,7 +17,9 @@ use bevy::audio::Volume;
 use bevy::prelude::*;
 
 use crate::combat::GameState;
+use crate::game_flow::GameFlow;
 use crate::player::{MoveInput, MoveSet};
+use crate::story::{self, StoryAlert, StoryBroadcast};
 
 pub const RAIN: &str = "audio/rain.ogg";
 pub const ROOM: &str = "audio/room.ogg";
@@ -202,6 +204,7 @@ impl Plugin for AudioPlugin {
                 Update,
                 (
                     footsteps_while_moving,
+                    story_cues,
                     play_events,
                     street_life,
                     drive_siren,
@@ -304,15 +307,39 @@ fn step_index(surface: Surface) -> usize {
     }
 }
 
+fn in_session(flow: &GameFlow) -> bool {
+    matches!(flow, GameFlow::Prologue | GameFlow::Playing)
+}
+
+/// Story alerts and 北廣 lines become the siren, the test chime, or the radio bed.
+fn story_cues(
+    mut alerts: MessageReader<StoryAlert>,
+    mut lines: MessageReader<StoryBroadcast>,
+    mut sfx: MessageWriter<SfxEvent>,
+) {
+    for alert in alerts.read() {
+        let kind = match alert.kind {
+            story::AlertKind::Test => AlertKind::Test,
+            story::AlertKind::Alert => AlertKind::Alert,
+            story::AlertKind::Clear => AlertKind::Clear,
+        };
+        sfx.write(SfxEvent::Alert { kind });
+    }
+    for _line in lines.read() {
+        sfx.write(SfxEvent::Broadcast);
+    }
+}
+
 fn footsteps_while_moving(
     time: Res<Time>,
     input: Res<MoveInput>,
     state: Res<GameState>,
+    flow: Res<State<GameFlow>>,
     mut mix: ResMut<Mix>,
     mut events: MessageWriter<SfxEvent>,
 ) {
     let stick = input.combined().length();
-    let moving = !state.over && stick > 0.15;
+    let moving = in_session(flow.get()) && !state.over && stick > 0.15;
     if !moving {
         mix.step.reset();
         return;
@@ -466,9 +493,11 @@ fn street_life(
     time: Res<Time>,
     clips: Res<Clips>,
     amb: Res<Ambience>,
+    flow: Res<State<GameFlow>>,
     mut mix: ResMut<Mix>,
 ) {
-    if amb.metro {
+    // Title and the ending screens stay quiet. The morning commute and the fight do not.
+    if !in_session(flow.get()) || amb.metro {
         return;
     }
     mix.next_street -= time.delta_secs();
@@ -503,9 +532,14 @@ fn drive_siren(
     time: Res<Time>,
     clips: Res<Clips>,
     amb: Res<Ambience>,
+    flow: Res<State<GameFlow>>,
     mut mix: ResMut<Mix>,
     mut voices: Query<(Entity, &mut AudioSink), With<SirenVoice>>,
 ) {
+    // The 萬安 rotor belongs to the prologue raid and the fight, not the title or an ending.
+    if !in_session(flow.get()) {
+        mix.siren_on = false;
+    }
     if !mix.siren_on || mix.siren_kind != AlertKind::Alert {
         for (entity, _) in voices.iter() {
             commands.entity(entity).despawn();
