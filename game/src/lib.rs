@@ -9,11 +9,15 @@ mod camera;
 mod city;
 mod combat;
 mod hud;
+mod perf;
 mod player;
 mod touch;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
 pub fn run() {
+    // Early marker for CI / logcat grepping (before window / GPU init).
+    println!("DTPERF boot starting");
+
     let window = Window {
         title: "Defend Taipei — Wanhua slice".into(),
         // Phones run fullscreen; desktop opens a resizable landscape window you can
@@ -46,6 +50,7 @@ pub fn run() {
             touch::TouchPlugin,
             combat::CombatPlugin,
             hud::HudPlugin,
+            perf::PerfPlugin,
         ))
         .run();
 }

@@ -19,6 +19,7 @@ What you can do right now:
   - Desktop: WASD or arrow keys to move, mouse wheel to zoom.
   - Phone: touch the left part of the screen and drag for a floating virtual joystick; pinch with two fingers to zoom.
 - **Orientation**: landscape is the main layout; portrait works too. The Android activity follows the sensor, and the camera and HUD re-fit on every resize / rotation (resize the desktop window to test).
+- **Perf overlay** (top-right): FPS, avg / p99 / max frame time, entity count. Off by default in release builds; on in debug. Toggle with **F3** (desktop) or a **three-finger tap** (Android). Force with `DEFEND_TAIPEI_PERF=1`. A `DTPERF …` line is always printed to stdout / logcat every ~5 s for CI.
 
 Everything is placeholder geometry: no models, textures, audio, menus or story yet.
 
@@ -40,6 +41,7 @@ game/                 crate `defend_taipei`: all gameplay + desktop binary `defe
   src/touch.rs        floating virtual joystick + pinch zoom
   src/combat.rs       waves, hostiles, auto-fire, HP, restart
   src/hud.rs          HP bar, stats, game-over banner
+  src/perf.rs         FPS overlay + DTPERF log lines (CI smoke)
 mobile/               crate `defend_taipei_android`: cdylib with `#[bevy_main]` (GameActivity entry)
 android/              Gradle project (from Bevy's examples/mobile/android_example), GameActivity
 .github/workflows/    CI: desktop fmt/clippy/build + arm64 APK artifact
