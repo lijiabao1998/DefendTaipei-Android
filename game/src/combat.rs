@@ -3,7 +3,7 @@
 
 use bevy::prelude::*;
 
-use crate::audio::SfxEvent;
+use crate::audio::{GunKind, SfxEvent};
 use crate::city::{Lcg, MAP_HALF, Obstacles};
 use crate::player::{PLAYER_RADIUS, Player, resolve_collisions, spawn_point};
 
@@ -208,9 +208,9 @@ fn move_enemies(
     }
     if damage > 0.0 {
         sfx.write(if state.hp - damage <= 0.0 {
-            SfxEvent::PlayerDeath
+            SfxEvent::Death { dist: 0.0 }
         } else {
-            SfxEvent::PlayerHurt
+            SfxEvent::Hurt { dist: 0.0 }
         });
     }
     state.hp = (state.hp - damage).max(0.0);
@@ -249,7 +249,11 @@ fn auto_fire(
         return;
     };
     state.fire_timer = FIRE_INTERVAL;
-    sfx.write(SfxEvent::Gunshot);
+    sfx.write(SfxEvent::Gunshot {
+        kind: GunKind::Rifle,
+        dist: 0.0,
+        indoor: false,
+    });
     let dir = (Vec3::new(target.x, muzzle.y, target.z) - muzzle).normalize_or_zero();
     commands.spawn((
         Bullet {
@@ -288,7 +292,7 @@ fn move_bullets(
                     if enemy.hp <= 0 {
                         commands.entity(ee).despawn();
                         state.kills += 1;
-                        sfx.write(SfxEvent::EnemyDeath);
+                        sfx.write(SfxEvent::Death { dist: 6.0 });
                     }
                     dead = true;
                     break;
