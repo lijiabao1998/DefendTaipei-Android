@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["game", "mobile"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+publish = false
+
+[workspace.dependencies]
+bevy = "0.20.1"
+
+# Bevy is slow in debug builds; optimize dependencies but keep our own code fast to compile.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+# Used for the APK: optimized and stripped so the .so stays small.
+[profile.release]
+strip = true
+
+# Bevy systems routinely take many params and nested query filters.
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"

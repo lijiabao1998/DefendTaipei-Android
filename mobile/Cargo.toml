@@ -1,0 +1,19 @@
+[package]
+name = "defend_taipei_android"
+description = "Android entry point (cdylib loaded by GameActivity)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "defend_taipei_android"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+defend_taipei = { path = "../game" }
+bevy = { workspace = true, features = ["android-game-activity"] }
+
+[lints]
+workspace = true

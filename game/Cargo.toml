@@ -1,0 +1,21 @@
+[package]
+name = "defend_taipei"
+description = "Defend Taipei native slice: game logic shared by desktop and Android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "defend_taipei"
+path = "src/lib.rs"
+
+[[bin]]
+name = "defend-taipei"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true }
+
+[lints]
+workspace = true
