@@ -1,8 +1,13 @@
-# Godot 4
-.godot/
+# Rust
+/target
 
-# Android export artifacts
+# Android build artifacts
 *.apk
 *.aab
-export_credentials.cfg
-android/build/
+local.properties
+.gradle/
+build/
+
+# Signing keys (never commit)
+*.jks
+*.keystore

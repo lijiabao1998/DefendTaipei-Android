@@ -12,11 +12,13 @@ The web build runs in a mobile browser, which adds a JavaScript, WebGL, and brow
 
 ## Planned stack
 
-- **Engine:** Godot 4, with gameplay written in GDScript
-- **Hot paths (if needed):** Rust GDExtension for work such as pathfinding and large unit counts
-- **Android export:** Godot's Android export via NDK and Vulkan
-- **Builds:** APK produced by GitHub Actions
+- **Engine:** [Bevy](https://bevy.org) 0.20.1 (latest stable on [crates.io](https://crates.io/crates/bevy) as of 2026-10-28), written in Rust and using Bevy's ECS (entity-component-system) architecture.
+- **Rendering:** [wgpu](https://wgpu.rs) on Vulkan.
+- **Android build:** Follow Bevy 0.20.1's official Android path: compile the Rust library with [`cargo-ndk`](https://crates.io/crates/cargo-ndk) for the Android NDK target (for example `cargo ndk -t arm64-v8a -P 26 -o <app>/src/main/jniLibs build`), then package the APK with a Gradle / Android Studio project (`./gradlew build`). Bevy's default Android activity is GameActivity. [`cargo-apk` is deprecated and does not support GameActivity](https://github.com/bevyengine/bevy/blob/v0.20.1/examples/README.md#about-cargo-apk); `xbuild` is not a supported Bevy Android path. See Bevy's [Android example docs](https://github.com/bevyengine/bevy/blob/v0.20.1/examples/README.md#android).
+- **Desktop:** The same codebase should also build for Windows, Linux, and macOS, for development and testing.
+- **Orientation:** Both portrait and landscape. Landscape is the primary layout for gameplay; portrait is for the map and menus. The game should handle window resize and orientation changes.
+- **CI:** APKs built by GitHub Actions.
 
 ## Status
 
-Planning. This repository has no Godot project, no playable build, and no CI yet.
+Planning. This repository has no Bevy project, no playable build, and no CI yet.
