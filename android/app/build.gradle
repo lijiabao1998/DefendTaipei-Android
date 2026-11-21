@@ -39,6 +39,7 @@ android {
     }
     sourceSets {
         main {
+            // Repo-root assets/ (audio and the UI font). Android reads the APK asset root.
             assets.srcDirs += files('../../assets')
         }
     }

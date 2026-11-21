@@ -5,6 +5,7 @@
 
 use bevy::{prelude::*, window::WindowMode};
 
+mod audio;
 mod camera;
 mod city;
 mod combat;
@@ -37,7 +38,10 @@ pub fn run() {
                     primary_window: Some(window),
                     ..default()
                 })
-                // Crate dir is `game/`; shared files live in the repo-root `assets/`.
+                // The crate lives in `game/`; audio and the UI font live in the repo-root `assets/`.
+                // `cargo run` sets CARGO_MANIFEST_DIR to `game/`. Android ignores this and
+                // reads the APK asset root. Override with BEVY_ASSET_ROOT when launching
+                // the binary directly.
                 .set(bevy::asset::AssetPlugin {
                     file_path: "../assets".to_string(),
                     ..default()
@@ -56,6 +60,7 @@ pub fn run() {
             touch::TouchPlugin,
             combat::CombatPlugin,
             game_flow::GameFlowPlugin,
+            audio::AudioPlugin,
             hud::HudPlugin,
         ))
         .run();
