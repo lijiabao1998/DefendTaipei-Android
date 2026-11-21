@@ -1,0 +1,8 @@
+# Godot 4
+.godot/
+
+# Android export artifacts
+*.apk
+*.aab
+export_credentials.cfg
+android/build/
