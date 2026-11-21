@@ -169,6 +169,51 @@ fn spawn_message_spawns_soldier() {
 }
 
 #[test]
+fn armor_spawn_is_ignored_until_ported() {
+    let mut app = test_app();
+    app.add_systems(Update, handle_spawn_requests);
+    for kind in [
+        EnemyKind::Zbl08,
+        EnemyKind::Zbd05,
+        EnemyKind::Mengshi,
+        EnemyKind::Ztd05,
+    ] {
+        app.world_mut().write_message(SpawnEnemy {
+            pos: Vec3::ZERO,
+            kind,
+        });
+    }
+    step(&mut app, 0.016);
+    let w = app.world_mut();
+    assert_eq!(w.query::<&Enemy>().iter(w).count(), 0);
+}
+
+#[test]
+fn shots_become_gunshot_sfx_with_distance() {
+    use crate::audio::{GunKind, SfxEvent};
+    let mut app = test_app();
+    app.add_message::<SfxEvent>();
+    app.add_systems(Update, super::sfx::combat_sfx);
+    app.world_mut().write_message(Gunshot {
+        pos: Vec3::new(30.0, 1.4, 40.0),
+        by_player: false,
+        fam: super::tuning::GunFam::Lmg,
+    });
+    step(&mut app, 0.016);
+    let msgs = app.world().resource::<Messages<SfxEvent>>();
+    let got: Vec<_> = msgs.iter_current_update_messages().copied().collect();
+    assert_eq!(got.len(), 1);
+    match got[0] {
+        SfxEvent::Gunshot { kind, dist, indoor } => {
+            assert_eq!(kind, GunKind::Mg);
+            assert!(!indoor);
+            assert!((dist - 50.0).abs() < 0.01, "dist {dist}");
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
 fn reset_clears_field_and_restores_player() {
     let mut app = test_app();
     app.add_systems(Update, apply_reset);

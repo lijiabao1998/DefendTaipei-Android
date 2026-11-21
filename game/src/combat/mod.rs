@@ -18,6 +18,7 @@ use crate::player::{Player, resolve_collisions, spawn_point};
 
 pub mod driver;
 pub mod input;
+pub mod sfx;
 pub mod soldier;
 pub mod squad;
 pub mod standin;
@@ -259,6 +260,7 @@ impl Plugin for CombatPlugin {
             .add_message::<Gunshot>()
             .add_message::<Callout>()
             .add_message::<ResetCombat>()
+            .add_message::<crate::audio::SfxEvent>()
             .configure_sets(
                 Update,
                 (
@@ -277,6 +279,7 @@ impl Plugin for CombatPlugin {
                     player_fire,
                     player_vitals,
                     tick_bodies,
+                    sfx::combat_sfx,
                 )
                     .chain()
                     .in_set(CombatSet),
@@ -581,6 +584,7 @@ fn grenades(
     mut died: MessageWriter<EnemyDied>,
     mut callouts: MessageWriter<Callout>,
     mut rng: ResMut<CombatRng>,
+    mut sfx: MessageWriter<crate::audio::SfxEvent>,
 ) {
     let dt = time.delta_secs();
     let Ok(ptf) = player.single() else { return };
@@ -659,6 +663,9 @@ fn grenades(
             tf.translation = Vec3::new(p.x, 1.6 + 4.0 * u * (1.0 - u) - 1.5 * u, p.y);
             if u >= 1.0 {
                 g.landed = true;
+                sfx.write(crate::audio::SfxEvent::Clink {
+                    dist: pp.distance(g.to),
+                });
                 if let Some(fx) = fx.as_deref() {
                     let w = standin::spawn_grenade_warn(&mut commands, fx, g.to);
                     commands.entity(ge).insert(GrenadeWarn(w));
@@ -678,6 +685,10 @@ fn grenades(
             standin::spawn_blast(&mut commands, fx, g.to);
         }
         let p = g.to;
+        sfx.write(crate::audio::SfxEvent::ShellBoom {
+            dist: pp.distance(p),
+            indoor: false,
+        });
         for (ent, mut e, tf) in &mut enemies {
             let s = &mut e.0;
             let d = s.pos.distance(p);
