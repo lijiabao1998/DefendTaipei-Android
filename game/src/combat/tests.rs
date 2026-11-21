@@ -42,7 +42,7 @@ fn drain<M: Message + Clone>(app: &App, cursor: &mut MessageCursor<M>) -> Vec<M>
 }
 
 fn soldier_at(app: &mut App, id: u32, pos: Vec2) -> Entity {
-    let mut s = Soldier::new(id, EnemyKind::PlaSoldier, pos, vec![]);
+    let mut s = Soldier::new(id, EnemyKind::Patrol, pos, vec![]);
     // face the player at the origin
     s.dir = (-pos.y).atan2(-pos.x);
     app.world_mut()
@@ -149,7 +149,7 @@ fn spawn_message_spawns_soldier() {
     app.add_systems(Update, handle_spawn_requests);
     app.world_mut().write_message(SpawnEnemy {
         pos: Vec3::new(4.0, 0.0, -3.0),
-        kind: EnemyKind::PlaSentry,
+        kind: EnemyKind::Garrison,
     });
     step(&mut app, 0.016);
     let w = app.world_mut();
@@ -161,7 +161,7 @@ fn spawn_message_spawns_soldier() {
     assert_eq!(
         list,
         vec![(
-            EnemyKind::PlaSentry,
+            EnemyKind::Garrison,
             Vec2::new(4.0, -3.0),
             Some(Vec2::new(4.0, -3.0))
         )]

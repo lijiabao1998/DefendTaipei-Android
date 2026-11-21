@@ -77,7 +77,7 @@ impl Soldier {
             pos,
             state: SolState::Patrol,
             wi: 1,
-            post: (kind == EnemyKind::PlaSentry).then_some(pos),
+            post: (kind == EnemyKind::Garrison).then_some(pos),
             route,
             ..Default::default()
         }
@@ -89,7 +89,7 @@ impl Soldier {
 
     /// `solActive`: night patrols only at night.
     pub fn active(&self, night: bool) -> bool {
-        self.kind != EnemyKind::PlaNightPatrol || night
+        self.kind != EnemyKind::NightPatrol || night
     }
 }
 
@@ -523,7 +523,7 @@ mod tests {
     }
 
     fn facing_soldier() -> Soldier {
-        let mut s = Soldier::new(0, EnemyKind::PlaSoldier, Vec2::ZERO, vec![]);
+        let mut s = Soldier::new(0, EnemyKind::Patrol, Vec2::ZERO, vec![]);
         s.dir = 0.0; // facing +x
         s
     }
@@ -655,10 +655,10 @@ mod tests {
     #[test]
     fn radio_and_noise_pull_idle_soldiers() {
         let mut list = [
-            Soldier::new(0, EnemyKind::PlaSoldier, Vec2::ZERO, vec![]),
-            Soldier::new(1, EnemyKind::PlaSoldier, Vec2::new(30.0, 0.0), vec![]),
-            Soldier::new(2, EnemyKind::PlaSoldier, Vec2::new(90.0, 0.0), vec![]),
-            Soldier::new(3, EnemyKind::PlaSentry, Vec2::new(5.0, 0.0), vec![]),
+            Soldier::new(0, EnemyKind::Patrol, Vec2::ZERO, vec![]),
+            Soldier::new(1, EnemyKind::Patrol, Vec2::new(30.0, 0.0), vec![]),
+            Soldier::new(2, EnemyKind::Patrol, Vec2::new(90.0, 0.0), vec![]),
+            Soldier::new(3, EnemyKind::Garrison, Vec2::new(5.0, 0.0), vec![]),
         ];
         let n = radio(list.iter_mut(), Vec2::new(1.0, 1.0), Vec2::ZERO, 0, false);
         assert_eq!(
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn night_patrol_only_at_night() {
-        let s = Soldier::new(0, EnemyKind::PlaNightPatrol, Vec2::ZERO, vec![]);
+        let s = Soldier::new(0, EnemyKind::NightPatrol, Vec2::ZERO, vec![]);
         assert!(!s.active(false));
         assert!(s.active(true));
     }
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn weapon_mix_matches_original() {
         let w: Vec<_> = (0..4)
-            .map(|i| Soldier::new(i, EnemyKind::PlaSoldier, Vec2::ZERO, vec![]).weapon)
+            .map(|i| Soldier::new(i, EnemyKind::Patrol, Vec2::ZERO, vec![]).weapon)
             .collect();
         assert_eq!(w, ["rifle", "qbz95", "rifle", "rifle"]);
     }

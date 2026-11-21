@@ -105,9 +105,9 @@ fn temp_spawner(
         for i in 0..n {
             let q = c + Vec2::new(i as f32 * 1.2, (i % 2) as f32 * 1.2);
             let kind = if d.rng.next_f32() < 0.15 {
-                EnemyKind::PlaSentry
+                EnemyKind::Garrison
             } else {
-                EnemyKind::PlaSoldier
+                EnemyKind::Patrol
             };
             spawn.write(SpawnEnemy {
                 pos: Vec3::new(q.x, 0.0, q.y),

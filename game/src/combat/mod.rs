@@ -33,16 +33,32 @@ use tuning::*;
 
 // ── Public types ────────────────────────────────────────────────────────
 
-/// Enemy unit types (original `Sol` variants in main.ts `spawnSoldiers` / district tiles).
+/// Occupation units the original places (same variants as lijiabao5's game-flow PR #5):
+/// street patrols (`spawnSoldiers`), the night half of that set, district outpost garrisons
+/// (`dSoldier` with a post), and the four armor models on main roads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum EnemyKind {
-    /// 解放軍 patrol soldier (day and night).
+    /// 解放軍 street patrol.
     #[default]
-    PlaSoldier,
+    Patrol,
     /// 解放軍 night patrol: only out at night (`Sol.night`).
-    PlaNightPatrol,
-    /// 解放軍 sentry holding a post (`Sol.post`): does not answer the radio.
-    PlaSentry,
+    NightPatrol,
+    /// 解放軍 outpost garrison: holds its post (`Sol.post`), does not answer the radio.
+    Garrison,
+    /// Armor (ZBL-08 / ZBD-05 / 猛士 / ZTD-05): not ported yet — `SpawnEnemy` ignores these.
+    Zbl08,
+    Zbd05,
+    Mengshi,
+    Ztd05,
+}
+
+impl EnemyKind {
+    pub fn is_soldier(self) -> bool {
+        matches!(
+            self,
+            EnemyKind::Patrol | EnemyKind::NightPatrol | EnemyKind::Garrison
+        )
+    }
 }
 
 /// Player combat state shown by the HUD.
@@ -117,13 +133,12 @@ pub struct SpawnEnemy {
     pub kind: EnemyKind,
 }
 
-/// An enemy was killed (exactly once per enemy). `by_player`: the player's shot.
+/// A hostile reached 0 HP (exactly once per enemy). `kind` is the unit that died.
+/// Same shape as lijiabao5's game-flow PR (#5): `EnemyDied { kind, pos }`.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct EnemyDied {
-    pub entity: Entity,
     pub kind: EnemyKind,
     pub pos: Vec3,
-    pub by_player: bool,
 }
 
 /// The player's HP reached 0 (once per life).
@@ -309,6 +324,11 @@ fn handle_spawn_requests(
     let mut alive = enemies.iter().count();
     for req in requests.read() {
         if alive >= MAX_SOLDIERS {
+            continue;
+        }
+        if !req.kind.is_soldier() {
+            // TODO(lijiabao2): armor (main.ts `armor`) is a later combat PR.
+            warn_once!("SpawnEnemy: armor {:?} not ported yet; ignored", req.kind);
             continue;
         }
         let id = timers.next_id;
@@ -667,10 +687,8 @@ fn grenades(
                     t: BODY_SECS,
                 });
                 died.write(EnemyDied {
-                    entity: ent,
                     kind: s.kind,
                     pos: tf.translation,
-                    by_player: false,
                 });
             }
         }
@@ -828,10 +846,8 @@ fn player_fire(
                 t: BODY_SECS,
             });
             died.write(EnemyDied {
-                entity: ent,
                 kind: e.0.kind,
                 pos: tf.translation,
-                by_player: true,
             });
         }
     }
