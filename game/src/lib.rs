@@ -5,6 +5,7 @@
 
 use bevy::{prelude::*, window::WindowMode};
 
+mod audio;
 mod camera;
 mod city;
 mod combat;
@@ -29,10 +30,21 @@ pub fn run() {
     };
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(window),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(window),
+                    ..default()
+                })
+                // The crate lives in `game/`; the shared folder is the repo-root `assets/`.
+                // `cargo run` sets CARGO_MANIFEST_DIR to `game/`. Android ignores this and
+                // reads the APK asset root. Override with BEVY_ASSET_ROOT when launching
+                // the binary directly.
+                .set(bevy::asset::AssetPlugin {
+                    file_path: "../assets".to_string(),
+                    ..default()
+                }),
+        )
         .insert_resource(ClearColor(Color::srgb(0.60, 0.64, 0.67)))
         .insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.81, 0.89, 1.0),
@@ -45,6 +57,7 @@ pub fn run() {
             camera::CameraPlugin,
             touch::TouchPlugin,
             combat::CombatPlugin,
+            audio::AudioPlugin,
             hud::HudPlugin,
         ))
         .run();
