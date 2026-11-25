@@ -30,16 +30,11 @@ pub struct CombatInput {
     pub crouch: bool,
 }
 
-/// Fire back at the nearest soldier in sight within 25 m that is already in combat
-/// with the player. F toggles it on desktop. Not part of `PlayerInput`.
-#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+/// Testing aid, OFF by default (the original has no auto-fire): fire back at the nearest
+/// soldier in sight within 25 m that is already in combat with the player. F toggles it on
+/// desktop. Not part of `PlayerInput`.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
 pub struct AutoFire(pub bool);
-
-impl Default for AutoFire {
-    fn default() -> Self {
-        Self(true)
-    }
-}
 
 /// Aim direction from a *screen-space* vector (x = right, y = up), as in
 /// `PlayerInput::aim`; converts it for the isometric camera.
@@ -88,7 +83,8 @@ pub(super) fn desktop_mouse_aim(
         auto.0 = !auto.0;
     }
     // Only a free mouse click aims; a click on 打 / 蹲 / the pad keeps PlayerInput's aim.
-    if !input.fire || !mouse.pressed(MouseButton::Left) || hands.claims(MOUSE_POINTER) {
+    let click = mouse.pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Left);
+    if !input.fire || !click || hands.claims(MOUSE_POINTER) {
         return;
     }
     let (cam, cam_gt) = *camera;

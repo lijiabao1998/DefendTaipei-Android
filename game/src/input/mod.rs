@@ -247,7 +247,10 @@ fn gather_player_input(
     *player = PlayerInput {
         r#move: combine_move(key, stick_vec),
         aim: Vec2::ZERO,
-        fire: frame.fire || (mouse.pressed(MouseButton::Left) && !mouse_on_pad),
+        // (a click pressed and released within one frame is only `just_pressed`)
+        fire: frame.fire
+            || ((mouse.pressed(MouseButton::Left) || mouse.just_pressed(MouseButton::Left))
+                && !mouse_on_pad),
         crouch: hands.crouch,
         retreat,
         stick: if stick_vec == Vec2::ZERO {

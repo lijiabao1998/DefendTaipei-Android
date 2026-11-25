@@ -114,6 +114,9 @@ pub fn gun(id: &str) -> Option<&'static Gun> {
 
 /// The player's gun in this slice (inventory / pickup is not ported yet).
 pub const PLAYER_START_GUN: &str = "rifle";
+/// Rounds the player starts with for it (provisional until the inventory port: the original
+/// player starts with whatever the role's pack holds).
+pub const PLAYER_START_ROUNDS: u32 = 120;
 
 /// firearms.ts RECOIL: kick (rad), climb, back (m), body, jitter (rad), heat per shot, screen shake.
 #[derive(Clone, Copy, Debug, PartialEq)]

@@ -26,7 +26,7 @@ pub mod world;
 
 pub use input::{AutoFire, CombatInput, CombatInputSet, WeaponInput, weapon_from_player};
 pub use soldier::{SolState, Soldier};
-pub use world::{CombatWorld, CombatWorldRes};
+pub use world::{CombatWorld, CombatWorldRes, ObstacleWorld};
 
 use soldier::{Ctx, PlayerMark};
 use tuning::*;
@@ -196,6 +196,35 @@ impl Default for PlayerGun {
     }
 }
 
+/// What the player is holding, for the HUD (`crate::combat::PlayerWeaponState`).
+///
+/// The original has no magazines and no reload for the player: `playerAttack` takes each round
+/// straight from the pack (`player.inv[d.ammo]`) and says 沒有子彈了 when there are none, so
+/// `rounds` is all the ammunition there is; `cap` is the gun's magazine size from the table, for
+/// display only. Written by combat; read-only for everyone else.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct PlayerWeaponState {
+    /// item id (`"rifle"`)
+    pub weapon: &'static str,
+    /// display name (Traditional Chinese, from the gun table)
+    pub name: &'static str,
+    /// rounds carried for it
+    pub rounds: u32,
+    pub cap: u32,
+}
+
+impl Default for PlayerWeaponState {
+    fn default() -> Self {
+        let g = gun(PLAYER_START_GUN).expect("start gun");
+        Self {
+            weapon: g.id,
+            name: g.name,
+            rounds: PLAYER_START_ROUNDS,
+            cap: g.cap,
+        }
+    }
+}
+
 /// Global AI timers (radio / grenade cooldowns, camping detector).
 #[derive(Resource, Default)]
 struct AiTimers {
@@ -249,6 +278,7 @@ impl Plugin for CombatPlugin {
             .init_resource::<PlayerStance>()
             .init_resource::<CombatWorldRes>()
             .init_resource::<PlayerGun>()
+            .init_resource::<PlayerWeaponState>()
             .init_resource::<AiTimers>()
             .init_resource::<CombatRng>()
             .add_message::<SpawnEnemy>()
@@ -271,6 +301,7 @@ impl Plugin for CombatPlugin {
             .add_systems(
                 Update,
                 (
+                    world::walls_from_city,
                     apply_reset,
                     input::sync_stance,
                     handle_spawn_requests,
@@ -353,6 +384,7 @@ fn apply_reset(
     mut requests: MessageReader<ResetCombat>,
     mut state: ResMut<GameState>,
     mut gun: ResMut<PlayerGun>,
+    mut weapon: ResMut<PlayerWeaponState>,
     mut timers: ResMut<AiTimers>,
     mut player: Query<(&mut Transform, &mut Visibility), With<Player>>,
     field: Query<Entity, Or<(With<Enemy>, With<Body>, With<Fx>, With<Grenade>)>>,
@@ -365,6 +397,7 @@ fn apply_reset(
     }
     *state = GameState::default();
     gun.cd = 0.0;
+    *weapon = PlayerWeaponState::default();
     let next_id = timers.next_id;
     *timers = AiTimers {
         next_id,
@@ -770,12 +803,14 @@ fn player_fire(
     env: Res<CombatEnv>,
     world: Res<CombatWorldRes>,
     mut gun: ResMut<PlayerGun>,
+    mut weapon: ResMut<PlayerWeaponState>,
     mut state: ResMut<GameState>,
     mut rng: ResMut<CombatRng>,
     player: Query<&Transform, (With<Player>, Without<Enemy>)>,
     mut enemies: Query<(Entity, &mut Enemy, &Transform)>,
     mut died: MessageWriter<EnemyDied>,
     mut shots: MessageWriter<Gunshot>,
+    mut callouts: MessageWriter<Callout>,
 ) {
     gun.cd = (gun.cd - time.delta_secs()).max(0.0);
     let Ok(ptf) = player.single() else { return };
@@ -796,6 +831,9 @@ fn player_fire(
                 .filter(|s| !only_fighting || s.state == SolState::Combat),
         )
     };
+    // original `(clicking || MB.fire) && playerAttack()`: a shot every `cd` while the trigger is
+    // held. Desktop aims at the cursor (`aim` set); the touch 打 button (no aim) at the nearest
+    // soldier in sight within 25 m, else straight ahead.
     let aim_pt = if input.fire {
         match input.aim.try_normalize() {
             Some(a) => Some(p0 + a * 5.0),
@@ -806,8 +844,7 @@ fn player_fire(
             })),
         }
     } else if auto.0 {
-        // TEMPORARY stand-in for holding 打: only answers soldiers already fighting the
-        // player, so the auto-fire does not snipe unaware patrols (stealth still matters).
+        // opt-in testing aid (off by default; F on desktop): answers soldiers already fighting.
         foe(true)
     } else {
         None
@@ -817,6 +854,16 @@ fn player_fire(
     if dir == Vec2::ZERO {
         return;
     }
+    if weapon.rounds == 0 {
+        // original: 沒有子彈了, and the trigger rests half a second
+        gun.cd = 0.5;
+        callouts.write(Callout {
+            pos: ptf.translation + Vec3::Y * 1.8,
+            text: "沒有子彈了",
+        });
+        return;
+    }
+    weapon.rounds -= 1;
     let g = gun.gun;
     gun.cd = g.cd;
     shots.write(Gunshot {

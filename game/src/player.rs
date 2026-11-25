@@ -181,3 +181,46 @@ fn move_player(
     let target = player.translation + Vec3::new(dir.x, 0.0, dir.y);
     player.look_at(target, Vec3::Y);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Playtest report: WASD / arrows did nothing. Keys reach `MoveInput.keys` and move the player
+    /// (the report did not reproduce under Xvfb either; most likely the window had no focus).
+    #[test]
+    fn keys_move_the_player() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<MoveInput>()
+            .init_resource::<GameState>()
+            .init_resource::<Obstacles>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, (keyboard_input, move_player).chain());
+        let e = app.world_mut().spawn((Player, Transform::default())).id();
+        for (key, screen) in [
+            (KeyCode::KeyD, Vec2::X),
+            (KeyCode::ArrowUp, Vec2::Y),
+            (KeyCode::KeyA, -Vec2::X),
+            (KeyCode::ArrowDown, -Vec2::Y),
+        ] {
+            app.world_mut().get_mut::<Transform>(e).unwrap().translation = Vec3::ZERO;
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(100));
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .release(key);
+            let moved = app.world().get::<Transform>(e).unwrap().translation.xz();
+            let want = screen_to_ground(screen) * SPEED * 0.1;
+            assert!(
+                moved.distance(want) < 1e-3,
+                "{key:?}: {moved:?} vs {want:?}"
+            );
+        }
+    }
+}

@@ -16,6 +16,7 @@ fn test_app() -> App {
         .init_resource::<PlayerStance>()
         .init_resource::<CombatWorldRes>()
         .init_resource::<PlayerGun>()
+        .init_resource::<PlayerWeaponState>()
         .init_resource::<AiTimers>()
         .init_resource::<CombatRng>()
         .add_message::<SpawnEnemy>()
@@ -54,6 +55,7 @@ fn soldier_at(app: &mut App, id: u32, pos: Vec2) -> Entity {
 #[test]
 fn player_shot_kills_soldier_once() {
     let mut app = test_app();
+    app.insert_resource(AutoFire(true));
     app.add_systems(Update, player_fire);
     let e = soldier_at(&mut app, 0, Vec2::new(10.0, 0.0));
     {
@@ -97,6 +99,7 @@ fn non_lethal_shot_provokes_soldier() {
 #[test]
 fn auto_fire_ignores_far_or_unaware_soldiers() {
     let mut app = test_app();
+    app.insert_resource(AutoFire(true));
     app.add_systems(Update, player_fire);
     let far = soldier_at(&mut app, 0, Vec2::new(30.0, 0.0));
     app.world_mut().get_mut::<Enemy>(far).unwrap().0.state = SolState::Combat;
@@ -325,4 +328,163 @@ fn player_input_aim_is_screen_space() {
         weapon_from_player(&crate::input::PlayerInput::default()).aim,
         Vec2::ZERO
     );
+}
+
+// ── Playtest fixes: firing follows the trigger; no shots through buildings ──
+
+#[test]
+fn no_auto_fire_by_default() {
+    // playtest: kills rose 1→10 by themselves — the (then default-on) auto-fire shooting every
+    // soldier in combat within 25 m, through buildings.
+    assert!(!AutoFire::default().0);
+    let mut app = test_app();
+    app.add_systems(Update, player_fire);
+    let e = soldier_at(&mut app, 0, Vec2::new(10.0, 0.0));
+    app.world_mut().get_mut::<Enemy>(e).unwrap().0.state = SolState::Combat;
+    let mut shots = MessageCursor::<Gunshot>::default();
+    let mut n = 0;
+    for _ in 0..50 {
+        step(&mut app, 0.1);
+        n += drain(&app, &mut shots).len();
+    }
+    assert_eq!(n, 0);
+    assert_eq!(app.world().resource::<GameState>().kills, 0);
+}
+
+#[test]
+fn a_click_is_one_shot_and_holding_fires_at_the_gun_rate() {
+    let mut app = test_app();
+    app.add_systems(Update, player_fire);
+    let mut shots = MessageCursor::<Gunshot>::default();
+    let start = app.world().resource::<PlayerWeaponState>().rounds;
+    // one frame of trigger (a click): one shot
+    app.world_mut().resource_mut::<WeaponInput>().fire = true;
+    step(&mut app, 0.05);
+    let mut n = drain(&app, &mut shots).len();
+    app.world_mut().resource_mut::<WeaponInput>().fire = false;
+    for _ in 0..10 {
+        step(&mut app, 0.05);
+        n += drain(&app, &mut shots).len();
+    }
+    assert_eq!(n, 1);
+    assert_eq!(
+        app.world().resource::<PlayerWeaponState>().rounds,
+        start - 1
+    );
+    // held for 1 s: rifle cd 0.18 s (items.ts) → shots at 0, .18, … , .90
+    app.world_mut().resource_mut::<WeaponInput>().fire = true;
+    let mut n = 0;
+    for _ in 0..100 {
+        step(&mut app, 0.01);
+        n += drain(&app, &mut shots).len();
+    }
+    assert!((5..=6).contains(&n), "{n}");
+}
+
+#[test]
+fn out_of_rounds_says_so_and_does_not_fire() {
+    let mut app = test_app();
+    app.add_systems(Update, player_fire);
+    app.world_mut().resource_mut::<PlayerWeaponState>().rounds = 0;
+    app.world_mut().resource_mut::<WeaponInput>().fire = true;
+    let mut shots = MessageCursor::<Gunshot>::default();
+    let mut calls = MessageCursor::<Callout>::default();
+    step(&mut app, 0.05);
+    assert!(drain(&app, &mut shots).is_empty());
+    assert_eq!(drain(&app, &mut calls)[0].text, "沒有子彈了");
+}
+
+fn wall_between() -> CombatWorldRes {
+    let mut w = CombatWorldRes::default();
+    w.set(ObstacleWorld(vec![crate::city::Aabb2 {
+        min: Vec2::new(4.0, -6.0),
+        max: Vec2::new(7.0, 6.0),
+        height: 12.0,
+    }]));
+    w
+}
+
+fn hostile(app: &mut App, pos: Vec2) -> Entity {
+    let e = soldier_at(app, 0, pos);
+    let mut en = app.world_mut().get_mut::<Enemy>(e).unwrap();
+    en.0.state = SolState::Combat;
+    en.0.alert = 1.0;
+    e
+}
+
+#[test]
+fn no_shots_through_a_building_and_no_bleeding_without_a_hit() {
+    // playtest: HP fell ~20 every ~30 s with no enemy in view — soldiers saw and shot
+    // through buildings because the world was `OpenGround` (no walls).
+    let mut app = test_app();
+    app.insert_resource(wall_between());
+    app.add_systems(Update, (soldiers_think, player_vitals).chain());
+    hostile(&mut app, Vec2::new(10.0, 0.0));
+    let mut hits = MessageCursor::<PlayerHit>::default();
+    let mut shots = MessageCursor::<Gunshot>::default();
+    let (mut n_hits, mut n_shots) = (0, 0);
+    for _ in 0..600 {
+        step(&mut app, 0.1);
+        n_hits += drain(&app, &mut hits).len();
+        n_shots += drain(&app, &mut shots).len();
+    }
+    let st = app.world().resource::<GameState>();
+    assert_eq!((n_hits, n_shots), (0, 0));
+    assert_eq!(st.hp, 100.0);
+    assert!(!st.bleed, "bleeding only ever starts with a hit");
+}
+
+#[test]
+fn bleeding_starts_only_with_a_hit_in_the_open() {
+    let mut app = test_app();
+    app.add_systems(Update, soldiers_think);
+    hostile(&mut app, Vec2::new(10.0, 0.0));
+    let mut hits = MessageCursor::<PlayerHit>::default();
+    for _ in 0..300 {
+        let was = app.world().resource::<GameState>().bleed;
+        step(&mut app, 0.1);
+        let got = drain(&app, &mut hits);
+        let now = app.world().resource::<GameState>().bleed;
+        if now && !was {
+            assert!(
+                got.iter().any(|h| h.bleed),
+                "bleeding began without a bleeding hit"
+            );
+        }
+    }
+    assert!(
+        app.world().resource::<GameState>().hp < 100.0,
+        "in the open they do hit"
+    );
+}
+
+#[test]
+fn an_alerted_soldier_closes_in() {
+    let mut app = test_app();
+    app.add_systems(Update, soldiers_think);
+    let e = hostile(&mut app, Vec2::new(15.0, 0.0));
+    for _ in 0..20 {
+        step(&mut app, 0.1);
+    }
+    let d = app.world().get::<Enemy>(e).unwrap().0.pos.length();
+    assert!(
+        d < 14.0,
+        "approaches (squadai: close to 8 m, flank, cover): {d}"
+    );
+}
+
+#[test]
+fn the_city_buildings_become_walls() {
+    let mut app = App::new();
+    app.init_resource::<CombatWorldRes>()
+        .insert_resource(crate::city::Obstacles(vec![crate::city::Aabb2 {
+            min: Vec2::new(4.0, -6.0),
+            max: Vec2::new(7.0, 6.0),
+            height: 12.0,
+        }]))
+        .add_systems(Update, world::walls_from_city);
+    app.update();
+    let w = app.world().resource::<CombatWorldRes>();
+    assert!(w.0.shot_ray(Vec2::ZERO, Vec2::new(10.0, 0.0), 1.6, 1.6, 0.0) < 1.0);
+    assert!(w.0.building_at(Vec2::new(5.0, 0.0)).is_some());
 }
