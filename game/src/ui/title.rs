@@ -977,12 +977,12 @@ fn render_information(root: &mut ChildSpawnerCommands, key: &RenderKey, font: &U
             0 => tr(
                 lang,
                 "移動\n拖曳左側搖桿；推到底可奔跑。\n\n戰鬥\n按住「打」攻擊；槍械需要對應彈藥。\n點「蹲」降低姿態，善用牆角與掩蔽物。\n\n視角\n雙指縮放；可隨時旋轉手機。\n鍵盤：WASD 移動，滑鼠左鍵攻擊。",
-                "MOVE\nDrag the left pad. Full deflection runs.\n\nFIGHT\nHold Attack. Guns need matching ammunition.\nTap Crouch and use corners and cover.\n\nCAMERA\nPinch to zoom; rotate your phone freely.\nKeyboard: WASD to move; left mouse to attack.",
+                "MOVE\nDrag the left pad. Full deflection runs.\n\nFIGHT\nHold Attack. Guns need matching ammunition.\nTap Crouch and use corners and cover.\n\nCAMERA\nPinch to zoom; rotate your phone freely.\nWASD to move; left mouse to attack.\nM / Map: explore, pan, zoom and mark supplies.",
             ),
             1 => tr(
                 lang,
-                "搜刮\n接近物資箱或倒下的敵人，點「互動」。\n\n照顧自己\n從「背包」裝備、飲食、包紮或睡眠。\n加速時間時，附近的危險會讓你停下。\n\n避難所\n把食物、水與藥品存入共同存糧。\n清晨六點結算；記得留夠大家的份。",
-                "SCAVENGE\nApproach a supply box or fallen enemy; tap Interact.\n\nLOOK AFTER YOURSELF\nOpen Bag to equip, eat, drink, treat wounds or sleep.\nNearby danger cancels accelerated time.\n\nSHELTER\nDeposit food, water and medicine in shared stock.\nDaily needs settle at 06:00. Leave enough for everyone.",
+                "搜刮\n接近物資箱、倒下的敵人或門，點「互動」。\n\n照顧自己\n從「背包」裝備、飲食、包紮或睡眠。\n加速時間時，附近的危險會讓你停下。\n\n避難所\n把食物、水與藥品存入共同存糧。\n清晨六點結算；記得留夠大家的份。",
+                "SCAVENGE\nApproach a box, fallen enemy or door; tap Interact.\n\nLOOK AFTER YOURSELF\nOpen Bag to equip, eat, drink, treat wounds or sleep.\nNearby danger cancels accelerated time.\n\nSHELTER\nDeposit food, water and medicine in shared stock.\nDaily needs settle at 06:00. Leave enough for everyone.",
             ),
             _ => tr(
                 lang,

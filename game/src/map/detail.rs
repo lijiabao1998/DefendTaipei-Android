@@ -231,7 +231,10 @@ pub fn windows(b: &Bld, kit: &WindowKit, out: &mut Parts) {
                 hex(0xe8e4d8),
             );
         }
-        if !broken {
+        // Mat::Glass is an opaque reflective pane. It can cover an unlit room,
+        // but would completely hide the emissive occupied-room pane behind it.
+        // Lit rooms retain their curtains, sash frames and exterior iron cage.
+        if !broken && !lit {
             let sl = (r.f() - 0.5) * 0.5;
             let a1 = -WW / 4.0 + sl.max(0.0);
             let a2 = WW / 4.0 + sl.min(0.0);
@@ -1060,12 +1063,207 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
     }
 }
 
+/// A narrow bar between two local points, used for sagging cables and awning brackets.
+fn frontage_bar(out: &mut Parts, t: Mat4, a: Vec3, b: Vec3, width: f32, col: u32) {
+    let delta = b - a;
+    let length = delta.length();
+    if length <= 0.001 {
+        return;
+    }
+    let transform = Mat4::from_translation((a + b) / 2.0)
+        * Mat4::from_quat(Quat::from_rotation_arc(Vec3::Y, delta / length));
+    out.add(
+        Mat::VCol,
+        &geom::cuboid(width, length, width),
+        t * transform,
+        hex(col),
+    );
+}
+
+/// Keep all floor dressing away from every nearby doorway, including doors in an
+/// adjacent lot. The larger clear zone also contains the dynamic door-leaf swing.
+fn frontage_floor_clear(world: &WorldData, b: &Bld, p: Vec2, normal: Vec2) -> bool {
+    if world.road_dist(p) < 0.55 || !world.free(p, 0.19) {
+        return false;
+    }
+    if let Some(other) = world.bld_at(p)
+        && (other.id != b.id || b.arcade.is_none())
+    {
+        return false;
+    }
+    // Leave a real walking strip outside this wall-hugging detail. Decoration is
+    // visual only, so it must not suggest an impassable obstacle in a narrow alley.
+    if !world.free(p + normal * 0.8, 0.48) {
+        return false;
+    }
+    for id in world.blds_in(p - Vec2::splat(8.0), p + Vec2::splat(8.0)) {
+        let Some(door) = world.blds[id as usize].door else {
+            continue;
+        };
+        let relative = p - door.p;
+        if relative.dot(door.tangent()).abs() < 1.8 && (-1.1..1.9).contains(&relative.dot(door.n)) {
+            return false;
+        }
+    }
+    true
+}
+
+fn frontage_planter(out: &mut Parts, t: Mat4, seed: u64) {
+    let mut r = Park(seed.max(1));
+    let pot = if r.f() < 0.6 { 0x8c5340 } else { 0x616b59 };
+    out.add(
+        Mat::VCol,
+        &geom::cylinder(0.2, 0.145, 0.32, 8),
+        t * geom::at(0.0, 0.16, 0.0),
+        hex(pot),
+    );
+    out.add(
+        Mat::VCol,
+        &geom::cylinder(0.204, 0.204, 0.045, 8),
+        t * geom::at(0.0, 0.31, 0.0),
+        hex(0x9e7860),
+    );
+    out.add(
+        Mat::VCol,
+        &geom::cylinder(0.181, 0.181, 0.012, 8),
+        t * geom::at(0.0, 0.336, 0.0),
+        hex(0x3e4331),
+    );
+    for k in 0..7 {
+        let angle = k as f32 * std::f32::consts::TAU / 7.0 + r.f() * 0.3;
+        let height = 0.3 + r.f() * 0.3;
+        let leaf = geom::plane2(0.11 + r.f() * 0.06, height);
+        out.add(
+            Mat::VCol,
+            &leaf,
+            t * geom::at(0.0, 0.35, 0.0)
+                * Mat4::from_rotation_y(angle)
+                * Mat4::from_rotation_z(0.35 + r.f() * 0.6)
+                * geom::at(0.0, height * 0.4, 0.0),
+            hex(if k % 3 == 0 { 0x647648 } else { 0x405d3e }),
+        );
+    }
+}
+
+/// A small, legible layer of everyday Wanhua life from alley.ts: shop awnings,
+/// bundled service cables and doorway plants. It follows actual solid wall slabs,
+/// not a second guessed facade, and uses the existing near-detail material batches.
+fn frontage_life(b: &Bld, world: &WorldData, out: &mut Parts) {
+    let Some(door) = b.door else { return };
+    let mut walls: Vec<_> = b
+        .walls
+        .iter()
+        .filter(|w| {
+            w.y0 < 0.01
+                && w.y1 >= DOOR_H
+                && w.a.distance(w.c) >= 1.8
+                && wall_normal(b, w).dot(door.n) > 0.95
+        })
+        .collect();
+    walls.sort_by(|a, c| {
+        ((a.a + a.c) / 2.0)
+            .distance_squared(door.p)
+            .total_cmp(&((c.a + c.c) / 2.0).distance_squared(door.p))
+    });
+    for (index, wall) in walls.into_iter().take(2).enumerate() {
+        let mut r = Park(
+            (b.seed8 ^ 0x7019_5b65)
+                .wrapping_add(index as u64 * 7919)
+                .max(1),
+        );
+        let width = (wall.a.distance(wall.c) - 0.28).min(5.2);
+        let mid = (wall.a + wall.c) / 2.0;
+        let normal = wall_normal(b, wall);
+        let transform = place(mid.x, 0.0, mid.y, normal.x.atan2(normal.y));
+        // Shallow segmented wires follow the upper wall; they never span a street or
+        // attach to a different building whose chunk could unload independently.
+        let wire_y = (b.h - 0.3).min(3.65);
+        for line in 0..2 {
+            for segment in 0..5 {
+                let point = |s: usize| {
+                    let t = s as f32 / 5.0;
+                    Vec3::new(
+                        (t - 0.5) * width,
+                        wire_y + line as f32 * 0.07 - (t * PI).sin() * 0.14,
+                        0.185,
+                    )
+                };
+                frontage_bar(
+                    out,
+                    transform,
+                    point(segment),
+                    point(segment + 1),
+                    0.021,
+                    0x393b35,
+                );
+            }
+        }
+        for x in [-width * 0.48, width * 0.48] {
+            out.add(
+                Mat::VCol,
+                &bx(0.085, 0.16, 0.045, x, wire_y, 0.175),
+                transform,
+                hex(0x757b69),
+            );
+        }
+
+        // Arcades already have a continuous ceiling. Extra awnings belong on exposed
+        // shop-house faces, and the drip edge stays outside the carriageway.
+        let depth = 0.72 + r.f() * 0.27;
+        let edge = mid + normal * (depth + 0.15);
+        let other_lot = world.bld_at(edge).is_some_and(|other| other.id != b.id);
+        if b.arcade.is_none()
+            && width >= 2.2
+            && b.h >= 3.5
+            && world.road_dist(edge) > 0.15
+            && !other_lot
+            && (b.kind != "home" || r.f() < 0.42)
+        {
+            let color = [0x648276, 0x8c5243, 0x777c6e, 0x526f6d][(r.f() * 4.0) as usize % 4];
+            let awning = geom::cuboid(width, 0.035, depth).map_uv(|_, p| [p[0] * 1.5, p[2] * 1.5]);
+            let at = transform
+                * geom::at(0.0, 3.05, 0.16)
+                * Mat4::from_rotation_x(0.16)
+                * geom::at(0.0, 0.0, depth / 2.0);
+            out.add(Mat::Tin, &awning, at, hex(color));
+            out.add(
+                Mat::VCol,
+                &bx(width, 0.1, 0.04, 0.0, 2.88, depth + 0.15),
+                transform,
+                hex(0x777064),
+            );
+            for x in [-width * 0.42, width * 0.42] {
+                frontage_bar(
+                    out,
+                    transform,
+                    Vec3::new(x, 2.62, 0.2),
+                    Vec3::new(x, 2.93, depth * 0.82),
+                    0.035,
+                    0x5a5b51,
+                );
+            }
+        }
+
+        // Wall-hugging pots are deliberately not crates, cabinets or water fixtures:
+        // the existing searchable / refillable objects remain visually distinct.
+        for side in [-1.0, 1.0] {
+            let local_x = side * (width * 0.5 - 0.35);
+            let local = transform.transform_point3(Vec3::new(local_x, 0.0, 0.43));
+            if r.f() > 0.68 || !frontage_floor_clear(world, b, local.xz(), normal) {
+                continue;
+            }
+            frontage_planter(out, transform * geom::at(local_x, 0.09, 0.43), r.0);
+        }
+    }
+}
+
 /// Everything the near layer adds to a building.
 pub fn near_detail(b: &Bld, kit: &WindowKit) -> Parts {
     let mut p = Parts::default();
     windows(b, kit, &mut p);
     walkup(b, &mut p);
     frontage_wear(b, &mut p);
+    frontage_life(b, super::world(), &mut p);
     p
 }
 
@@ -1081,6 +1279,115 @@ pub fn near_roof(b: &Bld) -> Parts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emissive_windows_are_not_hidden_behind_opaque_glazing() {
+        let world = super::super::world();
+        let mut building = world
+            .blds
+            .iter()
+            .find(|b| !b.wins.is_empty())
+            .unwrap()
+            .clone();
+        building.wins.truncate(1);
+        let kit = WindowKit::new();
+        let mut occupied = 0;
+        for id in 0..64 {
+            building.id = id;
+            let mut parts = Parts::default();
+            windows(&building, &kit, &mut parts);
+            if parts.0.contains_key(&Mat::Lamp) {
+                occupied += 1;
+                assert!(
+                    !parts.0.contains_key(&Mat::Glass),
+                    "opaque glass hides an occupied window"
+                );
+                assert!(
+                    parts.0.contains_key(&Mat::Metal),
+                    "occupied window loses sash/cage frame"
+                );
+            }
+        }
+        assert!(occupied >= 8);
+    }
+
+    #[test]
+    fn frontage_life_keeps_doors_and_roadways_clear_with_a_bounded_mesh() {
+        let world = super::super::world();
+        let mut buildings = 0;
+        let mut awnings = 0;
+        let mut planted = 0;
+        for b in world
+            .blds
+            .iter()
+            .filter(|b| b.c.distance(world.spawn) < 180.0)
+        {
+            let mut parts = Parts::default();
+            frontage_life(b, world, &mut parts);
+            if parts.vcount() == 0 {
+                continue;
+            }
+            buildings += 1;
+            awnings += usize::from(parts.0.contains_key(&Mat::Tin));
+            planted += usize::from(parts.0.values().any(|m| m.pos.iter().any(|p| p[1] < 1.0)));
+            assert!(
+                parts.vcount() <= 2200,
+                "frontage-life budget at {}: {}",
+                b.id,
+                parts.vcount()
+            );
+            assert!(parts.0.keys().all(|k| matches!(k, Mat::VCol | Mat::Tin)));
+            for mesh in parts.0.values() {
+                for p in &mesh.pos {
+                    let p = Vec3::from(*p);
+                    assert!(p.is_finite());
+                    if p.y < 1.0 {
+                        assert!(
+                            world.road_dist(p.xz()) > -0.05,
+                            "planter on the carriageway at {}",
+                            b.id
+                        );
+                    }
+                }
+            }
+            let nearby = world.blds_in(b.min - 3.0, b.max + 3.0);
+            for id in nearby {
+                let Some(door) = world.blds[id as usize].door else {
+                    continue;
+                };
+                let inv = place(door.p.x, 0.0, door.p.y, door.n.x.atan2(door.n.y)).inverse();
+                for mesh in parts.0.values() {
+                    let points: Vec<_> = mesh
+                        .pos
+                        .iter()
+                        .map(|p| inv.transform_point3(Vec3::from(*p)))
+                        .collect();
+                    for tri in mesh.idx.as_chunks::<3>().0 {
+                        let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+                        for &i in tri {
+                            lo = lo.min(points[i as usize]);
+                            hi = hi.max(points[i as usize]);
+                        }
+                        let blocks_swing = lo.x < 1.15
+                            && hi.x > -1.15
+                            && lo.y < 2.4
+                            && hi.y > 0.1
+                            && lo.z < 1.2
+                            && hi.z > -0.45;
+                        assert!(
+                            !blocks_swing,
+                            "frontage {} overlaps doorway {}: {lo:?}..{hi:?}",
+                            b.id, id
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            buildings > 20 && awnings > 5 && planted > 10,
+            "insufficient visible frontage variety: {buildings}/{awnings}/{planted}"
+        );
+    }
 
     #[test]
     fn frontage_utilities_are_bounded_and_do_not_cover_open_doorways() {

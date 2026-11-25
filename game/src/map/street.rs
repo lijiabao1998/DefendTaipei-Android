@@ -517,7 +517,7 @@ fn scooter(out: &mut Parts, t: Mat4, seed: u32) {
         hex(0x2a2a2c),
     ); // handlebar
     out.add(
-        Mat::Lamp,
+        Mat::VCol,
         &bx(0.16, 0.08, 0.04, 0.0, 1.0, 0.63),
         t,
         hex(0xfff6e0),
@@ -598,20 +598,20 @@ fn car(out: &mut Parts, t: Mat4, kind: PropKind, seed: u32) {
         hex(0x8a9aa8),
     );
     out.add(
-        Mat::Lamp,
+        Mat::VCol,
         &bx(0.3, 0.12, 0.04, -wd / 2.0 + 0.3, 0.75, l / 2.0),
         t,
         WHITE,
     );
     out.add(
-        Mat::Lamp,
+        Mat::VCol,
         &bx(0.3, 0.12, 0.04, wd / 2.0 - 0.3, 0.75, l / 2.0),
         t,
         WHITE,
     );
     if kind == PropKind::Taxi {
         out.add(
-            Mat::Lamp,
+            Mat::VCol,
             &bx(0.5, 0.15, 0.2, 0.0, 1.5, -0.15),
             t,
             hex(0xfff0a0),

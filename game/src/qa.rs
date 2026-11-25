@@ -46,6 +46,15 @@ enum Action {
     Skip,
     Street,
     Entrance,
+    DoorOpen,
+    DoorClose,
+    Map,
+    Rain,
+    Night,
+    Blackout,
+    Journal,
+    Pause,
+    Warnings,
     Shelter,
     Inventory,
     Trade,
@@ -137,6 +146,54 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "04c-door-open-landscape",
+        size: [1280, 720],
+        action: Action::DoorOpen,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d-door-closed-landscape",
+        size: [1280, 720],
+        action: Action::DoorClose,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04e-survivor-map-portrait",
+        size: [390, 844],
+        action: Action::Map,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04f-survivor-map-small-landscape",
+        size: [800, 360],
+        action: Action::None,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04g-rain-portrait",
+        size: [390, 844],
+        action: Action::Rain,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04h-night-portrait",
+        size: [390, 844],
+        action: Action::Night,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04i-blackout-portrait",
+        size: [390, 844],
+        action: Action::Blackout,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04j-survival-warnings-portrait",
+        size: [320, 640],
+        action: Action::Warnings,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "05-shelter-landscape",
         size: [1280, 720],
         action: Action::Shelter,
@@ -158,6 +215,18 @@ const STAGES: &[Stage] = &[
         name: "08-inventory-portrait",
         size: [720, 1280],
         action: Action::Inventory,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "08a-radio-journal-portrait",
+        size: [390, 844],
+        action: Action::Journal,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "08b-pause-small-landscape",
+        size: [800, 360],
+        action: Action::Pause,
         flow: ExpectedFlow::Playing,
     },
     Stage {
@@ -205,6 +274,8 @@ struct Checkpoint {
     role: SelectedRole,
     position: Vec3,
     game_min: f32,
+    map: crate::worldmap::MapProgress,
+    closed_doors: Vec<u32>,
 }
 
 #[derive(Resource)]
@@ -217,6 +288,7 @@ struct QaRun {
     ready_frames: u32,
     scene_chunk: Option<crate::map::ChunkKey>,
     entrance_building: Option<u32>,
+    door_test_id: Option<u32>,
     waiting_capture: bool,
     captured: bool,
     checkpoint: Option<Checkpoint>,
@@ -251,6 +323,7 @@ impl Plugin for QaPlugin {
             ready_frames: 0,
             scene_chunk: None,
             entrance_building: None,
+            door_test_id: None,
             waiting_capture: false,
             captured: false,
             checkpoint: None,
@@ -366,6 +439,12 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                 .blds
                 .iter()
                 .filter(|building| !building.fill && building.h < 20.0)
+                .filter(|building| {
+                    !world
+                        .resource::<crate::map::Obstacles>()
+                        .doors()
+                        .is_open(building.id)
+                })
                 .filter_map(|building| {
                     let door = building.door?;
                     // Our isometric camera looks from +X/+Z: choose an entrance
@@ -392,12 +471,84 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             move_view(world, position, 1.9)?;
             run.scene_chunk = Some(crate::map::ChunkKey::of(building.c));
             run.entrance_building = Some(building.id);
+            run.door_test_id = Some(building.id);
             run.report.assertions.push(format!(
                 "Entrance capture uses reachable building {} at ({:.2}, {:.2})",
                 building.id, position.x, position.y
             ));
         }
+        Action::DoorOpen | Action::DoorClose => {
+            let id = run.door_test_id.ok_or("Missing tested entrance")?;
+            let building = &crate::map::world().blds[id as usize];
+            let door = building.door.ok_or("Tested building has no door")?;
+            move_view(world, door.p + door.n * 1.5, 1.9)?;
+            world.write_message(crate::worldplay::WorldAction::Interact);
+            run.scene_chunk = Some(crate::map::ChunkKey::of(building.c));
+            run.entrance_building = Some(id);
+        }
+        Action::Map => {
+            let p = player_position(world)?.xz();
+            let mut progress = world.resource_mut::<crate::worldmap::MapProgress>();
+            progress.add_note(
+                p + Vec2::new(-20.0, 10.0),
+                crate::worldmap::NoteKind::Supplies,
+            );
+            progress.add_note(
+                p + Vec2::new(24.0, -12.0),
+                crate::worldmap::NoteKind::Danger,
+            );
+            world.write_message(crate::worldmap::ToggleMap);
+        }
+        Action::Rain => {
+            world.write_message(OpenPanel(PanelKind::Close));
+            let (p, owner) = street_view(crate::map::world()).ok_or("No rain street view")?;
+            move_view(world, p, 1.35)?;
+            run.scene_chunk = Some(owner);
+            world.resource_mut::<Campaign>().game_min = 720.0;
+            let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+            progress.weather.next = 5000.0;
+            progress.weather.until = 900.0;
+            progress.weather.amount = 0.85;
+            progress.weather.intensity = 0.85;
+            progress.weather.wet = 1.0;
+            run.report.assertions.push("Rain/night captures use explicit visual weather fixtures in the real running world".into());
+        }
+        Action::Night => {
+            world.resource_mut::<Campaign>().game_min = 1320.0;
+            let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+            progress.weather.until = 0.0;
+            progress.weather.amount = 0.0;
+        }
+        Action::Blackout => {
+            world
+                .resource_mut::<crate::survival::ShelterEnvironment>()
+                .power = false;
+        }
+        Action::Warnings => {
+            let mut needs = world.resource_mut::<crate::worldplay::PlayerNeeds>();
+            needs.hunger = 22.0;
+            needs.thirst = 18.0;
+            needs.fatigue = 82.0;
+            world.resource_mut::<crate::combat::GameState>().bleed = true;
+            world.resource_mut::<Campaign>().notice_t = 12.0;
+            world.resource_mut::<crate::worldplay::WorldNotice>().text = "流血，需要止血。".into();
+        }
+        Action::Journal => {
+            world.write_message(OpenPanel(PanelKind::Journal));
+        }
+        Action::Pause => {
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.write_message(crate::ui::TogglePause);
+        }
         Action::Shelter => {
+            world.resource_mut::<Campaign>().game_min = 1440.0 + 720.0;
+            world
+                .resource_mut::<crate::survival::ShelterEnvironment>()
+                .power = true;
+            *world.resource_mut::<crate::worldplay::PlayerNeeds>() = default();
+            let mut game = world.resource_mut::<crate::combat::GameState>();
+            game.bleed = false;
+            game.hp = 100.0;
             move_view(world, crate::player::spawn_point().xz(), 1.0)?;
             world.write_message(OpenPanel(PanelKind::Shelter));
         }
@@ -405,6 +556,7 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world.write_message(OpenPanel(PanelKind::Inventory));
         }
         Action::Trade => {
+            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
             // Known authored barter location. This fixture avoids turning a UI
             // regression run into several minutes of walking across the map.
             let pos = TRADE_SPOTS[0].pos;
@@ -423,6 +575,11 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                 role: *world.resource::<SelectedRole>(),
                 position,
                 game_min: world.resource::<Campaign>().game_min,
+                map: world.resource::<crate::worldmap::MapProgress>().clone(),
+                closed_doors: world
+                    .resource::<crate::worldplay::ScavengeState>()
+                    .closed_doors
+                    .clone(),
             });
             world.write_message(OpenPanel(PanelKind::Close));
             world.write_message(SaveAndMenu);
@@ -532,9 +689,20 @@ fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> 
     if world.resource::<Campaign>().game_min < checkpoint.game_min {
         return Err("Continue reset the campaign clock".into());
     }
+    let map = world.resource::<crate::worldmap::MapProgress>();
+    if map.notes != checkpoint.map.notes || !map.revealed.is_superset(&checkpoint.map.revealed) {
+        return Err("Continue lost survivor map notes or exploration".into());
+    }
+    if world
+        .resource::<crate::worldplay::ScavengeState>()
+        .closed_doors
+        != checkpoint.closed_doors
+    {
+        return Err("Continue changed closed door state".into());
+    }
     run.report
         .assertions
-        .push("Continue preserved day, stockpile, inventory, survivor, position and clock".into());
+        .push("Continue preserved day, stockpile, inventory, survivor, position, clock, map notes/exploration and closed doors".into());
     run.continuation_checked = true;
     Ok(())
 }
@@ -620,6 +788,21 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         enter_stage(world, run, stage)?;
     }
     run.frame += 1;
+    if run.frame == SETTLE_FRAMES / 2
+        && matches!(
+            stage.action,
+            Action::Rain | Action::Night | Action::Blackout
+        )
+    {
+        // The explicit clock/weather fixture can dispatch several catch-up
+        // broadcasts at once. Preserve their received-history flags, but clear
+        // their overlays so the weather/lighting evidence shows the street.
+        world.resource_mut::<Campaign>().notice_t = 0.0;
+        world
+            .resource_mut::<crate::worldplay::WorldNotice>()
+            .text
+            .clear();
+    }
     if run.frame > MAX_STAGE_FRAMES {
         return Err(format!(
             "Stage {} did not complete: flow={:?}",
@@ -648,7 +831,10 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     {
         return Ok(());
     }
-    if matches!(stage.action, Action::Street | Action::Entrance) {
+    if matches!(
+        stage.action,
+        Action::Street | Action::Entrance | Action::DoorOpen | Action::DoorClose | Action::Rain
+    ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
         let chunks_ready = keys.into_iter().flatten().all(|key| {
@@ -681,6 +867,80 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         if run.ready_frames < 4 {
             return Ok(());
         }
+    }
+    if matches!(stage.action, Action::DoorOpen | Action::DoorClose) {
+        let id = run.door_test_id.ok_or("Missing door interaction test")?;
+        let open = matches!(stage.action, Action::DoorOpen);
+        let door = crate::map::world().blds[id as usize].door.unwrap();
+        let obstacles = world.resource::<crate::map::Obstacles>();
+        if obstacles.doors().is_open(id) != open || obstacles.blocked(door.p, PLAYER_RADIUS) == open
+        {
+            return Err(format!(
+                "Door {id} interaction did not synchronize visible state and collision (expected open={open})"
+            ));
+        }
+        if !world
+            .query::<&crate::doors::DoorLeaf>()
+            .iter(world)
+            .any(|leaf| leaf.id == id)
+        {
+            return Err("Door collider has no visible streamed leaf".into());
+        }
+        run.report.assertions.push(format!(
+            "Real Interact set door {id} open={open}; collision and streamed leaf match"
+        ));
+    }
+    if matches!(stage.action, Action::Map) {
+        if !world.resource::<crate::worldmap::MapOpen>().0
+            || !world.resource::<crate::ui::UiModal>().open
+            || world.resource::<crate::worldmap::MapProgress>().notes.len() != 2
+        {
+            return Err(
+                "Survivor map did not open with input capture and two saved annotations".into(),
+            );
+        }
+        run.report.assertions.push(
+            "Survivor map opens with real exploration, two annotations and modal input capture"
+                .into(),
+        );
+    }
+    if matches!(
+        stage.action,
+        Action::Rain | Action::Night | Action::Blackout
+    ) {
+        let atmosphere = world.resource::<crate::map::atmosphere::AtmosphereState>();
+        let ok = match stage.action {
+            Action::Rain => {
+                atmosphere.rain_streaks > 0
+                    && atmosphere.rain_streaks <= 240
+                    && atmosphere.wetness > 0.5
+            }
+            Action::Night => {
+                atmosphere.night > 0.9
+                    && atmosphere.power
+                    && atmosphere.active_lights > 0
+                    && atmosphere.active_lights <= 6
+            }
+            Action::Blackout => {
+                atmosphere.night > 0.9 && !atmosphere.power && atmosphere.active_lights == 0
+            }
+            _ => unreachable!(),
+        };
+        if !ok {
+            return Err(format!(
+                "Atmosphere mismatch for {}: {atmosphere:?}",
+                stage.name
+            ));
+        }
+        run.report.assertions.push(format!(
+            "{}: night={:.2}, power={}, wetness={:.2}, lights={}, rain={}",
+            stage.name,
+            atmosphere.night,
+            atmosphere.power,
+            atmosphere.wetness,
+            atmosphere.active_lights,
+            atmosphere.rain_streaks
+        ));
     }
     if matches!(stage.action, Action::Continue) && !run.continuation_checked {
         check_continuation(world, run)?;

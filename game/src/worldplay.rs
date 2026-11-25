@@ -13,10 +13,11 @@ use crate::audio::{Ambience, SfxEvent};
 use crate::combat::{
     self, CombatEnv, Enemy, EnemyDied, EnemyKind, GameState, PlayerDied, SolState,
 };
+use crate::doors::{DoorPrompt, DoorTarget};
 use crate::game_flow::{Campaign, FlowSet, GameFlow};
 use crate::i18n::{Language, tr};
 use crate::inventory::{Inventory, LOOT, UseResult, Vitals, item};
-use crate::map::{EvacSites, world};
+use crate::map::{EvacSites, Obstacles, world};
 use crate::player::Player;
 use crate::roles::SelectedRole;
 use crate::save::LoadCompleted;
@@ -80,12 +81,22 @@ pub struct ScavengeState {
     pub drops: Vec<(String, [f32; 2])>,
     /// Per-fixture next refill minute, persisted so Continue cannot bypass it.
     pub taps: Vec<(String, f32)>,
+    /// Building IDs with closed entrances. Missing in older native saves means
+    /// their previously open passages stay open; new games set their own defaults.
+    pub closed_doors: Vec<u32>,
     pub weather: WeatherState,
 }
 
 #[derive(Resource, Default)]
 pub struct WorldNotice {
     pub text: String,
+}
+
+/// Both the HUD and Interact use the same reachable target and priority.
+#[derive(Resource, Default, Debug, Clone, PartialEq, Eq)]
+pub struct InteractionHint {
+    pub label: String,
+    pub detail: String,
 }
 
 #[derive(Resource, Default)]
@@ -157,6 +168,8 @@ impl Plugin for WorldPlayPlugin {
             .init_resource::<ScavengeState>()
             .init_resource::<WorldNotice>()
             .init_resource::<MoralPrompt>()
+            .init_resource::<InteractionHint>()
+            .init_resource::<DoorPrompt>()
             .init_resource::<FrameProgress>()
             .add_message::<WorldAction>()
             .configure_sets(Update, WorldSet.after(ShelterSet).after(combat::CombatSet))
@@ -189,6 +202,7 @@ impl Plugin for WorldPlayPlugin {
                     update_environment,
                     update_evac,
                     stream_loot,
+                    update_interaction_hint,
                 )
                     .chain()
                     .in_set(WorldSet),
@@ -335,10 +349,29 @@ fn reset_new_run(
     mut player: Query<&mut Transform, With<Player>>,
     old: Query<Entity, With<Enemy>>,
     markers: Query<Entity, With<LootMarker>>,
+    obstacles: Res<Obstacles>,
 ) {
     *inventory = Inventory::from_role(selected.role());
     *needs = PlayerNeeds::default();
     *progress = ScavengeState::default();
+    obstacles
+        .doors()
+        .replace_closed(&obstacles.doors().all_ids());
+    // The player's shelter has an open exit on a fresh run. Every other door
+    // starts closed, as in the Web game, without modifying the world planner.
+    if let Some(home) = world()
+        .blds
+        .iter()
+        .filter_map(|b| b.door.map(|d| (b.id, d)))
+        .min_by(|(_, a), (_, b)| {
+            a.p.distance_squared(world().spawn)
+                .total_cmp(&b.p.distance_squared(world().spawn))
+        })
+    {
+        obstacles.doors().set_open(home.0, true);
+    }
+    crate::doors::protect_position(&obstacles, catalog.home);
+    progress.closed_doors = obstacles.doors().closed_ids();
     shelter.home = Some(catalog.home.to_array());
     *frame = FrameProgress {
         minute: Some(campaign.game_min),
@@ -496,12 +529,17 @@ fn nearest_container(
     pos: Vec2,
     catalog: &WorldCatalog,
     progress: &ScavengeState,
+    obstacles: Option<&Obstacles>,
 ) -> Option<Container> {
     let building = world().bld_at(pos).map(|b| b.id);
     let mut best = catalog
         .containers
         .iter()
-        .filter(|c| c.pos.distance(pos) < 2.2 && world().bld_at(c.pos).map(|b| b.id) == building)
+        .filter(|c| {
+            c.pos.distance(pos) < 2.2
+                && world().bld_at(c.pos).map(|b| b.id) == building
+                && obstacles.is_none_or(|obs| obs.los(pos, c.pos))
+        })
         .min_by(|a, b| {
             a.pos
                 .distance_squared(pos)
@@ -512,6 +550,7 @@ fn nearest_container(
         let q = Vec2::from_array(*p);
         if q.distance(pos) < 2.2
             && world().bld_at(q).map(|b| b.id) == building
+            && obstacles.is_none_or(|obs| obs.los(pos, q))
             && best
                 .as_ref()
                 .is_none_or(|b| q.distance_squared(pos) < b.pos.distance_squared(pos))
@@ -525,6 +564,126 @@ fn nearest_container(
         }
     }
     best
+}
+
+#[derive(Clone)]
+enum InteractionTarget {
+    Door(DoorTarget),
+    Container(Container),
+    Trade,
+    Shelter,
+    None,
+}
+
+fn interaction_target(
+    pos: Vec2,
+    catalog: &WorldCatalog,
+    progress: &ScavengeState,
+    shelter: &Shelter,
+    obstacles: &Obstacles,
+) -> InteractionTarget {
+    if trade_at(pos.to_array()).is_some() {
+        return InteractionTarget::Trade;
+    }
+    let door = crate::doors::nearest_door(pos, obstacles);
+    let container = nearest_container(pos, catalog, progress, Some(obstacles));
+    if let Some(door) = door
+        && container
+            .as_ref()
+            .is_none_or(|c| c.pos.distance(pos) + 0.12 >= door.distance)
+    {
+        return InteractionTarget::Door(door);
+    }
+    if let Some(container) = container {
+        InteractionTarget::Container(container)
+    } else if shelter.at_home(pos.to_array()) {
+        InteractionTarget::Shelter
+    } else {
+        InteractionTarget::None
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_interaction_hint(
+    flow: Res<State<GameFlow>>,
+    pause: Res<PauseOpen>,
+    modal: Res<UiModal>,
+    player: Query<&Transform, With<Player>>,
+    obstacles: Res<Obstacles>,
+    catalog: Res<WorldCatalog>,
+    progress: Res<ScavengeState>,
+    shelter: Res<Shelter>,
+    lang: Res<Language>,
+    mut hint: ResMut<InteractionHint>,
+    mut door_prompt: ResMut<DoorPrompt>,
+) {
+    door_prompt.0 = None;
+    let mut next = InteractionHint::default();
+    if flow.get() == &GameFlow::Playing
+        && !pause.0
+        && !modal.blocks_input()
+        && let Ok(player) = player.single()
+    {
+        let target = interaction_target(
+            player.translation.xz(),
+            &catalog,
+            &progress,
+            &shelter,
+            &obstacles,
+        );
+        let (label, detail) = match target {
+            InteractionTarget::Door(door) => {
+                door_prompt.0 = Some(door);
+                (
+                    tr(
+                        *lang,
+                        if door.open { "關門" } else { "開門" },
+                        if door.open { "Close door" } else { "Open door" },
+                    ),
+                    tr(*lang, "建築入口 · E 互動", "Entrance · E to interact"),
+                )
+            }
+            InteractionTarget::Container(c) if c.id == HOME_TAP_ID => (
+                tr(*lang, "裝水", "Fill water"),
+                tr(*lang, "避難所飲水設備", "Shelter water fixture"),
+            ),
+            InteractionTarget::Container(c) if progress.searched.contains(&c.id) => (
+                tr(*lang, "查看", "Inspect"),
+                tr(*lang, "已搜尋的物資", "Previously searched supplies"),
+            ),
+            InteractionTarget::Container(c) if c.cabinet => (
+                tr(*lang, "搜尋", "Search"),
+                tr(
+                    *lang,
+                    "屋內櫥櫃 · E 互動",
+                    "Household cabinet · E to interact",
+                ),
+            ),
+            InteractionTarget::Container(_) => (
+                tr(*lang, "搜尋", "Search"),
+                tr(
+                    *lang,
+                    "附近物資 · E 互動",
+                    "Nearby supplies · E to interact",
+                ),
+            ),
+            InteractionTarget::Trade => (
+                tr(*lang, "交易", "Barter"),
+                tr(*lang, "龍山交易攤", "Longshan barter stall"),
+            ),
+            InteractionTarget::Shelter => (
+                tr(*lang, "避難所", "Shelter"),
+                tr(*lang, "你已回到家中", "You are back at home"),
+            ),
+            InteractionTarget::None => (
+                tr(*lang, "互動", "Interact"),
+                tr(*lang, "走近門口或物資", "Approach an entrance or supplies"),
+            ),
+        };
+        next.label = label.into();
+        next.detail = detail.into();
+    }
+    hint.set_if_neq(next);
 }
 
 fn roll_loot(id: &str, kind: &str, minute: f32) -> Stash {
@@ -628,8 +787,9 @@ fn fill_water(
     inventory: &mut Inventory,
     minute: f32,
     water: bool,
+    obstacles: Option<&Obstacles>,
 ) -> Result<(), TapError> {
-    let fixture = nearest_container(pos, catalog, progress)
+    let fixture = nearest_container(pos, catalog, progress, obstacles)
         .filter(|container| container.id == HOME_TAP_ID)
         .ok_or(TapError::TooFar)?;
     if !water {
@@ -723,6 +883,8 @@ fn apply_actions(
     lang: Res<Language>,
     selected: Res<SelectedRole>,
     env: Res<ShelterEnvironment>,
+    obstacles: Res<Obstacles>,
+    civilians: Query<&Transform, With<crate::human::Civilian>>,
 ) {
     let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game) = states;
     if flow.get() != &GameFlow::Playing || pause.0 || game.hp <= 0.0 || game.over {
@@ -745,6 +907,7 @@ fn apply_actions(
                     &mut inventory,
                     campaign.game_min,
                     env.water,
+                    Some(&obstacles),
                 ) {
                     Ok(()) => tr(
                         *lang,
@@ -759,11 +922,52 @@ fn apply_actions(
                 if prompt.0.is_some() {
                     continue;
                 }
-                if trade_at(pos.to_array()).is_some() {
+                let target = interaction_target(pos, &catalog, &progress, &shelter, &obstacles);
+                if let InteractionTarget::Trade = target {
                     panels.write(OpenPanel(PanelKind::Trade));
                     continue;
                 }
-                if let Some(c) = nearest_container(pos, &catalog, &progress) {
+                if let InteractionTarget::Door(target) = target {
+                    let door = world().blds[target.id as usize].door.unwrap();
+                    let occupants = std::iter::once((pos, crate::player::PLAYER_RADIUS))
+                        .chain(
+                            enemies
+                                .iter()
+                                .filter(|e| e.0.alive())
+                                .map(|e| (e.0.pos, 0.4)),
+                        )
+                        .chain(civilians.iter().map(|c| (c.translation.xz(), 0.35)));
+                    if target.open && !crate::doors::can_close(door, occupants) {
+                        notice.text = tr(
+                            *lang,
+                            "門口有人，先退開再關門。",
+                            "The doorway is occupied. Step away before closing it.",
+                        )
+                        .into();
+                    } else {
+                        obstacles.doors().set_open(target.id, !target.open);
+                        progress.closed_doors = obstacles.doors().closed_ids();
+                        notice.text = tr(
+                            *lang,
+                            if target.open {
+                                "關上了門。"
+                            } else {
+                                "打開了門。"
+                            },
+                            if target.open {
+                                "Door closed."
+                            } else {
+                                "Door opened."
+                            },
+                        )
+                        .into();
+                        sound.write(SfxEvent::Clink {
+                            dist: target.distance,
+                        });
+                    }
+                    continue;
+                }
+                if let InteractionTarget::Container(c) = target {
                     if c.id == HOME_TAP_ID {
                         notice.text = match fill_water(
                             pos,
@@ -772,6 +976,7 @@ fn apply_actions(
                             &mut inventory,
                             campaign.game_min,
                             env.water,
+                            Some(&obstacles),
                         ) {
                             Ok(()) => tr(
                                 *lang,
@@ -801,13 +1006,13 @@ fn apply_actions(
                         tr(*lang, "這裡已經沒有物資。", "No supplies left here.").into()
                     };
                     sound.write(SfxEvent::Rummage);
-                } else if shelter.at_home(pos.to_array()) {
+                } else if matches!(target, InteractionTarget::Shelter) {
                     panels.write(OpenPanel(PanelKind::Shelter));
                 } else {
                     notice.text = tr(
                         *lang,
-                        "走近屋內的櫥櫃、遺留物、交易點或避難所再互動。",
-                        "Move closer to a cabinet, dropped supplies, trader or your shelter.",
+                        "走近門口、屋內櫥櫃、遺留物或交易點再互動。",
+                        "Move closer to an entrance, cabinet, dropped supplies or trader.",
                     )
                     .into();
                 }
@@ -1083,13 +1288,10 @@ fn remember_deaths(mut died: MessageReader<EnemyDied>, mut progress: ResMut<Scav
 fn update_environment(
     campaign: Res<Campaign>,
     shelter: Res<Shelter>,
-    env: Res<ShelterEnvironment>,
     progress: Res<ScavengeState>,
     player: Query<&Transform, With<Player>>,
     mut combat: ResMut<CombatEnv>,
     mut ambience: ResMut<Ambience>,
-    mut ambient: ResMut<GlobalAmbientLight>,
-    mut sun: Query<&mut DirectionalLight>,
 ) {
     let night = is_night(f64::from(campaign.game_min));
     combat.night = night;
@@ -1099,18 +1301,6 @@ fn update_environment(
     if let Ok(p) = player.single() {
         ambience.indoor = world().bld_at(p.translation.xz()).is_some();
         ambience.home = shelter.at_home(p.translation.xz().to_array());
-    }
-    ambient.brightness = if night {
-        if env.power { 150.0 } else { 65.0 }
-    } else {
-        600.0 * (1.0 - progress.weather.amount * 0.35)
-    };
-    for mut light in &mut sun {
-        light.illuminance = if night {
-            120.0
-        } else {
-            12000.0 * (1.0 - progress.weather.amount * 0.65)
-        };
     }
 }
 
@@ -1200,6 +1390,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn closed_arcade_door_blocks_water_and_nearest_target_tracks_the_real_action() {
+        let map = world();
+        let obstacles = Obstacles::new(map.clone());
+        let (id, door) = map
+            .blds
+            .iter()
+            .filter(|b| b.arcade.is_some())
+            .filter_map(|b| b.door.map(|d| (b.id, d)))
+            .find(|(id, d)| {
+                let outside = d.p + d.n * 0.6;
+                let inside = d.p - d.n * 1.4;
+                map.bld_at(outside).is_some_and(|b| b.id == *id)
+                    && map.bld_at(inside).is_some_and(|b| b.id == *id)
+                    && obstacles.los(outside, inside)
+            })
+            .expect("a recessed arcade entrance with a clear water-fixture ray");
+        let fixture = door.p - door.n * 1.4;
+        let pos = door.p + door.n * 0.6;
+        let catalog = WorldCatalog {
+            containers: vec![Container {
+                id: HOME_TAP_ID.into(),
+                pos: fixture,
+                kind: "tap",
+                cabinet: false,
+            }],
+            patrols: vec![],
+            home: fixture,
+        };
+        let mut progress = ScavengeState::default();
+        let mut inventory = Inventory::default();
+        let shelter = Shelter::default();
+        obstacles.doors().set_open(id, false);
+        assert!(
+            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles), InteractionTarget::Door(d) if d.id == id && !d.open)
+        );
+        assert_eq!(
+            fill_water(
+                pos,
+                &catalog,
+                &mut progress,
+                &mut inventory,
+                500.0,
+                true,
+                Some(&obstacles)
+            ),
+            Err(TapError::TooFar)
+        );
+        assert_eq!(inventory.count("water"), 0);
+        obstacles.doors().set_open(id, true);
+        let inside = door.p - door.n * 1.1;
+        assert!(
+            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
+        );
+        fill_water(
+            inside,
+            &catalog,
+            &mut progress,
+            &mut inventory,
+            500.0,
+            true,
+            Some(&obstacles),
+        )
+        .unwrap();
+        assert_eq!(inventory.count("water"), 1);
+    }
+
+    #[test]
     fn loading_before_dawn_restores_baseline_before_daily_spoilage() {
         use crate::game_flow::GameFlowPlugin;
         use crate::survival::{DawnTracker, ShelterPlugin};
@@ -1217,6 +1474,7 @@ mod tests {
             .init_resource::<CombatEnv>()
             .init_resource::<Ambience>()
             .init_resource::<GlobalAmbientLight>()
+            .insert_resource(Obstacles::new(world().clone()))
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
             .init_resource::<ButtonInput<KeyCode>>()
@@ -1290,7 +1548,8 @@ mod tests {
                 &mut progress,
                 &mut inventory,
                 440.0,
-                true
+                true,
+                None,
             ),
             Err(TapError::TooFar)
         );
@@ -1301,7 +1560,8 @@ mod tests {
                 &mut progress,
                 &mut inventory,
                 440.0,
-                false
+                false,
+                None,
             ),
             Err(TapError::WaterOff)
         );
@@ -1312,6 +1572,7 @@ mod tests {
             &mut inventory,
             440.0,
             true,
+            None,
         )
         .unwrap();
         assert_eq!(inventory.count("water"), 1);
@@ -1324,7 +1585,8 @@ mod tests {
                 &mut loaded,
                 &mut inventory,
                 530.0,
-                true
+                true,
+                None,
             ),
             Err(TapError::Cooldown)
         );
@@ -1335,6 +1597,7 @@ mod tests {
             &mut inventory,
             530.1,
             true,
+            None,
         )
         .unwrap();
         assert_eq!(inventory.count("water"), 2);
@@ -1345,7 +1608,8 @@ mod tests {
                 &mut loaded,
                 &mut inventory,
                 WATER_OFF as f32,
-                false
+                false,
+                None,
             ),
             Err(TapError::WaterOff)
         );

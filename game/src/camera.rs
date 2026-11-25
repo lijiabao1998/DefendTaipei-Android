@@ -61,7 +61,15 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-fn wheel_zoom(scroll: Res<AccumulatedMouseScroll>, mut zoom: ResMut<CameraZoom>) {
+fn wheel_zoom(
+    scroll: Res<AccumulatedMouseScroll>,
+    modal: Option<Res<crate::ui::UiModal>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
+    mut zoom: ResMut<CameraZoom>,
+) {
+    if modal.is_some_and(|m| m.blocks_input()) || pause.is_some_and(|p| p.0) {
+        return;
+    }
     let dy = match scroll.unit {
         MouseScrollUnit::Line => scroll.delta.y,
         MouseScrollUnit::Pixel => scroll.delta.y / 40.0,

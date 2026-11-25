@@ -1,5 +1,7 @@
 # Streets, entrances and title flow
 
+**Historical scope:** this records PR #17's first street/title wave. The next wave replaces fixed-open leaves with [interactive persisted doors](DOORS-PARITY.md), adds the [survivor map](SURVIVOR-MAP-PARITY.md), [expanded HUD/report history](HUD-PARITY.md), and [weather/power-responsive atmosphere](CITY-ATMOSPHERE-PARITY.md). Its native QA expands the 18 captures below to 28. Statements about fixed-open doors below describe PR #17, not the current build.
+
 This document describes the native visual work prompted by physical-phone screenshots showing overly clean paving and walls, conspicuous colored asphalt patches, missing visible doors and a sparse start screen. It records the implemented scope and the checks required for this revision. It does not certify pixel-for-pixel Web parity or a hardware frame-rate target.
 
 The reference is **Defend Taipei Web v24.42.0**, pinned to [`b9b0a2736642b37dd45925a4719dfef08b8f36b4`](https://github.com/lijiabao1998/defendtaipei/tree/b9b0a2736642b37dd45925a4719dfef08b8f36b4). The native changes use procedural textures, meshes and UI from this repository. No generated bitmap artwork is required.

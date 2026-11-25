@@ -5,10 +5,12 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::audio::SfxEvent;
-use crate::game_flow::GameFlow;
+use crate::combat::GameState;
+use crate::game_flow::{Campaign, GameFlow};
 use crate::i18n::{Language, UiFont, tr};
 use crate::input::ScreenRect;
 use crate::save::{SaveAndMenu, SaveStatus};
+use crate::survival::Shelter;
 
 use super::layout::pause_layout;
 use super::{ConsumedPresses, PauseOpen, StateScoped, TogglePause};
@@ -27,6 +29,10 @@ pub(super) struct PauseHeading;
 
 #[derive(Component)]
 pub(super) struct PauseStatus;
+#[derive(Component)]
+pub(super) struct PauseSummary;
+#[derive(Component)]
+pub(super) struct PauseFrame;
 
 pub(super) fn drive_pause(
     mut commands: Commands,
@@ -89,14 +95,54 @@ pub(super) fn place_pause(
     windows: Query<&Window, With<PrimaryWindow>>,
     lang: Res<Language>,
     save: Res<SaveStatus>,
-    mut heading: Query<(&mut Node, &mut Text), With<PauseHeading>>,
-    mut resume: Query<(&mut Node, &mut Text), (With<ResumeButton>, Without<PauseHeading>)>,
+    campaign: Option<Res<Campaign>>,
+    shelter: Option<Res<Shelter>>,
+    game: Option<Res<GameState>>,
+    mut decorations: Query<
+        (&mut Node, Option<&PauseFrame>),
+        (
+            Or<(With<PauseFrame>, With<PauseSummary>)>,
+            Without<PauseHeading>,
+            Without<ResumeButton>,
+            Without<MenuButton>,
+            Without<PauseStatus>,
+        ),
+    >,
+    mut summary: Query<
+        &mut Text,
+        (
+            With<PauseSummary>,
+            Without<PauseHeading>,
+            Without<ResumeButton>,
+            Without<MenuButton>,
+            Without<PauseStatus>,
+        ),
+    >,
+    mut heading: Query<
+        (&mut Node, &mut Text),
+        (
+            With<PauseHeading>,
+            Without<PauseSummary>,
+            Without<PauseFrame>,
+        ),
+    >,
+    mut resume: Query<
+        (&mut Node, &mut Text),
+        (
+            With<ResumeButton>,
+            Without<PauseHeading>,
+            Without<PauseSummary>,
+            Without<PauseFrame>,
+        ),
+    >,
     mut menu: Query<
         (&mut Node, &mut Text),
         (
             With<MenuButton>,
             Without<PauseHeading>,
             Without<ResumeButton>,
+            Without<PauseSummary>,
+            Without<PauseFrame>,
         ),
     >,
     mut status: Query<
@@ -106,6 +152,8 @@ pub(super) fn place_pause(
             Without<PauseHeading>,
             Without<ResumeButton>,
             Without<MenuButton>,
+            Without<PauseSummary>,
+            Without<PauseFrame>,
         ),
     >,
 ) {
@@ -113,6 +161,33 @@ pub(super) fn place_pause(
         return;
     };
     let layout = pause_layout(Vec2::new(window.width(), window.height()));
+    for (mut node, frame) in &mut decorations {
+        place(
+            &mut node,
+            if frame.is_some() {
+                layout.frame
+            } else {
+                layout.summary
+            },
+        );
+    }
+    let minute = campaign.as_ref().map_or(0, |c| c.game_min.max(0.0) as u32);
+    let day = shelter.as_ref().map_or(1, |s| s.day);
+    let hp = game.as_ref().map_or(100.0, |g| g.hp);
+    let copy = format!(
+        "{} · {} {} · {:02}:{:02} · HP {:.0}",
+        tr(*lang, "萬華", "Wanhua"),
+        tr(*lang, "第", "Day"),
+        day,
+        minute / 60 % 24,
+        minute % 60,
+        hp
+    );
+    for mut text in &mut summary {
+        if text.0 != copy {
+            text.0 = copy.clone();
+        }
+    }
     for (mut node, mut text) in &mut heading {
         place(&mut node, layout.heading);
         let next = tr(*lang, "暫停", "Paused");
@@ -136,7 +211,21 @@ pub(super) fn place_pause(
     }
     for (mut node, mut text) in &mut status {
         place(&mut node, layout.status);
-        let next = save.error.as_deref().unwrap_or(&save.notice);
+        let next = save
+            .error
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                if save.notice.is_empty() {
+                    tr(
+                        *lang,
+                        "時間已暫停。離開前儲存，才能從這裡繼續。",
+                        "Time is paused. Save before leaving to continue from here.",
+                    )
+                } else {
+                    &save.notice
+                }
+            });
         if text.0 != next {
             text.0 = next.to_owned();
         }
@@ -168,7 +257,7 @@ fn spawn_pause(commands: &mut Commands, viewport: Vec2, font: &UiFont, lang: Lan
                 height: percent(100.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.02, 0.025, 0.72)),
+            BackgroundColor(Color::srgba(0.02, 0.025, 0.03, 0.80)),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -176,6 +265,13 @@ fn spawn_pause(commands: &mut Commands, viewport: Vec2, font: &UiFont, lang: Lan
             GlobalZIndex(50),
         ))
         .with_children(|parent| {
+            parent.spawn((
+                PauseFrame,
+                placed_node(layout.frame, true),
+                BackgroundColor(Color::srgb(0.065, 0.075, 0.078)),
+                BorderColor::all(Color::srgb(0.51, 0.44, 0.28)),
+            ));
+            parent.spawn(label(PauseSummary, layout.summary, 13.0, font, ""));
             parent.spawn(label(
                 PauseHeading,
                 layout.heading,
@@ -183,12 +279,17 @@ fn spawn_pause(commands: &mut Commands, viewport: Vec2, font: &UiFont, lang: Lan
                 font,
                 tr(lang, "暫停", "Paused"),
             ));
-            parent.spawn(button(
-                ResumeButton,
-                layout.resume,
-                font,
-                tr(lang, "繼續", "Resume"),
-            ));
+            parent
+                .spawn(button(
+                    ResumeButton,
+                    layout.resume,
+                    font,
+                    tr(lang, "繼續", "Resume"),
+                ))
+                .insert((
+                    BackgroundColor(Color::srgb(0.76, 0.63, 0.36)),
+                    TextColor(Color::srgb(0.10, 0.11, 0.09)),
+                ));
             parent.spawn(button(
                 MenuButton,
                 layout.menu,
@@ -217,13 +318,17 @@ fn label(
 }
 
 fn button(marker: impl Component, rect: ScreenRect, font: &UiFont, text: &str) -> impl Bundle {
+    // A Bevy Text leaf does not vertically centre its own glyphs through flex
+    // alignment. Inset the line box while preserving the full finger target.
+    let mut node = placed_node(rect, true);
+    node.padding = UiRect::vertical(px(((rect.height() - 26.0) * 0.5).max(0.0)));
     (
         marker,
-        placed_node(rect, true),
-        BackgroundColor(Color::srgb(0.45, 0.32, 0.12)),
+        node,
+        BackgroundColor(Color::srgb(0.14, 0.16, 0.15)),
         BorderColor::all(Color::srgba(0.95, 0.85, 0.55, 0.8)),
         Text::new(text),
-        TextFont::from_font_size(FontSize::Px(22.0)).with_font(font.0.clone()),
+        TextFont::from_font_size(FontSize::Px(20.0)).with_font(font.0.clone()),
         TextColor(Color::srgb(0.98, 0.96, 0.9)),
         TextLayout::justify(Justify::Center),
     )

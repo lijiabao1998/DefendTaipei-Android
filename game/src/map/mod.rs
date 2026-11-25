@@ -8,6 +8,7 @@
 //! player at the right LOD (built on the async compute pool, so nothing blocks a frame); a chunk
 //! loader can switch it off with [`MapStreaming`] and call the two functions itself.
 
+pub mod atmosphere;
 pub mod blocks;
 pub mod build;
 pub mod canvas;
@@ -277,7 +278,7 @@ pub struct MapPlugin;
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
         let w = world().clone();
-        app.insert_resource(Obstacles(w.clone()))
+        app.insert_resource(Obstacles::new(w.clone()))
             .init_resource::<MapStreaming>()
             .init_resource::<MapReady>()
             .init_resource::<Streamer>()

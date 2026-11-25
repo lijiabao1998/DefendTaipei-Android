@@ -38,7 +38,7 @@ use layout::control_hit;
 
 /// Pointer presses swallowed by our screens, in window coordinates.
 #[derive(Resource, Default)]
-pub(super) struct ConsumedPresses {
+pub(crate) struct ConsumedPresses {
     pub points: Vec<Vec2>,
 }
 
@@ -69,7 +69,12 @@ impl Plugin for FlowUiPlugin {
                 PreUpdate,
                 consume_ui_clicks.after(bevy::input::InputSystems),
             )
-            .add_systems(Update, shelter::drive_panels.before(crate::input::InputSet))
+            .add_systems(
+                Update,
+                shelter::drive_panels
+                    .before(crate::worldmap::MapInputSet)
+                    .before(crate::input::InputSet),
+            )
             .add_systems(
                 Update,
                 (
@@ -99,6 +104,8 @@ fn consume_ui_clicks(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut touches: ResMut<Touches>,
     mut consumed: ResMut<ConsumedPresses>,
+    map: Option<Res<crate::worldmap::MapOpen>>,
+    geometry: Option<Res<crate::hud::HudGeometry>>,
     mut modal: ResMut<UiModal>,
 ) {
     consumed.points.clear();
@@ -109,7 +116,17 @@ fn consume_ui_clicks(
     let hit = |point: Vec2| {
         control_hit(flow.get(), viewport, point, pause.0)
             || (flow.get() == &GameFlow::Playing
-                && (modal.open || shelter::toolbar_hit(viewport, point)))
+                && (modal.open
+                    || shelter::toolbar_hit(viewport, point)
+                    || geometry
+                        .as_ref()
+                        .and_then(|g| g.banner)
+                        .is_some_and(|rect| rect.contains(point))
+                    || crate::worldmap::captures_pointer(
+                        viewport,
+                        point,
+                        map.as_ref().is_some_and(|m| m.0),
+                    )))
     };
     if mouse.just_pressed(MouseButton::Left)
         && let Some(cursor) = window.cursor_position()

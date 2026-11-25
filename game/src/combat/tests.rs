@@ -479,7 +479,7 @@ fn the_city_buildings_become_walls() {
     let data = crate::map::world().clone();
     let center = data.blds[0].c;
     app.init_resource::<CombatWorldRes>()
-        .insert_resource(crate::city::Obstacles(data))
+        .insert_resource(crate::city::Obstacles::new(data))
         .add_systems(Update, world::walls_from_city);
     assert!(app.world().resource::<CombatWorldRes>().0.stand_in());
     app.update();

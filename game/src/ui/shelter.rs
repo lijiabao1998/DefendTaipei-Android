@@ -12,8 +12,9 @@ use crate::input::{ScreenRect, safe_insets};
 use crate::inventory::{Inventory, ItemKind, item};
 use crate::player::Player;
 use crate::save::{SaveGame, SaveStatus};
+use crate::story::TIMELINE;
 use crate::survival::{MoralChoice, Shelter, TRADE_ITEMS, TRADE_SPOTS, Upgrade, trade_at};
-use crate::worldplay::{MoralPrompt, PlayerNeeds, WorldAction, WorldNotice};
+use crate::worldplay::{InteractionHint, MoralPrompt, PlayerNeeds, WorldAction, WorldNotice};
 
 use super::{ConsumedPresses, PauseOpen, StateScoped, TogglePause};
 
@@ -30,6 +31,7 @@ pub enum PanelKind {
     Inventory,
     Shelter,
     Trade,
+    Journal,
     Close,
 }
 
@@ -80,6 +82,16 @@ enum Action {
     Moral(MoralChoice),
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Tone {
+    #[default]
+    Normal,
+    Heading,
+    Muted,
+    Selected,
+    Badge(ItemKind),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Widget {
     rect: ScreenRect,
@@ -87,12 +99,14 @@ struct Widget {
     action: Option<Action>,
     enabled: bool,
     font_size: f32,
+    tone: Tone,
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
 struct Frame {
     panel: Option<ScreenRect>,
     widgets: Vec<Widget>,
+    cards: Vec<(ScreenRect, bool)>,
 }
 
 impl Frame {
@@ -103,6 +117,7 @@ impl Frame {
             action: None,
             enabled: true,
             font_size,
+            tone: Tone::Normal,
         });
     }
 
@@ -113,7 +128,14 @@ impl Frame {
             action: Some(action),
             enabled,
             font_size: 15.0,
+            tone: Tone::Normal,
         });
+    }
+
+    fn tone(&mut self, tone: Tone) {
+        if let Some(widget) = self.widgets.last_mut() {
+            widget.tone = tone;
+        }
     }
 
     fn action_at(&self, point: Vec2) -> Option<Action> {
@@ -129,6 +151,8 @@ impl Frame {
 struct Row {
     text: String,
     buttons: Vec<(String, Action, bool)>,
+    item_kind: Option<ItemKind>,
+    equipped: bool,
 }
 
 impl Row {
@@ -136,6 +160,8 @@ impl Row {
         Self {
             text: text.into(),
             buttons: Vec::new(),
+            item_kind: None,
+            equipped: false,
         }
     }
 
@@ -143,6 +169,8 @@ impl Row {
         Self {
             text: text.into(),
             buttons: vec![(label.to_owned(), action, enabled)],
+            item_kind: None,
+            equipped: false,
         }
     }
 }
@@ -190,6 +218,146 @@ fn item_name(id: &str, lang: Language) -> &str {
     item(id).map_or(id, |definition| definition.name(lang))
 }
 
+fn item_category(kind: ItemKind, lang: Language) -> &'static str {
+    match kind {
+        ItemKind::Food => tr(lang, "食物", "Food"),
+        ItemKind::Drink => tr(lang, "飲水", "Drink"),
+        ItemKind::Med => tr(lang, "醫療", "Medical"),
+        ItemKind::Melee => tr(lang, "近戰", "Melee"),
+        ItemKind::Gun => tr(lang, "槍械", "Firearm"),
+        ItemKind::Ammo => tr(lang, "彈藥", "Ammunition"),
+        ItemKind::Tool => tr(lang, "工具", "Tools"),
+    }
+}
+
+fn item_badge(kind: ItemKind, lang: Language) -> &'static str {
+    match kind {
+        ItemKind::Food => tr(lang, "食", "FD"),
+        ItemKind::Drink => tr(lang, "飲", "H2O"),
+        ItemKind::Med => tr(lang, "醫", "+"),
+        ItemKind::Melee => tr(lang, "刃", "ML"),
+        ItemKind::Gun => tr(lang, "槍", "GN"),
+        ItemKind::Ammo => tr(lang, "彈", "AM"),
+        ItemKind::Tool => tr(lang, "具", "TL"),
+    }
+}
+
+fn item_color(kind: ItemKind) -> Color {
+    match kind {
+        ItemKind::Food => Color::srgb(0.79, 0.58, 0.29),
+        ItemKind::Drink => Color::srgb(0.43, 0.66, 0.83),
+        ItemKind::Med => Color::srgb(0.62, 0.75, 0.56),
+        ItemKind::Melee | ItemKind::Gun => Color::srgb(0.83, 0.62, 0.49),
+        ItemKind::Ammo => Color::srgb(0.79, 0.71, 0.46),
+        ItemKind::Tool => Color::srgb(0.65, 0.69, 0.70),
+    }
+}
+
+/// Fired timeline IDs already belong to the atomic save. Derive the original
+/// report text from those IDs, never reveal later broadcasts or fabricate a
+/// reception timestamp; the displayed time is the report's scheduled time.
+fn journal_rows(campaign: &Campaign, shelter: &Shelter, lang: Language) -> Vec<Row> {
+    let mut rows = vec![Row::text(tr(
+        lang,
+        "收音機與通報",
+        "Radio and public notices",
+    ))];
+    let mut received = false;
+    for line in TIMELINE
+        .iter()
+        .rev()
+        .filter(|line| campaign.fired.iter().any(|id| id == line.id))
+    {
+        received = true;
+        rows.push(Row::text(format!(
+            "{} {} · {:02}:{:02} · {}\n{}",
+            tr(lang, "第", "Day"),
+            line.minute / 1440 + 1,
+            line.minute / 60 % 24,
+            line.minute % 60,
+            line.who,
+            line.text
+        )));
+    }
+    if !received {
+        rows.push(Row::text(tr(
+            lang,
+            "還沒有收到通報。",
+            "No broadcasts received yet.",
+        )));
+    }
+    rows.push(Row::text(tr(
+        lang,
+        "避難所每日紀錄",
+        "Daily shelter record",
+    )));
+    if shelter.log.is_empty() {
+        rows.push(Row::text(tr(
+            lang,
+            "每天清晨六點結算，紀錄會留在這裡。",
+            "Daily records appear here after the 06:00 settlement.",
+        )));
+    } else {
+        rows.extend(shelter.log.iter().map(|line| Row::text(line.clone())));
+    }
+    rows
+}
+
+fn apply_interaction_label(frame: &mut Frame, hint: Option<&InteractionHint>) {
+    if let Some(hint) = hint.filter(|hint| !hint.label.is_empty()) {
+        for widget in &mut frame.widgets {
+            if widget.action == Some(Action::Interact) {
+                widget.text = format!("{} E", hint.label);
+                widget.font_size = 13.0;
+            }
+        }
+    }
+}
+
+fn widget_colors(widget: &Widget, panel: bool) -> (Color, Color, Color) {
+    let ink = Color::srgb(0.91, 0.89, 0.82);
+    let gold = Color::srgb(0.91, 0.77, 0.47);
+    if let Tone::Badge(kind) = widget.tone {
+        return (
+            Color::srgb(0.065, 0.078, 0.083),
+            Color::srgba(0.37, 0.40, 0.38, 0.7),
+            item_color(kind),
+        );
+    }
+    if widget.action.is_some() {
+        if widget.tone == Tone::Selected {
+            return (
+                Color::srgb(0.24, 0.22, 0.15),
+                Color::srgb(0.68, 0.56, 0.31),
+                gold,
+            );
+        }
+        if !widget.enabled {
+            return (
+                Color::srgb(0.075, 0.087, 0.09),
+                Color::srgba(0.29, 0.31, 0.29, 0.45),
+                Color::srgb(0.44, 0.47, 0.44),
+            );
+        }
+        return (
+            Color::srgb(0.19, 0.20, 0.17),
+            Color::srgba(0.56, 0.49, 0.31, 0.75),
+            ink,
+        );
+    }
+    let bg = if panel {
+        Color::NONE
+    } else {
+        Color::srgba(0.025, 0.03, 0.035, 0.90)
+    };
+    let text = match widget.tone {
+        Tone::Heading => gold,
+        Tone::Muted => Color::srgb(0.67, 0.72, 0.67),
+        _ => ink,
+    };
+    (bg, Color::NONE, text)
+}
+
 fn inventory_rows(inventory: &Inventory, campaign: &Campaign, lang: Language) -> Vec<Row> {
     let mut rows = vec![Row::action(
         tr(
@@ -207,6 +375,8 @@ fn inventory_rows(inventory: &Inventory, campaign: &Campaign, lang: Language) ->
     )];
     rows.push(Row {
         text: tr(lang, "時間速度", "Time speed").to_owned(),
+        item_kind: None,
+        equipped: false,
         buttons: [1, 3, 20]
             .into_iter()
             .map(|speed| {
@@ -234,16 +404,26 @@ fn inventory_rows(inventory: &Inventory, campaign: &Campaign, lang: Language) ->
         };
         let usable = definition.usable();
         let text = format!(
-            "{} ×{}\n{}",
+            "{} ×{}{}\n{} · {:.2} kg\n{}",
             definition.name(lang),
             count,
+            if equipped {
+                tr(lang, " · 已裝備", " · Equipped")
+            } else {
+                ""
+            },
+            item_category(definition.kind, lang),
+            definition.weight * *count as f32,
             definition.description(lang)
         );
-        rows.push(if usable {
+        let mut row = if usable {
             Row::action(text, label, Action::Use(id.clone()), true)
         } else {
             Row::text(text)
-        });
+        };
+        row.item_kind = Some(definition.kind);
+        row.equipped = equipped;
+        rows.push(row);
     }
     if inventory.stacks().iter().all(|(_, count)| *count == 0) {
         rows.push(Row::text(tr(lang, "背包是空的。", "Your bag is empty.")));
@@ -411,6 +591,8 @@ fn trade_rows(shelter: &Shelter, inventory: &Inventory, pos: [f32; 2], lang: Lan
         let sell = (buy - 1).max(1);
         rows.push(Row {
             text: format!("{} ×{}", item_name(id, lang), inventory.count(id)),
+            item_kind: item(id).map(|d| d.kind),
+            equipped: false,
             buttons: vec![
                 (
                     format!("{} {}", tr(lang, "買", "Buy"), buy),
@@ -465,7 +647,8 @@ fn moral_rows(inventory: &Inventory, lang: Language) -> Vec<Row> {
 }
 
 fn row_height(row: &Row, width: f32) -> f32 {
-    let available = (width - row.buttons.len() as f32 * 77.0 - 16.0).max(60.0);
+    let badge_w = if row.item_kind.is_some() { 42.0 } else { 0.0 };
+    let available = (width - row.buttons.len() as f32 * 77.0 - badge_w - 16.0).max(60.0);
     let lines: f32 = row
         .text
         .split('\n')
@@ -541,19 +724,8 @@ fn make_frame(
         ] {
             frame.button(rect, label.to_owned(), action, true);
         }
-        if !notice.text.is_empty() {
-            let width = (toolbar[4].max.x - toolbar[0].min.x).min(600.0);
-            frame.text(
-                ScreenRect::new(
-                    (viewport.x - width) * 0.5,
-                    viewport.y * 0.5 - 24.0,
-                    width,
-                    48.0,
-                ),
-                notice.text.clone(),
-                14.0,
-            );
-        }
+        // Gameplay notices share the HUD context slot and expire there. A fixed
+        // screen-centre toast obscured the radio card on short portrait phones.
         return frame;
     };
 
@@ -580,6 +752,7 @@ fn make_frame(
         title,
         23.0,
     );
+    frame.tone(Tone::Heading);
     frame.button(
         ScreenRect::new(x + width - 64.0, header_y, 64.0, 42.0),
         tr(lang, "關閉", "Close").to_owned(),
@@ -601,6 +774,9 @@ fn make_frame(
                 Action::Open(tab),
                 view != tab,
             );
+            if view == tab {
+                frame.tone(Tone::Selected);
+            }
         }
         y += 46.0;
     }
@@ -651,14 +827,15 @@ fn make_frame(
         },
         View::Journal => tr(
             lang,
-            "每天清晨六點更新。開啟面板時，世界仍在運作。",
-            "Updated at 06:00. The world keeps running while this panel is open.",
+            "已收到的通報與每日紀錄。開啟面板時，世界仍在運作。",
+            "Received broadcasts and daily records. The world keeps running while this panel is open.",
         )
         .to_string(),
         View::Moral => String::new(),
     };
     if !summary.is_empty() {
         frame.text(ScreenRect::new(x, y, width, 44.0), summary, 14.0);
+        frame.tone(Tone::Muted);
         y += 48.0;
     }
     let footer_y = panel.max.y - 52.0;
@@ -669,27 +846,58 @@ fn make_frame(
         View::Shelter => shelter_rows(shelter, inventory, pos, lang),
         View::Trade => trade_rows(shelter, inventory, pos, lang),
         View::Moral => moral_rows(inventory, lang),
-        View::Journal => {
-            if shelter.log.is_empty() {
-                vec![Row::text(tr(lang, "還沒有日誌。", "No entries yet."))]
-            } else {
-                shelter
-                    .log
-                    .iter()
-                    .map(|line| Row::text(line.clone()))
-                    .collect()
-            }
-        }
+        View::Journal => journal_rows(campaign, shelter, lang),
     };
     let pages = pages(rows, width, available_h);
     let page = state.page.min(pages.len() - 1);
     for (row, height) in &pages[page] {
         let action_width = row.buttons.len() as f32 * 77.0;
-        frame.text(
-            ScreenRect::new(x, y, (width - action_width - 6.0).max(1.0), *height - 4.0),
-            row.text.clone(),
-            15.0,
-        );
+        frame.cards.push((
+            ScreenRect::new(x, y + 1.0, width, *height - 5.0),
+            row.equipped,
+        ));
+        let badge_w = if row.item_kind.is_some() { 42.0 } else { 0.0 };
+        if let Some(kind) = row.item_kind {
+            frame.text(
+                ScreenRect::new(x + 5.0, y + 8.0, 32.0, 32.0),
+                item_badge(kind, lang).to_owned(),
+                13.0,
+            );
+            frame.tone(Tone::Badge(kind));
+        }
+        let text_x = x + badge_w + 3.0;
+        let text_w = (width - action_width - badge_w - 10.0).max(1.0);
+        if let Some((title, detail)) = row.text.split_once('\n') {
+            // The source inventory distinguishes names from metadata. Keep the
+            // whole text in the pagination estimate, then style the two levels.
+            let title_h = if title.chars().count() as f32 * 15.0 > text_w {
+                40.0
+            } else {
+                23.0
+            };
+            frame.text(
+                ScreenRect::new(text_x, y + 3.0, text_w, title_h),
+                title.to_owned(),
+                14.0,
+            );
+            frame.text(
+                ScreenRect::new(
+                    text_x,
+                    y + 3.0 + title_h,
+                    text_w,
+                    (*height - title_h - 10.0).max(16.0),
+                ),
+                detail.to_owned(),
+                12.0,
+            );
+            frame.tone(Tone::Muted);
+        } else {
+            frame.text(
+                ScreenRect::new(text_x, y + 1.0, text_w, *height - 5.0),
+                row.text.clone(),
+                15.0,
+            );
+        }
         for (i, (label, action, enabled)) in row.buttons.iter().enumerate() {
             frame.button(
                 ScreenRect::new(
@@ -713,6 +921,7 @@ fn make_frame(
         save.notice.clone()
     };
     frame.text(ScreenRect::new(x, status_y, width, 38.0), status, 13.0);
+    frame.tone(Tone::Muted);
     let nav_w = (width * 0.24).min(110.0);
     frame.button(
         ScreenRect::new(x, footer_y, nav_w, 42.0),
@@ -751,6 +960,8 @@ pub(super) struct PanelWorld<'w, 's> {
     lang: Res<'w, Language>,
     notice: ResMut<'w, WorldNotice>,
     save_status: Res<'w, SaveStatus>,
+    hint: Option<Res<'w, InteractionHint>>,
+    geometry: Option<Res<'w, crate::hud::HudGeometry>>,
 }
 
 pub(super) fn drive_panels(
@@ -766,6 +977,7 @@ pub(super) fn drive_panels(
     mut world_actions: MessageWriter<WorldAction>,
     mut saves: MessageWriter<SaveGame>,
     mut pauses: MessageWriter<TogglePause>,
+    map: Option<Res<crate::worldmap::MapOpen>>,
 ) {
     let PanelWorld {
         player,
@@ -777,6 +989,8 @@ pub(super) fn drive_panels(
         lang,
         mut notice,
         save_status,
+        hint,
+        geometry,
     } = world;
     let previous_view = state.view;
     if flow.get() != &GameFlow::Playing || pause.0 {
@@ -785,11 +999,17 @@ pub(super) fn drive_panels(
         opens.clear();
         return;
     }
+    if map.as_ref().is_some_and(|m| m.0) && opens.is_empty() {
+        state.view = None;
+        modal.open = true;
+        return;
+    }
     for open in opens.read() {
         state.view = match open.0 {
             PanelKind::Inventory => Some(View::Inventory),
             PanelKind::Shelter => Some(View::Shelter),
             PanelKind::Trade => Some(View::Trade),
+            PanelKind::Journal => Some(View::Journal),
             PanelKind::Close => None,
         };
         state.page = 0;
@@ -806,7 +1026,7 @@ pub(super) fn drive_panels(
         .map(|w| Vec2::new(w.width(), w.height()))
         .unwrap_or(Vec2::new(1280.0, 720.0));
     let pos = position(&player);
-    let frame = make_frame(
+    let mut frame = make_frame(
         viewport,
         &state,
         &shelter,
@@ -818,10 +1038,18 @@ pub(super) fn drive_panels(
         &notice,
         &save_status,
     );
-    let mut action = consumed
-        .points
-        .iter()
-        .find_map(|point| frame.action_at(*point));
+    apply_interaction_label(&mut frame, hint.as_deref());
+    let mut action = consumed.points.iter().find_map(|point| {
+        frame.action_at(*point).or_else(|| {
+            (state.view.is_none()
+                && campaign.notice_t > 0.0
+                && geometry
+                    .as_ref()
+                    .and_then(|g| g.banner)
+                    .is_some_and(|rect| rect.contains(*point)))
+            .then_some(Action::Open(View::Journal))
+        })
+    });
     if state.view.is_some() && keys.just_pressed(KeyCode::Escape) {
         keys.clear_just_pressed(KeyCode::Escape);
         action = Some(Action::Close);
@@ -925,6 +1153,20 @@ pub(super) fn drive_panels(
     }
 }
 
+#[derive(SystemParam)]
+pub(super) struct PanelRenderWorld<'w> {
+    shelter: Res<'w, Shelter>,
+    inventory: Res<'w, Inventory>,
+    campaign: Res<'w, Campaign>,
+    needs: Res<'w, PlayerNeeds>,
+    lang: Res<'w, Language>,
+    notice: Res<'w, WorldNotice>,
+    save: Res<'w, SaveStatus>,
+    font: Res<'w, UiFont>,
+    map: Option<Res<'w, crate::worldmap::MapOpen>>,
+    hint: Option<Res<'w, InteractionHint>>,
+}
+
 pub(super) fn render_panels(
     mut commands: Commands,
     flow: Res<State<GameFlow>>,
@@ -932,38 +1174,45 @@ pub(super) fn render_panels(
     windows: Query<&Window, With<PrimaryWindow>>,
     player: Query<&Transform, With<Player>>,
     state: Res<PanelState>,
-    shelter: Res<Shelter>,
-    inventory: Res<Inventory>,
-    campaign: Res<Campaign>,
-    needs: Res<PlayerNeeds>,
-    lang: Res<Language>,
-    notice: Res<WorldNotice>,
-    save: Res<SaveStatus>,
-    font: Res<UiFont>,
+    world: PanelRenderWorld,
     roots: Query<Entity, With<SurvivalUiRoot>>,
     mut cache: ResMut<RenderCache>,
 ) {
-    let frame = if flow.get() == &GameFlow::Playing && !pause.0 {
-        let viewport = windows
-            .iter()
-            .next()
-            .map(|w| Vec2::new(w.width(), w.height()))
-            .unwrap_or(Vec2::new(1280.0, 720.0));
-        make_frame(
-            viewport,
-            &state,
-            &shelter,
-            &inventory,
-            &campaign,
-            &needs,
-            position(&player),
-            *lang,
-            &notice,
-            &save,
-        )
-    } else {
-        Frame::default()
-    };
+    let PanelRenderWorld {
+        shelter,
+        inventory,
+        campaign,
+        needs,
+        lang,
+        notice,
+        save,
+        font,
+        map,
+        hint,
+    } = world;
+    let mut frame =
+        if flow.get() == &GameFlow::Playing && !pause.0 && !map.as_ref().is_some_and(|m| m.0) {
+            let viewport = windows
+                .iter()
+                .next()
+                .map(|w| Vec2::new(w.width(), w.height()))
+                .unwrap_or(Vec2::new(1280.0, 720.0));
+            make_frame(
+                viewport,
+                &state,
+                &shelter,
+                &inventory,
+                &campaign,
+                &needs,
+                position(&player),
+                *lang,
+                &notice,
+                &save,
+            )
+        } else {
+            Frame::default()
+        };
+    apply_interaction_label(&mut frame, hint.as_deref());
     if cache.0 == frame && (!roots.is_empty() || frame.widgets.is_empty()) {
         return;
     }
@@ -997,36 +1246,34 @@ pub(super) fn render_panels(
                     BorderColor::all(Color::srgb(0.5, 0.43, 0.25)),
                 ));
             }
+            for (rect, selected) in frame.cards {
+                parent.spawn((
+                    node_at(rect),
+                    BackgroundColor(if selected {
+                        Color::srgb(0.20, 0.20, 0.15)
+                    } else {
+                        Color::srgb(0.105, 0.122, 0.13)
+                    }),
+                    BorderColor::all(if selected {
+                        Color::srgb(0.62, 0.51, 0.29)
+                    } else {
+                        Color::srgba(0.24, 0.27, 0.26, 0.55)
+                    }),
+                    Pickable::IGNORE,
+                ));
+            }
             for widget in frame.widgets {
                 let button = widget.action.is_some();
-                let bg = if button {
-                    if widget.enabled {
-                        Color::srgb(0.24, 0.25, 0.19)
-                    } else {
-                        Color::srgb(0.10, 0.12, 0.12)
-                    }
-                } else if frame.panel.is_none() {
-                    Color::srgba(0.025, 0.03, 0.035, 0.88)
-                } else {
-                    Color::NONE
-                };
+                let (bg, border, text_color) = widget_colors(&widget, frame.panel.is_some());
                 parent.spawn((
                     node_at(widget.rect),
                     BackgroundColor(bg),
-                    BorderColor::all(if button {
-                        Color::srgba(0.7, 0.62, 0.36, 0.65)
-                    } else {
-                        Color::NONE
-                    }),
+                    BorderColor::all(border),
                     Text::new(widget.text),
                     TextFont::from_font_size(FontSize::Px(widget.font_size))
                         .with_font(font.0.clone()),
-                    TextColor(if widget.enabled {
-                        Color::srgb(0.96, 0.93, 0.84)
-                    } else {
-                        Color::srgb(0.57, 0.59, 0.55)
-                    }),
-                    TextLayout::justify(if button {
+                    TextColor(text_color),
+                    TextLayout::justify(if button || matches!(widget.tone, Tone::Badge(_)) {
                         Justify::Center
                     } else {
                         Justify::Left
@@ -1253,5 +1500,60 @@ mod tests {
         assert_eq!(app.world().resource::<Shelter>().stash.count("rice"), 5);
         assert!(app.world().resource::<UiModal>().open);
         assert!(!app.world().resource::<PauseOpen>().0);
+    }
+    #[test]
+    fn journal_only_shows_received_reports_and_survives_campaign_roundtrip() {
+        let mut campaign = Campaign {
+            game_min: 20_000.0,
+            ..default()
+        };
+        campaign.fired.push("a".to_owned());
+        let received = TIMELINE.iter().find(|line| line.id == "a").unwrap();
+        let future = TIMELINE.iter().find(|line| line.id == "e1").unwrap();
+        let shelter = Shelter {
+            log: vec!["Daily shelter entry".to_owned()],
+            ..default()
+        };
+        let copy = journal_rows(&campaign, &shelter, Language::En)
+            .into_iter()
+            .map(|row| row.text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(copy.contains(received.text));
+        assert!(copy.contains("08:05"));
+        assert!(copy.contains("Daily shelter entry"));
+        assert!(!copy.contains(future.text));
+        let restored: Campaign =
+            serde_json::from_slice(&serde_json::to_vec(&campaign).unwrap()).unwrap();
+        let restored_copy = journal_rows(&restored, &shelter, Language::En)
+            .into_iter()
+            .map(|row| row.text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(copy, restored_copy);
+    }
+
+    #[test]
+    fn equipped_item_card_and_context_action_use_live_inventory_and_hint() {
+        let mut inventory = Inventory::from_role(&crate::roles::ROLES[0]);
+        inventory.add("knife", 1);
+        inventory.equipped = "knife".to_owned();
+        let rows = inventory_rows(&inventory, &Campaign::default(), Language::En);
+        let weapon = rows.iter().find(|row| row.equipped).unwrap();
+        assert_eq!(weapon.item_kind, Some(ItemKind::Melee));
+        assert!(weapon.text.contains("Equipped"));
+        assert_eq!(weapon.buttons[0].1, Action::Use("knife".to_owned()));
+        let mut frame = Frame::default();
+        let rect = toolbar_rects(Vec2::new(390.0, 844.0))[3];
+        frame.button(rect, "Use E".to_owned(), Action::Interact, true);
+        apply_interaction_label(
+            &mut frame,
+            Some(&InteractionHint {
+                label: "Open door".to_owned(),
+                detail: String::new(),
+            }),
+        );
+        assert_eq!(frame.widgets[0].text, "Open door E");
+        assert_eq!(frame.action_at(rect.center()), Some(Action::Interact));
     }
 }

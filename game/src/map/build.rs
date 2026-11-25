@@ -205,9 +205,9 @@ fn door_flanks(b: &Bld, d: Door) -> [f32; 2] {
 }
 
 /// Street-readable doors from doors.ts: the red home gate / ochre shop frame, a stone sill
-/// and recognisable iron leaves. Leaves are already folded flat against the *solid* wall.
-/// The native game currently has no closed-door state, so rendering a closed leaf here
-/// would contradict its collision world. The 1.6 m opening remains unobstructed.
+/// and address details. Live hinged leaves are supplied by `crate::doors`, separately
+/// from streamed meshes so their saved state survives a chunk unload or LOD swap.
+/// This static frame keeps the 1.6 m collision opening unobstructed.
 pub fn entrance(b: &Bld, lod: Lod) -> Parts {
     let mut out = Parts::default();
     let Some(d) = b.door else { return out };
@@ -217,8 +217,6 @@ pub fn entrance(b: &Bld, lod: Lod) -> Parts {
     let t = place(d.p.x, 0.0, d.p.y, d.n.x.atan2(d.n.y));
     let home = b.kind == "home";
     let paint = if home { 0xad3c30 } else { 0xc97838 };
-    let gate = if home { 0x86372d } else { 0x365b49 };
-    let rail = if home { 0x4c2924 } else { 0x293c32 };
     let box_at = |w, h, depth, x, y, z| (geom::cuboid(w, h, depth), t * geom::at(x, y, z));
     for x in [-DOOR_W / 2.0, DOOR_W / 2.0] {
         let (g, tr) = box_at(0.16, DOOR_H + 0.08, 0.38, x, DOOR_H / 2.0, 0.03);
@@ -230,41 +228,6 @@ pub fn entrance(b: &Bld, lod: Lod) -> Parts {
     out.add(Mat::VCol, &g, tr, hex(0xb5afa2));
 
     let flanks = door_flanks(b, d);
-    for (i, side) in [-1.0f32, 1.0].into_iter().enumerate() {
-        let width = (flanks[i] - 0.14).clamp(0.0, DOOR_W / 2.0 - 0.08);
-        if width < 0.28 {
-            continue;
-        }
-        let x = side * (DOOR_W / 2.0 + 0.04 + width / 2.0);
-        let (g, tr) = box_at(width, 2.22, 0.055, x, 1.15, 0.175);
-        out.add(Mat::VCol, &g, tr, hex(gate));
-        // Two horizontal straps remain legible at Mid LOD.
-        for y in [0.4, 1.95] {
-            let (g, tr) = box_at(width, 0.055, 0.04, x, y, 0.22);
-            out.add(Mat::VCol, &g, tr, hex(rail));
-        }
-        if lod == Lod::Near {
-            for k in 1..=3 {
-                let bar_x = x - width / 2.0 + width * k as f32 / 4.0;
-                let (g, tr) = box_at(0.025, 1.94, 0.04, bar_x, 1.15, 0.22);
-                out.add(Mat::VCol, &g, tr, hex(rail));
-            }
-            let (g, tr) = box_at(0.055, 0.18, 0.07, x + side * width * 0.28, 1.05, 0.23);
-            out.add(Mat::Metal, &g, tr, hex(0xb6a381));
-            // Chipped paint at the kickplate; small solid patches, not a uniform noise layer.
-            for (offset, w, h) in [(-0.2, 0.16f32, 0.045), (0.13, 0.12, 0.08)] {
-                let (g, tr) = box_at(
-                    w.min(width * 0.3),
-                    h,
-                    0.008,
-                    x + width * offset,
-                    0.18,
-                    0.208,
-                );
-                out.add(Mat::VCol, &g, tr, hex(0x655546));
-            }
-        }
-    }
     if lod == Lod::Near {
         let (g, tr) = box_at(1.12, 0.018, 0.42, 0.0, 0.093, 0.51);
         out.add(
@@ -469,7 +432,7 @@ mod tests {
             })
             .expect("spawn has a home door");
         let d = home.door.unwrap();
-        let obstacles = Obstacles(world.clone());
+        let obstacles = Obstacles::new(world.clone());
         for side in [-0.12, 0.0, 0.12] {
             for step in -6..=6 {
                 let p = d.p + d.tangent() * side + d.n * step as f32 * 0.1;
