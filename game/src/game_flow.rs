@@ -1,14 +1,14 @@
 //! Game flow ported from the web build's opening, death, and 奪回萬華 ending.
 //!
 //! [`GameFlow`] is the only game-state enum. Title → prologue → playing, then
-//! death, reclaiming all fifteen 萬華 districts, or an evacuation. The data-driven
-//! catalog in [`crate::story`] is not auto-played; send [`RunStoryEvent`].
+//! death, reclaiming all fifteen 萬華 districts, or an evacuation. Screens and
+//! pointer input belong to [`crate::ui`]. This module only advances state and
+//! writes story messages. The one visual it still owns is the prologue phone
+//! banner, despawned on leaving [`GameFlow::Prologue`].
 
 use bevy::prelude::*;
 
-use crate::city::{Lcg, Obstacles};
-use crate::combat::{Enemy, EnemyKind, GameState, PlayerDied, ResetCombat, SpawnEnemy};
-use crate::player::Player;
+use crate::combat::{GameState, PlayerDied, ResetCombat};
 use crate::story::{
     ALL_CLEAR_ID, AM765_STATION, AlertKind, DistrictReclaimed, EvacComplete, EvacRoute, PRO_NEWS,
     RunStoryEvent, StoryAlert, StoryBroadcast, StoryEmit, WANHUA_DISTRICTS, event_by_id,
@@ -54,8 +54,7 @@ pub struct Campaign {
     prologue_t: f32,
     news_i: usize,
     raid: bool,
-    spawn_timer: f32,
-    rng: Lcg,
+    /// Phone / radio line. The prologue banner reads it; nothing draws it in play.
     notice: String,
     notice_t: f32,
     fired: Vec<String>,
@@ -68,8 +67,6 @@ impl Default for Campaign {
             prologue_t: 0.0,
             news_i: 0,
             raid: false,
-            spawn_timer: 1.5,
-            rng: Lcg(0xdefe_17a1),
             notice: String::new(),
             notice_t: 0.0,
             fired: Vec::new(),
@@ -77,18 +74,12 @@ impl Default for Campaign {
     }
 }
 
+/// Prologue phone card. [`DespawnOnExit`] removes it when play (or any other state) begins.
 #[derive(Component)]
-struct FlowRoot;
+struct PrologueBanner;
 
 #[derive(Component)]
-struct FlowBody;
-
-#[derive(Component)]
-enum FlowButton {
-    Start,
-    Skip,
-    Menu,
-}
+struct PrologueBannerText;
 
 pub struct GameFlowPlugin;
 
@@ -104,152 +95,18 @@ impl Plugin for GameFlowPlugin {
             .add_message::<StoryBroadcast>()
             .add_message::<DistrictReclaimed>()
             .add_message::<EvacComplete>()
-            .add_systems(Startup, spawn_overlay)
             .add_systems(
                 Update,
                 (
-                    read_keys,
-                    read_buttons,
                     apply_flow,
                     prologue,
-                    occupation_pressure,
                     story_events,
                     reclaim,
                     sync_over,
-                    refresh_overlay,
+                    sync_prologue_banner,
                 )
                     .chain(),
             );
-    }
-}
-
-fn font(size: f32, face: Handle<Font>) -> TextFont {
-    TextFont {
-        font: bevy::text::FontSource::Handle(face),
-        font_size: FontSize::Px(size),
-        ..default()
-    }
-}
-
-fn spawn_overlay(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let face = asset_server.load("fonts/NotoSansTC-Subset.otf");
-    commands
-        .spawn((
-            FlowRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                height: percent(100),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                flex_direction: FlexDirection::Column,
-                row_gap: px(12),
-                padding: UiRect::all(px(24)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.05, 0.06, 0.08, 0.82)),
-            GlobalZIndex(30),
-        ))
-        .with_children(|parent| {
-            parent.spawn((
-                FlowBody,
-                Text::new(""),
-                font(22.0, face.clone()),
-                TextColor(Color::WHITE),
-                TextLayout::justify(Justify::Center),
-            ));
-            parent
-                .spawn((
-                    bevy::ui_widgets::Button,
-                    FlowButton::Start,
-                    Node {
-                        padding: UiRect::axes(px(18), px(10)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.75, 0.55, 0.15)),
-                ))
-                .with_child((
-                    Text::new("新遊戲"),
-                    font(18.0, face.clone()),
-                    TextColor(Color::BLACK),
-                ));
-            parent
-                .spawn((
-                    bevy::ui_widgets::Button,
-                    FlowButton::Skip,
-                    Node {
-                        padding: UiRect::axes(px(18), px(10)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.25, 0.28, 0.32)),
-                ))
-                .with_child((
-                    Text::new("跳過開場 ⏭"),
-                    font(16.0, face.clone()),
-                    TextColor(Color::WHITE),
-                ));
-            parent
-                .spawn((
-                    bevy::ui_widgets::Button,
-                    FlowButton::Menu,
-                    Node {
-                        padding: UiRect::axes(px(18), px(10)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.45, 0.16, 0.14)),
-                ))
-                .with_child((
-                    Text::new("返回主選單"),
-                    font(16.0, face),
-                    TextColor(Color::WHITE),
-                ));
-        });
-}
-
-fn read_keys(
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    state: Res<State<GameFlow>>,
-    mut start: MessageWriter<StartGame>,
-    mut restart: MessageWriter<RestartGame>,
-    mut skip: MessageWriter<SkipPrologue>,
-) {
-    let enter = keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]);
-    let click = mouse.just_pressed(MouseButton::Left);
-    match state.get() {
-        GameFlow::Title if enter || click => {
-            start.write(StartGame);
-        }
-        GameFlow::Prologue if enter || click || keys.just_pressed(KeyCode::Escape) => {
-            skip.write(SkipPrologue);
-        }
-        GameFlow::GameOver(_)
-            if enter || click || keys.any_just_pressed([KeyCode::KeyR, KeyCode::Escape]) =>
-        {
-            restart.write(RestartGame);
-        }
-        _ => {}
-    }
-}
-
-fn read_buttons(
-    buttons: Query<&FlowButton, Added<bevy::ui::Pressed>>,
-    mut start: MessageWriter<StartGame>,
-    mut restart: MessageWriter<RestartGame>,
-    mut skip: MessageWriter<SkipPrologue>,
-) {
-    for button in &buttons {
-        match button {
-            FlowButton::Start => {
-                start.write(StartGame);
-            }
-            FlowButton::Skip => {
-                skip.write(SkipPrologue);
-            }
-            FlowButton::Menu => {
-                restart.write(RestartGame);
-            }
-        }
     }
 }
 
@@ -335,53 +192,11 @@ fn prologue(
         campaign.notice_t = 8.0;
     } else if campaign.raid && campaign.prologue_t > 16.0 {
         next.set(GameFlow::Playing);
-        campaign.notice =
-            "解放軍已攻入萬華，街上到處是哨兵與裝甲車。從現在起，活下去，一區一區奪回來。".into();
-        campaign.notice_t = 8.0;
+        // The phone card belongs to the prologue. Playing must not inherit it.
+        campaign.notice.clear();
+        campaign.notice_t = 0.0;
     }
     campaign.notice_t = (campaign.notice_t - time.delta_secs()).max(0.0);
-}
-
-/// Stand-in for `spawnSoldiers`: patrols keep arriving on the street ring.
-/// The win condition is districts, not clearing these.
-fn occupation_pressure(
-    time: Res<Time>,
-    state: Res<State<GameFlow>>,
-    obstacles: Res<Obstacles>,
-    mut game: ResMut<GameState>,
-    mut campaign: ResMut<Campaign>,
-    player: Single<&Transform, With<Player>>,
-    enemies: Query<(), With<Enemy>>,
-    mut spawns: MessageWriter<SpawnEnemy>,
-) {
-    if !matches!(state.get(), GameFlow::Playing) || game.over {
-        return;
-    }
-    game.survived += time.delta_secs();
-    campaign.spawn_timer -= time.delta_secs();
-    if campaign.spawn_timer > 0.0 || enemies.iter().count() >= 14 {
-        return;
-    }
-    campaign.spawn_timer = 1.6;
-    let origin = player.translation.xz();
-    for _ in 0..10 {
-        let angle = campaign.rng.range(0.0, std::f32::consts::TAU);
-        let radius = campaign.rng.range(26.0, 34.0);
-        let point = origin + Vec2::from_angle(angle) * radius;
-        if obstacles.blocked(point, 0.8) {
-            continue;
-        }
-        let night = campaign.rng.range(0.0, 1.0) > 0.75;
-        spawns.write(SpawnEnemy {
-            pos: Vec3::new(point.x, 0.9, point.y),
-            kind: if night {
-                EnemyKind::NightPatrol
-            } else {
-                EnemyKind::Patrol
-            },
-        });
-        break;
-    }
 }
 
 fn story_events(
@@ -467,66 +282,54 @@ fn sync_over(state: Res<State<GameFlow>>, mut game: ResMut<GameState>) {
     }
 }
 
-fn refresh_overlay(
+/// Draws the current prologue phone line. The entity is marked [`DespawnOnExit`]
+/// so leaving the prologue cannot leave the card on screen.
+fn sync_prologue_banner(
+    mut commands: Commands,
     state: Res<State<GameFlow>>,
-    game: Res<GameState>,
     campaign: Res<Campaign>,
-    mut root: Single<(&mut Visibility, &mut BackgroundColor), With<FlowRoot>>,
-    mut body: Single<&mut Text, With<FlowBody>>,
-    mut buttons: Query<(&FlowButton, &mut Visibility), Without<FlowRoot>>,
+    card: Option<Single<&mut Visibility, With<PrologueBanner>>>,
+    body: Option<Single<&mut Text, With<PrologueBannerText>>>,
 ) {
-    let (root_vis, background) = &mut *root;
-    let playing = matches!(state.get(), GameFlow::Playing);
-    **root_vis = Visibility::Inherited;
-    background.0 = if playing {
-        Color::srgba(0.0, 0.0, 0.0, 0.0)
-    } else {
-        Color::srgba(0.05, 0.06, 0.08, 0.82)
-    };
-    let day = (game.survived / 1440.0).floor() as i32 + 1;
-    body.0 = match state.get() {
-        GameFlow::Title => "捍衛台北\n萬華\n\n新遊戲開始序章。Enter 也可以。".into(),
-        GameFlow::Prologue => {
-            if campaign.notice_t > 0.0 {
-                format!("07:20　鬧鐘響了\n\n{}", campaign.notice)
-            } else {
-                "07:20　鬧鐘響了\n今天也要去西門町\n跟著路上的人流。Enter 跳過開場。".into()
-            }
-        }
-        GameFlow::Playing => {
-            if campaign.notice_t > 0.0 {
-                campaign.notice.clone()
-            } else {
-                String::new()
-            }
-        }
-        GameFlow::GameOver(Ending::Death) => format!(
-            "你陣亡了\n這就是你的結局。\n你在淪陷的台北撐過了 {day} 天，擊倒 {} 名佔領軍，奪回了 {} 個街區。\n\n重新開始（新的倖存者）",
-            game.kills,
-            campaign.reclaimed.len()
-        ),
-        GameFlow::GameOver(Ending::Reclaimed) => format!(
-            "奪回萬華\n結局：國軍與萬華的街坊並肩，把佔領軍趕出了艋舺。\n存活 {day} 天　奪回街區 {} / {}\n擊倒佔領軍 {}",
-            campaign.reclaimed.len(),
-            WANHUA_DISTRICTS.len(),
-            game.kills
-        ),
-        GameFlow::GameOver(Ending::EvacHelicopter) => {
-            "您已成功撤離至 福特號航空母艦（USS Gerald R. Ford, CVN-78）\n撤離路線：直升機・河濱撤離區".into()
-        }
-        GameFlow::GameOver(Ending::EvacBoat) => {
-            "您已成功撤離至 福特號航空母艦（USS Gerald R. Ford, CVN-78）\n撤離路線：小艇・淡水河出海".into()
-        }
-    };
-    if playing && campaign.notice_t <= 0.0 {
-        **root_vis = Visibility::Hidden;
+    if !matches!(state.get(), GameFlow::Prologue) {
+        return;
     }
-    for (button, mut visibility) in &mut buttons {
-        *visibility = match (state.get(), button) {
-            (GameFlow::Title, FlowButton::Start) => Visibility::Inherited,
-            (GameFlow::Prologue, FlowButton::Skip) => Visibility::Inherited,
-            (GameFlow::GameOver(_), FlowButton::Menu) => Visibility::Inherited,
-            _ => Visibility::Hidden,
-        };
+    let show = campaign.notice_t > 0.0 && !campaign.notice.is_empty();
+    let Some(mut card) = card else {
+        commands
+            .spawn((
+                PrologueBanner,
+                DespawnOnExit(GameFlow::Prologue),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(12),
+                    left: px(16),
+                    right: px(16),
+                    padding: UiRect::all(px(10)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.03, 0.06, 0.1, 0.92)),
+                GlobalZIndex(70),
+                Visibility::Hidden,
+            ))
+            .with_child((
+                PrologueBannerText,
+                Text::new(""),
+                TextFont {
+                    font_size: FontSize::Px(16.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.86, 0.93, 1.0)),
+                TextLayout::justify(Justify::Left),
+            ));
+        return;
+    };
+    **card = if show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    if show && let Some(mut body) = body {
+        body.0 = campaign.notice.clone();
     }
 }
