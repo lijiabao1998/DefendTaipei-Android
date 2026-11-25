@@ -13,6 +13,7 @@ pub mod game_flow;
 mod hud;
 pub mod i18n;
 pub mod input;
+mod perf;
 mod player;
 pub mod roles;
 mod story;
@@ -21,6 +22,9 @@ pub mod ui;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
 pub fn run() {
+    // Early marker for CI / logcat grepping (before window / GPU init).
+    println!("DTPERF boot starting");
+
     let window = Window {
         title: "保衛台北 Defend Taipei".into(),
         // Phones run fullscreen; desktop opens a resizable landscape window you can
@@ -69,6 +73,7 @@ pub fn run() {
             audio::AudioPlugin,
             hud::HudPlugin,
             ui::FlowUiPlugin,
+            perf::PerfPlugin,
         ))
         .run();
 }
