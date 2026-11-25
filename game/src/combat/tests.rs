@@ -267,3 +267,62 @@ fn squads_assign_roles_and_flank_callouts() {
         .collect();
     assert_eq!(texts, vec!["左翼包抄！", "右翼包抄！"]);
 }
+
+// ── PlayerInput (crate::input, PR #6) → combat ──────────────────────────
+
+#[test]
+fn player_input_fire_shoots_through_adapter() {
+    let mut app = test_app();
+    app.init_resource::<crate::input::PlayerInput>()
+        .add_systems(Update, (input::player_input_to_weapon, player_fire).chain());
+    let e = soldier_at(&mut app, 0, Vec2::new(10.0, 0.0));
+    // unaware soldier: auto-fire alone would not shoot
+    let mut shots = MessageCursor::<Gunshot>::default();
+    step(&mut app, 0.01);
+    assert!(drain(&app, &mut shots).is_empty());
+    // 打 held (touch button or mouse): PlayerInput.fire
+    app.world_mut()
+        .resource_mut::<crate::input::PlayerInput>()
+        .fire = true;
+    step(&mut app, 0.01);
+    assert_eq!(drain(&app, &mut shots).len(), 1);
+    assert!(app.world().get::<Enemy>(e).unwrap().0.hp < SOLDIER_HP);
+}
+
+#[test]
+fn player_input_crouch_sets_sneak() {
+    let mut app = test_app();
+    app.init_resource::<crate::input::PlayerInput>()
+        .add_systems(
+            Update,
+            (input::player_input_to_weapon, input::sync_stance).chain(),
+        );
+    app.world_mut()
+        .resource_mut::<crate::input::PlayerInput>()
+        .crouch = true;
+    step(&mut app, 0.01);
+    assert!(app.world().resource::<PlayerStance>().sneak);
+    app.world_mut()
+        .resource_mut::<crate::input::PlayerInput>()
+        .crouch = false;
+    step(&mut app, 0.01);
+    assert!(!app.world().resource::<PlayerStance>().sneak);
+}
+
+#[test]
+fn player_input_aim_is_screen_space() {
+    let p = crate::input::PlayerInput {
+        aim: Vec2::new(0.0, 3.0),
+        fire: true,
+        ..Default::default()
+    };
+    let w = weapon_from_player(&p);
+    assert!(w.fire && !w.crouch);
+    // screen-up maps to the same ground direction as moving screen-up
+    let up = crate::player::screen_to_ground(Vec2::Y).normalize();
+    assert!(w.aim.distance(up) < 1e-5, "{:?} vs {:?}", w.aim, up);
+    assert_eq!(
+        weapon_from_player(&crate::input::PlayerInput::default()).aim,
+        Vec2::ZERO
+    );
+}

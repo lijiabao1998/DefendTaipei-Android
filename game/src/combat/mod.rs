@@ -6,7 +6,7 @@
 //! - Messages read: [`SpawnEnemy`], [`ResetCombat`].
 //! - Messages written: [`EnemyDied`], [`PlayerDied`], [`PlayerHit`], [`Gunshot`], [`Callout`].
 //! - [`spawn_enemy`] / [`spawn_enemy_with_route`] for direct spawning.
-//! - [`WeaponInput`] (aim / fire / crouch; becomes `PlayerInput` after PR #6), [`AutoFire`], [`CombatEnv`] (night, rain), [`PlayerStance`].
+//! - Input: reads `crate::input::PlayerInput` (fire / crouch / aim) through the thin adapter [`WeaponInput`], [`AutoFire`], [`CombatEnv`] (night, rain), [`PlayerStance`].
 //! - [`CombatWorldRes`] / [`world::CombatWorld`]: line of sight, cover, buildings (map owner plugs in).
 //! - [`GameState`]: HP, bleeding, kills, … for the HUD.
 //! - Character visuals: [`standin`] (swap for the real rig).
@@ -24,7 +24,7 @@ pub mod standin;
 pub mod tuning;
 pub mod world;
 
-pub use input::{AutoFire, CombatInput, CombatInputSet, WeaponInput};
+pub use input::{AutoFire, CombatInput, CombatInputSet, WeaponInput, weapon_from_player};
 pub use soldier::{SolState, Soldier};
 pub use world::{CombatWorld, CombatWorldRes};
 
@@ -262,7 +262,9 @@ impl Plugin for CombatPlugin {
             .configure_sets(
                 Update,
                 (
-                    CombatInputSet.after(crate::player::MoveSet),
+                    CombatInputSet
+                        .after(crate::player::MoveSet)
+                        .after(crate::input::InputSet),
                     CombatSet.after(CombatInputSet),
                 ),
             )
@@ -284,8 +286,14 @@ impl Plugin for CombatPlugin {
                     .in_set(CombatSet),
             )
             .add_plugins(standin::StandinPlugin);
+        app.add_systems(Update, input::player_input_to_weapon.in_set(CombatInputSet));
         #[cfg(not(target_os = "android"))]
-        app.add_systems(Update, input::desktop_mouse_input.in_set(CombatInputSet));
+        app.add_systems(
+            Update,
+            input::desktop_mouse_aim
+                .after(input::player_input_to_weapon)
+                .in_set(CombatInputSet),
+        );
     }
 }
 
