@@ -130,9 +130,8 @@ impl Plugin for ChunkPlugin {
             .add_systems(
                 Update,
                 (
+                    debug::skip_menu_for_debug,
                     provider::stream_tiles,
-                    debug::suppress_game_camera,
-                    debug::fit_debug_camera,
                     debug::update_legend,
                     debug::capture_debug_shot,
                 )
