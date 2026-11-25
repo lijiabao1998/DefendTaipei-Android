@@ -59,7 +59,7 @@ wait_log() {
   local pattern="$1"
   for _ in {1..45}; do
     adb logcat -d >"$OUT_DIR/logcat-current.txt"
-    if rg -q "$pattern" "$OUT_DIR/logcat-current.txt"; then
+    if grep -Eq "$pattern" "$OUT_DIR/logcat-current.txt"; then
       return 0
     fi
     alive
@@ -180,9 +180,9 @@ capture 12-barter-portrait 390 844
 alive
 
 adb logcat -d >"$OUT_DIR/logcat.txt"
-if rg -n 'panicked at|FATAL EXCEPTION|Fatal signal|AM crashed:|Native crash|error\[B000' "$OUT_DIR/logcat.txt"; then
+if grep -En 'panicked at|FATAL EXCEPTION|Fatal signal|AM crashed:|Native crash|error\[B000' "$OUT_DIR/logcat.txt"; then
   echo "Runtime crash signature found" >&2
   exit 1
 fi
-rg 'DTUI|DTPERF' "$OUT_DIR/logcat.txt" >"$OUT_DIR/events.txt"
+grep -E 'DTUI|DTPERF' "$OUT_DIR/logcat.txt" >"$OUT_DIR/events.txt"
 printf '%s\n' 'Android gameplay smoke passed: touch panels, persistence and orientation.'

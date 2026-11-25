@@ -59,7 +59,7 @@ jobs:
           DEFEND_TAIPEI_PERF: "0"
           BEVY_ASSET_ROOT: ${{ github.workspace }}/game
         run: |
-          export VK_ICD_FILENAMES="$(rg --files /usr/share/vulkan/icd.d | rg '/lvp_icd[^/]*\.json$' | head -n 1)"
+          export VK_ICD_FILENAMES="$(python3 -c 'from pathlib import Path; paths=sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")); print(paths[0] if paths else "")')"
           test -n "$VK_ICD_FILENAMES"
           timeout 900s target/debug/defend-taipei --qa > native-qa.log 2>&1
           python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 11, report'
