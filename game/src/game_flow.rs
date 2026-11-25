@@ -187,8 +187,7 @@ fn prologue(
             kind: AlertKind::Alert,
         });
         campaign.notice =
-            "⚠️ 國家級警報\n飛彈空襲警報！共軍部隊於淡水河沿岸登陸，請立即就近避難，遠離窗戶。"
-                .into();
+            "國家級警報\n飛彈空襲警報！共軍部隊於淡水河沿岸登陸，請立即就近避難，遠離窗戶。".into();
         campaign.notice_t = 8.0;
     } else if campaign.raid && campaign.prologue_t > 16.0 {
         next.set(GameFlow::Playing);

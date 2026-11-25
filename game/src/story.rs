@@ -31,7 +31,7 @@ pub struct RadioScript {
     pub text: &'static str,
 }
 
-pub const AM765_STATION: &str = "📻 北廣 AM765（北都廣播電台）";
+pub const AM765_STATION: &str = "廣播 北廣 AM765（北都廣播電台）";
 
 pub const AM765: &[RadioScript] = &[
     RadioScript {
@@ -46,20 +46,20 @@ pub const AM765: &[RadioScript] = &[
 
 /// Prologue phone pushes: seconds into the commute, sender, text. From `prologue.ts`.
 pub const PRO_NEWS: &[(f32, &str, &str)] = &[
-    (3.0, "📱 早安推播", "今日台北：多雲 26°C，午後局部陣雨。"),
+    (3.0, "早安推播", "今日台北：多雲 26°C，午後局部陣雨。"),
     (
         12.0,
-        "📱 新聞快訊",
+        "新聞快訊",
         "國防部：共軍於台海周邊實施「聯合演習」，政府呼籲民眾照常上班上課。",
     ),
     (
         24.0,
-        "📱 交通",
+        "交通",
         "北都地下鐵正常營運；西門町周邊道路車多請改道。",
     ),
     (
         38.0,
-        "📱 新聞快訊",
+        "新聞快訊",
         "多處網站遭受大規模網路攻擊，部分銀行 App 暫停服務。",
     ),
 ];

@@ -116,11 +116,21 @@ pub struct DeathLayout {
 }
 
 pub fn death_layout(viewport: Vec2) -> DeathLayout {
+    overlay_layout(viewport, 24.0)
+}
+
+/// Same column as the ending screen, shifted down so the prologue phone card
+/// (drawn above this UI) does not cover the heading.
+pub fn prologue_layout(viewport: Vec2) -> DeathLayout {
+    overlay_layout(viewport, 88.0)
+}
+
+fn overlay_layout(viewport: Vec2, top_gap: f32) -> DeathLayout {
     let insets = safe_insets(viewport);
     let portrait = orientation(viewport) == Orientation::Portrait;
     let inner_w = (viewport.x - insets.left - insets.right).max(1.0);
     let x = insets.left;
-    let top = insets.top + 24.0;
+    let top = insets.top + top_gap;
     let heading = ScreenRect::new(x, top, inner_w, 48.0);
     let sub = ScreenRect::new(x, heading.max.y + 8.0, inner_w, 32.0);
     let body = ScreenRect::new(x, sub.max.y + 8.0, inner_w, 48.0);

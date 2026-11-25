@@ -12,7 +12,7 @@ use crate::i18n::{Language, UiFont, tr};
 use crate::input::ScreenRect;
 use crate::roles::{Gender, ROLES, Role, SelectedRole};
 
-use super::layout::{death_layout, title_layout};
+use super::layout::{death_layout, prologue_layout, title_layout};
 use super::pause::{MenuButton, PauseHeading, ResumeButton};
 use super::{ConsumedPresses, StateScoped};
 
@@ -150,8 +150,11 @@ pub(super) fn restyle(
 ) {
     let viewport = viewport_of(&windows);
     let title = matches!(flow.get(), GameFlow::Title).then(|| title_layout(viewport));
-    let overlay = matches!(flow.get(), GameFlow::Prologue | GameFlow::GameOver(_))
-        .then(|| death_layout(viewport));
+    let overlay = match flow.get() {
+        GameFlow::Prologue => Some(prologue_layout(viewport)),
+        GameFlow::GameOver(_) => Some(death_layout(viewport)),
+        _ => None,
+    };
     for (mut node, mut font, heading, intro, detail, gender, lang, role, start, restart, skip) in
         &mut nodes
     {
@@ -409,7 +412,7 @@ pub(super) fn prologue_clicks(
     if !matches!(flow.get(), GameFlow::Prologue) {
         return;
     }
-    let skip_rect = death_layout(viewport_of(&windows)).restart;
+    let skip_rect = prologue_layout(viewport_of(&windows)).restart;
     let on_button = consumed
         .points
         .iter()
@@ -458,7 +461,11 @@ fn spawn_overlay(
     ending: bool,
     state: GameFlow,
 ) {
-    let layout = death_layout(viewport);
+    let layout = if ending {
+        death_layout(viewport)
+    } else {
+        prologue_layout(viewport)
+    };
     let color = if ending {
         Color::srgb(0.86, 0.22, 0.18)
     } else {
