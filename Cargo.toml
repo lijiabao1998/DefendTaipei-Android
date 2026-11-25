@@ -9,7 +9,7 @@ rust-version = "1.97.1"
 publish = false
 
 [workspace.dependencies]
-bevy = "0.20.1"
+bevy = { version = "0.20.1", features = ["complex_script_segmentation"] }
 
 # Bevy is slow in debug builds; optimize dependencies but keep our own code fast to compile.
 [profile.dev]

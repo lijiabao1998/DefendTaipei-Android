@@ -31,7 +31,7 @@ pub struct RadioScript {
     pub text: &'static str,
 }
 
-pub const AM765_STATION: &str = "📻 北廣 AM765（北都廣播電台）";
+pub const AM765_STATION: &str = "廣播 北廣 AM765（北都廣播電台）";
 
 pub const AM765: &[RadioScript] = &[
     RadioScript {
@@ -46,20 +46,20 @@ pub const AM765: &[RadioScript] = &[
 
 /// Prologue phone pushes: seconds into the commute, sender, text. From `prologue.ts`.
 pub const PRO_NEWS: &[(f32, &str, &str)] = &[
-    (3.0, "📱 早安推播", "今日台北：多雲 26°C，午後局部陣雨。"),
+    (3.0, "早安推播", "今日台北：多雲 26°C，午後局部陣雨。"),
     (
         12.0,
-        "📱 新聞快訊",
+        "新聞快訊",
         "國防部：共軍於台海周邊實施「聯合演習」，政府呼籲民眾照常上班上課。",
     ),
     (
         24.0,
-        "📱 交通",
+        "交通",
         "北都地下鐵正常營運；西門町周邊道路車多請改道。",
     ),
     (
         38.0,
-        "📱 新聞快訊",
+        "新聞快訊",
         "多處網站遭受大規模網路攻擊，部分銀行 App 暫停服務。",
     ),
 ];
@@ -196,15 +196,8 @@ pub struct TimelineLine {
 /// `startPrologue` sets the clock to 07:20.
 pub const PROLOGUE_START_MIN: f32 = 7.0 * 60.0 + 20.0;
 
-/// Stand-in day length until the survival-mode hour picker exists.
-/// One in-game hour passes each real second, so the original minute table
-/// (07:20 through the day-7 evacuation) finishes in one sitting.
-pub const GAME_MINUTES_PER_REAL_SECOND: f32 = 60.0;
-
-/// Shown while the evacuation window is open. The riverside pad and the
-/// informant's boat are not on this map yet, so H and B stand in for walking
-/// into the zone and meeting the contact.
-pub const EVAC_STANDIN: &str = "暫代撤離區（河濱與橡皮艇尚未接入地圖）\nH　直升機・河濱撤離區\nB　小艇・聯絡人：「人都到了？上船，快。」";
+/// Original default: one real hour per in-game day; the chosen day length divides this rate.
+pub const GAME_MINUTES_PER_REAL_SECOND: f32 = 1440.0 / 3600.0;
 
 /// 第3天 19:00 斷電・第5天 07:00 斷水. Day 7 06:00 through day 8 18:00 is the evac window.
 pub const POWER_OFF: u32 = 2 * 1440 + 19 * 60;
@@ -212,123 +205,116 @@ pub const WATER_OFF: u32 = 4 * 1440 + 7 * 60;
 pub const EVAC_OPEN: u32 = 6 * 1440 + 6 * 60;
 pub const EVAC_CLOSE: u32 = 7 * 1440 + 18 * 60;
 
-/// In-game minute when each act-1 catalog event is due. The web build does not schedule these.
-pub const CATALOG_AT: &[(u32, &str)] = &[
-    (8 * 60, "act1_siren_test"),
-    (10 * 60, "act1_drill_news"),
-    (18 * 60, "act1_panic_buying"),
-];
-
 pub const TIMELINE: &[TimelineLine] = &[
     TimelineLine {
         minute: 8 * 60 + 5,
         id: "a",
-        who: "📱 國家級警報",
+        who: "國家級警報",
         text: "萬華、中正一帶實施戒嚴，民眾非必要請勿外出。夜間 20:00 後宵禁。",
         radio: false,
     },
     TimelineLine {
         minute: 12 * 60,
         id: "b",
-        who: "📻 北廣 AM765（北都廣播電台）",
+        who: "廣播 北廣 AM765（北都廣播電台）",
         text: "…佔領當局宣稱「水電維持正常供應」，但多處變電所已遭接管…",
         radio: true,
     },
     TimelineLine {
         minute: 1440 + 7 * 60,
         id: "r1",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "…這裡是自由之聲。國軍與志願者仍在新店溪南岸堅守，請萬華的鄉親保持冷靜、儲水、避開大馬路…",
         radio: true,
     },
     TimelineLine {
         minute: 1440 + 9 * 60,
         id: "c",
-        who: "💬 里長通訊群組",
+        who: "里長通訊群組",
         text: "各位鄰居：聽說電力公司員工被帶走了，大家趕快把水桶裝滿、手機充飽電！",
         radio: false,
     },
     TimelineLine {
         minute: 2 * 1440 + 14 * 60,
         id: "d",
-        who: "📱 電力公司簡訊",
+        who: "電力公司簡訊",
         text: "【停電通知】因「軍事管制」，萬華區即日起停止供電，復電時間未定。",
         radio: false,
     },
     TimelineLine {
         minute: POWER_OFF,
         id: "P",
-        who: "⚡ 斷電",
+        who: "斷電",
         text: "整條街一瞬間暗了下來。冰箱停了，裡面的食物撐不了多久。",
         radio: false,
     },
     TimelineLine {
         minute: 2 * 1440 + 21 * 60,
         id: "r2",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "…停電了？別慌。收音機用電池還能撐。宵禁時佔領軍會帶手電筒巡邏，看到光束就躲進騎樓…",
         radio: true,
     },
     TimelineLine {
         minute: 3 * 1440 + 10 * 60,
         id: "e",
-        who: "📻 收音機（電池）",
+        who: "廣播 收音機（電池）",
         text: "…自來水事業處人員已撤離，加壓站停擺，高樓層將最先停水…",
         radio: true,
     },
     TimelineLine {
         minute: 3 * 1440 + 13 * 60,
         id: "r3",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "…注意！今天 15:00 前後會有一批物資空投到萬華，紅色煙霧就是信號。佔領軍也會去搶，動作要快！",
         radio: true,
     },
     TimelineLine {
         minute: 3 * 1440 + 15 * 60,
         id: "AD",
-        who: "🪂 空投",
+        who: "空投",
         text: "遠處升起一道紅色煙霧——物資箱落地了！佔領軍的巡邏隊正往那邊移動。",
         radio: false,
     },
     TimelineLine {
         minute: WATER_OFF,
         id: "W",
-        who: "🚱 停水",
+        who: "停水",
         text: "水龍頭只流出幾滴黃水就停了。從現在起，每一瓶水都很珍貴。",
         radio: false,
     },
     TimelineLine {
         minute: 4 * 1440 + 20 * 60,
         id: "r4",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "…停水第一天。把水桶、臉盆放到頂樓或戶外，下雨就能接水。雨水記得煮過再喝…",
         radio: true,
     },
     TimelineLine {
         minute: 5 * 1440 + 20 * 60,
         id: "e0",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "…有消息說，盟軍正在河濱準備一條撤離通道。明早請守在收音機旁…",
         radio: true,
     },
     TimelineLine {
         minute: 6 * 1440 + 12 * 60,
         id: "r5",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "…西門町一帶已有三個街區被奪回！每一區的勝利，都讓他們更害怕…",
         radio: true,
     },
     TimelineLine {
         minute: EVAC_OPEN,
         id: "e1",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "撤離窗口開啟！西側河濱撤離區（綠色 H、紅色信號彈）將有直升機接應，時限至第 8 天 18:00。想留下來奪回家園的人，我們也與你同在。",
         radio: true,
     },
     TimelineLine {
         minute: EVAC_CLOSE,
         id: "e2",
-        who: "📻 地下電台「自由之聲」",
+        who: "廣播 地下電台「自由之聲」",
         text: "撤離窗口已關閉。留下來的人——台北靠你們奪回。",
         radio: true,
     },

@@ -1,98 +1,113 @@
-# DefendTaipei-Android
+# DefendTaipei-Android · 保衛台北
 
-Native Android (and desktop) version of [Defend Taipei](https://github.com/lijiabao1998/defendtaipei), a Taipei urban survival game, rewritten in **Rust + [Bevy](https://bevy.org) 0.20.1**.
+A native **Rust + Bevy 0.20.1** port of [Defend Taipei](https://github.com/lijiabao1998/defendtaipei). Desktop and Android run the same game crate. The source reference is Web **v24.42.0**, pinned to [`b9b0a27`](https://github.com/lijiabao1998/defendtaipei/tree/b9b0a2736642b37dd45925a4719dfef08b8f36b4).
 
-The original game is a TypeScript + Three.js web title (currently v24.42) set across Taipei's 12 districts. This repo is the native port: the same Rust code builds a desktop executable and an Android APK.
+## Current playable scope
 
-## Status: first playable slice (v0.1.0)
+The Wanhua core now connects exploration, combat, carried supplies, a shared shelter, daily survival and persistent saves. This is a playable native survival slice; it does **not** yet contain every district or every system from the Web game. The precise parity boundary and reference tests are documented in [SHELTER-PARITY.md](docs/SHELTER-PARITY.md).
 
-| Landscape | Portrait |
-| --- | --- |
-| ![Landscape](docs/screenshots/desktop-landscape.png) | ![Portrait](docs/screenshots/desktop-portrait.png) |
+- **World:** the original Wanhua road/building data, streamed building geometry and detail, interior collision, cover, fading roofs/walls, and an isometric camera that adapts to landscape and portrait.
+- **Survivors and combat:** six selectable roles, gender selection, procedural character rigs, 64 patrol routes, night patrols, line of sight, noise, investigation, cover and attacks. Equipped weapons use the real inventory and consume their matching ammunition.
+- **Supplies:** 126 item definitions and 18 loot tables from the pinned Web source. Search nearby cabinets and fallen soldiers; equip, eat, drink, treat wounds, unload ammunition and cook supported food. Loot and deaths persist across Continue.
+- **Shelter:** shared food/water/medicine deposits, five construction upgrades, survivor meals and illness, morale, arrivals, raids, rain collection, planters, once-per-day prayer, moral choices and a shelter-dependent ending paragraph. Daily settlement occurs when crossing 06:00.
+- **World survival:** hunger, thirst, fatigue, sleep, 1×/3×/20× time, rain, power/water cutoffs, food spoilage, a refillable home water fixture and the reachable Longshan barter stall. One game day takes one real hour at 1× speed.
+- **Flow and presentation:** title, prologue, pause, inventory, shelter, barter, journal and endings; Traditional Chinese/English controls and item labels; bundled CJK font and dictionary-based line breaking; environmental audio and alerts. Original story broadcasts remain in Chinese.
+- **Persistence:** one validated, atomically replaced save; autosave every 20 real seconds during play and on app background/close; manual Save and Save and return to menu. Continue restores the role, position, inventory, shelter, clock, weather and world loot history. Starting a new run or dying clears the previous run, matching the original game's permanent-death rule.
 
-What you can do right now:
+## Play on Android
 
-- Walk a placeholder **Wanhua street grid** (box buildings with shop signs, sidewalks, lane markings) with building collision.
-- **Isometric orthographic camera** matching the web build: offset (40, 56, 40), ~44 m of street visible in landscape, tighter framing in portrait, zoom 0.5×–2.2×. Buildings between the camera and the player turn see-through.
-- **Survive waves**: hostiles close in from outside the view; you auto-fire at the nearest one within 15 m. Contact drains HP; every 25 s the wave number goes up (more, faster, tougher hostiles). Game over shows your time, kills and wave; tap / press R to retry.
-- **Controls**
-  - Desktop: WASD or arrow keys to move, mouse wheel to zoom.
-  - Phone: touch the left part of the screen and drag for a floating virtual joystick; pinch with two fingers to zoom.
-- **Orientation**: landscape is the main layout; portrait works too. The Android activity follows the sensor, and the camera and HUD re-fit on every resize / rotation (resize the desktop window to test).
-- **Perf overlay** (top-right): FPS, avg / p99 / max frame time, entity count. Off by default in release builds; on in debug. Toggle with **F3** (desktop) or a **three-finger tap** (Android). Force with `DEFEND_TAIPEI_PERF=1`. A `DTPERF …` line is always printed to stdout / logcat every ~5 s for CI.
+Open a successful run of [GitHub Actions CI](https://github.com/lijiabao1998/DefendTaipei-Android/actions/workflows/ci.yml), then download the **DefendTaipei-arm64-debug-apk** artifact. Unzip and install `DefendTaipei-arm64-debug.apk`.
 
-Everything is placeholder geometry: no models, textures, audio, menus or story yet.
+The phone build requires **Android 12 / API 31 or newer**, **arm64-v8a**, and **Vulkan**. It is a debug-signed testing APK. The x86_64 artifact is for the CI emulator. Physical-phone GPU compatibility and performance still need a device playtest.
 
-## Get the APK (no build needed)
+### First run
 
-Every push and pull request runs [GitHub Actions](../../actions/workflows/ci.yml). Open the latest successful run → **Artifacts** → `DefendTaipei-arm64-debug-apk`, download the zip, unzip it, and install `DefendTaipei-arm64-debug.apk` on the phone (allow "install unknown apps" for your browser / file manager).
+1. Choose a role and start a new game. The prologue can be skipped.
+2. You begin at your shelter. Open **避難所 / Shelter** to deposit provisions or inspect construction costs. Grey buttons indicate an unmet cost, range or daily-use requirement.
+3. Use **背包 / Bag** to equip a weapon or consume supplies. Guns require matching ammunition. Brown crates mark searchable containers; the blue home fixture supplies one bottle of water, then waits more than 90 game minutes before another refill. It stops working after the water cutoff.
+4. Explore and return supplies to the shelter before the next morning. The **日誌 / Journal** records daily events. Sleep is available indoors when tired and safe; nearby danger cancels accelerated time.
+5. Use **儲存 / Save**, or **暫停 → 儲存並返回主選單 / Pause → Save and return to menu**. The title's Continue button becomes available after a valid save exists.
 
-Requirements: a 64-bit ARM phone (arm64-v8a) with **Android 12 (API 31) or newer** and Vulkan support. The APK is debug-signed (fine for testing, not for the Play Store).
+### Controls
 
-## Project layout
+| Action | Desktop | Phone |
+| --- | --- | --- |
+| Move | WASD / arrow keys; Shift to run | Left movement pad; full deflection runs |
+| Attack | Hold left mouse button away from UI | Attack pad |
+| Crouch / retreat | Click the corresponding touch control | Crouch pad / retreat gesture |
+| Interact / collect | E | Bottom **互動 / Interact** button |
+| Inventory / shelter / barter | I / C / T | Bottom toolbar or panel tabs |
+| Sleep / wake | Z, or inventory action | Inventory action |
+| Time scale | 1 / 2 / 3 for 1× / 3× / 20× | Inventory actions |
+| Pause / close panel | Esc | Pause / Close buttons |
+| Camera zoom | Mouse wheel | Two-finger pinch |
+| Performance overlay | F3 | Three-finger tap |
 
-```
-Cargo.toml            workspace (Bevy 0.20.1, shared profiles and lints)
-game/                 crate `defend_taipei`: all gameplay + desktop binary `defend-taipei`
-  src/lib.rs          app setup (window, plugins) — `defend_taipei::run()`
-  src/city.rs         Wanhua placeholder grid, building footprints
-  src/player.rs       player, keyboard input, collision
-  src/camera.rs       isometric follow camera, zoom, resize/orientation fit, occluder fading
-  src/touch.rs        floating virtual joystick + pinch zoom
-  src/combat.rs       waves, hostiles, auto-fire, HP, restart
-  src/hud.rs          HP bar, stats, game-over banner
-  src/perf.rs         FPS overlay + DTPERF log lines (CI smoke)
-mobile/               crate `defend_taipei_android`: cdylib with `#[bevy_main]` (GameActivity entry)
-android/              Gradle project (from Bevy's examples/mobile/android_example), GameActivity
-.github/workflows/    CI: desktop fmt/clippy/build + arm64 APK artifact
-```
+UI presses remain captured until release, so holding a menu button cannot also fire or move the character. Backgrounding the app pauses simulation. Both orientations are supported; long panels paginate at short screen heights.
 
-## Build and run on desktop
+## Build on desktop
 
-Needs Rust **1.97.1 or newer** (`rustup update stable`).
+Install Rust **1.97.1 or newer**. Linux also needs audio/input/window development libraries:
 
 ```sh
-# Linux only: system libraries for audio, input and windowing
 sudo apt-get install libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config
-
-cargo run -p defend_taipei            # debug (dependencies are optimized, first build takes a while)
-cargo run -p defend_taipei --release  # smoother
+cargo run -p defend_taipei
+# Optimized game build:
+cargo run -p defend_taipei --release
 ```
 
-Windows and macOS need no extra system packages.
+Windows and macOS use the same game crate. Save files use the platform application-data directory; Android uses the app's private internal files directory. `DEFEND_TAIPEI_SAVE_DIR` selects an isolated desktop save directory for development or QA.
 
-## Build the Android APK locally
+## Build the Android APK
 
-Follows Bevy 0.20.1's official Android path ([docs](https://github.com/bevyengine/bevy/blob/v0.20.1/examples/README.md#android)): `cargo-ndk` builds the Rust library, Gradle packages it with GameActivity. (`cargo-apk` is deprecated and does not support GameActivity.)
-
-Prerequisites: Android SDK (platform 34, build-tools), Android NDK (tested with r27), JDK 17+.
+Prerequisites: Android SDK platform 34, Android NDK, JDK 17, `cargo-ndk`, and the Rust Android target. CI selects the hosted runner's installed NDK.
 
 ```sh
 rustup target add aarch64-linux-android
 cargo install cargo-ndk
-export ANDROID_HOME=$HOME/Android/Sdk
-export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/<version>
-
-# 1. Rust → android/app/src/main/jniLibs/arm64-v8a/libdefend_taipei_android.so
-cargo ndk -t arm64-v8a -P 31 -o android/app/src/main/jniLibs build --release -p defend_taipei_android
-
-# 2. Package and (optionally) install
+# Set ANDROID_HOME and ANDROID_NDK_HOME to your SDK and NDK installations.
+cargo ndk -t arm64-v8a -P 31 -o android/app/src/main/jniLibs \
+  build --release -p defend_taipei_android
 cd android
-./gradlew assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew installDebug         # with a phone connected over adb
+./gradlew assembleDebug
+# android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Use `--release` for the Rust step: a debug `.so` with symbols is over 2 GB.
+The shared Rust library is packaged with Android GameActivity. The activity follows the orientation sensor. MSAA and shadow maps are disabled on Android. No external-storage permission is needed for saves.
 
-## Tech notes
+## Verification
 
-- **Engine:** Bevy 0.20.1 (ECS). Rendering via wgpu on **Vulkan** on Android.
-- **Android:** GameActivity (`androidx.games:games-activity` 4.4.0, matching Bevy's `android-activity`), `minSdk 31`, `arm64-v8a` only, `screenOrientation="sensor"`. MSAA and shadow maps are disabled on Android (known Bevy crashes on some GPUs, bevyengine/bevy#8229 and #8214).
-- **Desktop:** Windows, Linux and macOS from the same code.
+```sh
+cargo fmt --all -- --check
+CARGO_PROFILE_DEV_DEBUG=0 cargo clippy --workspace --all-targets -- -D warnings
+CARGO_PROFILE_DEV_DEBUG=0 cargo test -p defend_taipei --lib
+```
 
-## Known gaps / next steps
+CI also builds both APK ABIs and runs two end-to-end checks:
 
-- Not yet tested on a physical phone; first device run may surface GPU/driver issues.
-- No title screen, pause on app background, audio, or Chinese text (Bevy's default font has no CJK glyphs; needs a bundled font).
-- Placeholder map, not the real Wanhua street layout; no AI teammates, weapons choice, or districts from the web build.
-- APK is ~45 MB (debug-signed); Bevy feature trimming and a signed release build come later.
+- **Native GPU QA:** `cargo run -p defend_taipei -- --qa` renders eleven actual Bevy screenshots covering the title, prologue, gameplay, panels, small landscape, portrait and Save → Menu → Continue. It uses an offscreen GPU texture, does not require a display server, and fails if the restored run differs. Outputs are in the **native-qa** artifact. On Linux, install `mesa-vulkan-drivers` for software Vulkan when no GPU is available. `DEFEND_TAIPEI_QA_OUT` selects the output directory. This uses a fixed simulation timestep and is **not a performance benchmark**.
+- **Android gameplay smoke:** the **emulator-smoke** artifact contains logcat, screenshots and actual private save JSON from touch-driven deposit, prayer, disabled construction, save, menu, continue and rotation checks. `scripts/emulator-gameplay-smoke.sh` clears the disposable emulator's app data and refuses to run on a physical phone.
+
+To launch a directly built desktop binary, set `BEVY_ASSET_ROOT` to the repository's `game` directory. The usual `cargo run` path supplies the crate's asset root automatically.
+
+## Code map
+
+| Path | Responsibility |
+| --- | --- |
+| `game/src/map/`, `game/src/chunk/` | Wanhua data, geometry, collision, streaming and mesh utilities |
+| `game/src/combat/`, `game/src/human/`, `game/src/input/` | Combat, character rigs and input |
+| `game/src/inventory.rs`, `game/src/inventory/catalog.rs` | Item behavior and generated source catalog |
+| `game/src/survival.rs` | Shelter rules and daily settlement |
+| `game/src/worldplay.rs` | World interactions, loot, vitals, weather and utility integration |
+| `game/src/game_flow.rs`, `game/src/story.rs`, `game/src/ui/` | Campaign flow, story data and responsive screens |
+| `game/src/save.rs`, `game/src/qa.rs` | Save lifecycle and native visual QA |
+| `game/tests/fixtures/`, `tools/generate_*.cjs` | Original TypeScript reference fixtures and generators |
+| `mobile/`, `android/`, `.github/workflows/ci.yml` | Android entry point, APK packaging and CI |
+
+## Remaining Web-port work
+
+The current playable bounds cover the Wanhua core. Other Taipei districts, the outside-core Dongyuan trade location, vehicles and armor combat, full teammate/rescue systems, metro/inter-floor traversal, and the boat-informant path are not implemented. District-reclamation events have a handler but no complete native capture loop. The active extraction route is the timed helicopter site; instant keyboard evacuation shortcuts have been removed.
+
+Container/furniture and patrol placement use a native deterministic stream, not the Web renderer's interleaved random calls. Nearby containers are collected as a group rather than through the Web's per-item pickup panel. Some weapon silhouettes and environmental visuals are simplified. These boundaries are intentional disclosures, not a claim of full visual or gameplay parity.
+
+Map data attribution: © OpenStreetMap contributors, ODbL. The bundled Noto font license is included under `assets/fonts/`.

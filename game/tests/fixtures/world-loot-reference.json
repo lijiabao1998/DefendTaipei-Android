@@ -1,0 +1,6280 @@
+{
+  "source": "lijiabao1998/defendtaipei@b9b0a2736642b37dd45925a4719dfef08b8f36b4",
+  "file": "src/core/main.ts",
+  "note": "Executed unmodified rollLoot and spoilRolled with original item tables; includes the exact spoilage boundary and unknown-table fallback. Native container placement is a separate stream.",
+  "cases": [
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "sport",
+          2
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "snack",
+          1
+        ],
+        [
+          "rice",
+          3
+        ],
+        [
+          "noodle",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cracker",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "store",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "rice",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bandage",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "water",
+          1
+        ],
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "medkit",
+          1
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "water",
+          1
+        ],
+        [
+          "bandage",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "noodle",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "vtx",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ],
+        [
+          "seeds",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "lipo",
+          1
+        ],
+        [
+          "umbrella",
+          1
+        ],
+        [
+          "cloth",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "frame",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "home",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "huntsg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "bandage",
+          1
+        ],
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "a9",
+          7
+        ],
+        [
+          "tmap",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "bandage",
+          1
+        ],
+        [
+          "pistol",
+          1
+        ],
+        [
+          "tmap",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "police",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "a9",
+          13
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "a9",
+          8
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "a762n",
+          7
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "a12",
+          1
+        ],
+        [
+          "a9",
+          8
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "t65k2",
+          1
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ],
+        [
+          "a556n",
+          30
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "a12",
+          2
+        ],
+        [
+          "t75p",
+          2
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "a12",
+          6
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "armory",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "a9",
+          3
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "tea",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "tea",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "coffee",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "tea",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "tea",
+          3
+        ],
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "water",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "coffee",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "fridge",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "cupnoodle",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "snack",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "peanutcan",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "cupnoodle",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "snack",
+          3
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "cupnoodle",
+          4
+        ],
+        [
+          "noodle",
+          4
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cracker",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "shelf",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "cupnoodle",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "egg",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "oden",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "bento",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "rice",
+          1
+        ],
+        [
+          "egg",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "oden",
+          2
+        ],
+        [
+          "egg",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "rice",
+          1
+        ],
+        [
+          "egg",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "rice",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "counter",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "egg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bandage",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "pill",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "tissue",
+          1
+        ],
+        [
+          "bandage",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "pill",
+          3
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "medkit",
+          1
+        ],
+        [
+          "bandage",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "tissue",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "medshelf",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "tissue",
+          2
+        ],
+        [
+          "snack",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "snack",
+          3
+        ],
+        [
+          "noodle",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "mianxian",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "grocery",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "snack",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "betel",
+          5
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "betel",
+          4
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "sport",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "betel",
+          4
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "betel",
+          6
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "betel",
+          12
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "coffee",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "betelcase",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "betel",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "soymilk",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "soymilk",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          5
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "mantou",
+          1
+        ],
+        [
+          "soymilk",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "soymilk",
+          2
+        ],
+        [
+          "danbing",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mantou",
+          1
+        ],
+        [
+          "danbing",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "mantou",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "breakfast",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "danbing",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "chicken",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "sausage",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "milktea",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "milktea",
+          1
+        ],
+        [
+          "chicken",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "sausage",
+          2
+        ],
+        [
+          "chicken",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "milktea",
+          1
+        ],
+        [
+          "chicken",
+          4
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "milktea",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "stall",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "chicken",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "knife",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cstove",
+          1
+        ],
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "soymilk",
+          1
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "noodle",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cstove",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "kitchen",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "plank",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "hammer",
+          1
+        ],
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "plank",
+          2
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "hammer",
+          1
+        ],
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "water",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "tapw",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "patch",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "bucket",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "cstove",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "knife",
+          1
+        ],
+        [
+          "patch",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "radio",
+          1
+        ],
+        [
+          "battery",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "knife",
+          1
+        ],
+        [
+          "hose",
+          1
+        ],
+        [
+          "battery",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "hardware",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "hose",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "pineapple",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "can",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "canfruit",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "canfruit",
+          1
+        ],
+        [
+          "pineapple",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "can",
+          1
+        ],
+        [
+          "pineapple",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "canfruit",
+          1
+        ],
+        [
+          "pineapple",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "canfruit",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "altar",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "pineapple",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 1,
+      "items": [
+        [
+          "noodle",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "vtx",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ],
+        [
+          "seeds",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "lipo",
+          1
+        ],
+        [
+          "umbrella",
+          1
+        ],
+        [
+          "cloth",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "frame",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "unknown",
+      "minute": 440,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "huntsg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "sport",
+          2
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "snack",
+          1
+        ],
+        [
+          "rice",
+          3
+        ],
+        [
+          "noodle",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cracker",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "store",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "rice",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bandage",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "water",
+          1
+        ],
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "medkit",
+          1
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "water",
+          1
+        ],
+        [
+          "bandage",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "noodle",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "vtx",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ],
+        [
+          "seeds",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "lipo",
+          1
+        ],
+        [
+          "umbrella",
+          1
+        ],
+        [
+          "cloth",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "frame",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "home",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "huntsg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "bandage",
+          1
+        ],
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "a9",
+          7
+        ],
+        [
+          "tmap",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "bandage",
+          1
+        ],
+        [
+          "pistol",
+          1
+        ],
+        [
+          "tmap",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "police",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "a9",
+          13
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "a9",
+          8
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "a762n",
+          7
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "a12",
+          1
+        ],
+        [
+          "a9",
+          8
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "t65k2",
+          1
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ],
+        [
+          "a556n",
+          30
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "a12",
+          2
+        ],
+        [
+          "t75p",
+          2
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "a12",
+          6
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "armory",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "a9",
+          3
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "tea",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "tea",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "coffee",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "tea",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "tea",
+          3
+        ],
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "water",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "coffee",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "fridge",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "cupnoodle",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "snack",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "peanutcan",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "cupnoodle",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "snack",
+          3
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "cupnoodle",
+          4
+        ],
+        [
+          "noodle",
+          4
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cracker",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "shelf",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "cupnoodle",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "egg",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "oden",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "bento",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "rice",
+          1
+        ],
+        [
+          "egg",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "oden",
+          2
+        ],
+        [
+          "egg",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "rice",
+          1
+        ],
+        [
+          "egg",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "rice",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "counter",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "egg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bandage",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "pill",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "tissue",
+          1
+        ],
+        [
+          "bandage",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "pill",
+          3
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "medkit",
+          1
+        ],
+        [
+          "bandage",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "tissue",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "tissue",
+          2
+        ],
+        [
+          "snack",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "snack",
+          3
+        ],
+        [
+          "noodle",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "mianxian",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "grocery",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "snack",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "betel",
+          5
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "betel",
+          4
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "sport",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "betel",
+          4
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "betel",
+          6
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "betel",
+          12
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "coffee",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "betel",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "soymilk",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "soymilk",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          5
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "mantou",
+          1
+        ],
+        [
+          "soymilk",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "soymilk",
+          2
+        ],
+        [
+          "danbing",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mantou",
+          1
+        ],
+        [
+          "danbing",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "mantou",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "danbing",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "chicken",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "sausage",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "milktea",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "milktea",
+          1
+        ],
+        [
+          "chicken",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "sausage",
+          2
+        ],
+        [
+          "chicken",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "milktea",
+          1
+        ],
+        [
+          "chicken",
+          4
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "milktea",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "stall",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "chicken",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "knife",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cstove",
+          1
+        ],
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "soymilk",
+          1
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "noodle",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cstove",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "plank",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "hammer",
+          1
+        ],
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "plank",
+          2
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "hammer",
+          1
+        ],
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "water",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "tapw",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "patch",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "bucket",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "cstove",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "knife",
+          1
+        ],
+        [
+          "patch",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "radio",
+          1
+        ],
+        [
+          "battery",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "knife",
+          1
+        ],
+        [
+          "hose",
+          1
+        ],
+        [
+          "battery",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "hardware",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "hose",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "pineapple",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "can",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "canfruit",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "canfruit",
+          1
+        ],
+        [
+          "pineapple",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "can",
+          1
+        ],
+        [
+          "pineapple",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "canfruit",
+          1
+        ],
+        [
+          "pineapple",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "canfruit",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "altar",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "pineapple",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 1,
+      "items": [
+        [
+          "noodle",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "vtx",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ],
+        [
+          "seeds",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "lipo",
+          1
+        ],
+        [
+          "umbrella",
+          1
+        ],
+        [
+          "cloth",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "frame",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "unknown",
+      "minute": 5459,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "huntsg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "sport",
+          2
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "snack",
+          1
+        ],
+        [
+          "noodle",
+          3
+        ],
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 601448360
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cracker",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "store",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "rotten",
+          1
+        ]
+      ],
+      "final_seed": 2709482403
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bandage",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "water",
+          1
+        ],
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "medkit",
+          1
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "water",
+          1
+        ],
+        [
+          "bandage",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "pharmacy",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "noodle",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "vtx",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ],
+        [
+          "seeds",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "lipo",
+          1
+        ],
+        [
+          "umbrella",
+          1
+        ],
+        [
+          "cloth",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "frame",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "home",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "huntsg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "bandage",
+          1
+        ],
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "a9",
+          7
+        ],
+        [
+          "tmap",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "bandage",
+          1
+        ],
+        [
+          "pistol",
+          1
+        ],
+        [
+          "tmap",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "police",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "pistol",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "a9",
+          13
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "a9",
+          8
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "a762n",
+          7
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "a12",
+          1
+        ],
+        [
+          "a9",
+          8
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "t65k2",
+          1
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ],
+        [
+          "a556n",
+          30
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "a12",
+          2
+        ],
+        [
+          "t75p",
+          2
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "a12",
+          6
+        ],
+        [
+          "t75p",
+          1
+        ],
+        [
+          "a9",
+          12
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "armory",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "a9",
+          3
+        ],
+        [
+          "t75p",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "tea",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "tea",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "coffee",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "tea",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "tea",
+          3
+        ],
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "water",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "coffee",
+          3
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "fridge",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "cupnoodle",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "snack",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "peanutcan",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "cupnoodle",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "snack",
+          3
+        ],
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "cracker",
+          1
+        ],
+        [
+          "cupnoodle",
+          4
+        ],
+        [
+          "noodle",
+          4
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cracker",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "shelf",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "cupnoodle",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 2868466484
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 3027450565
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 3184037537
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [],
+      "final_seed": 3926884741
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 4293268301
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "rotten",
+          3
+        ]
+      ],
+      "final_seed": 33406695
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 324721188
+    },
+    {
+      "kind": "counter",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "rotten",
+          1
+        ]
+      ],
+      "final_seed": 2709482403
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bandage",
+          4
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "pill",
+          3
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "tissue",
+          1
+        ],
+        [
+          "bandage",
+          3
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "pill",
+          3
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "medkit",
+          1
+        ],
+        [
+          "bandage",
+          8
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "tissue",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "medshelf",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "tissue",
+          2
+        ],
+        [
+          "snack",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "snack",
+          3
+        ],
+        [
+          "noodle",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "mianxian",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "grocery",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "snack",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "betel",
+          5
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "betel",
+          4
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "sport",
+          2
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "betel",
+          4
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "betel",
+          6
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "coffee",
+          1
+        ],
+        [
+          "betel",
+          12
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "coffee",
+          2
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "betelcase",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "betel",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 2868466484
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 3027450565
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          5
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [],
+      "final_seed": 3926884741
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 4293268301
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "rotten",
+          3
+        ]
+      ],
+      "final_seed": 33406695
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 324721188
+    },
+    {
+      "kind": "breakfast",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "rotten",
+          1
+        ]
+      ],
+      "final_seed": 2709482403
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 2868466484
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 3027450565
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 3184037537
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [],
+      "final_seed": 3926884741
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 4293268301
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "rotten",
+          3
+        ]
+      ],
+      "final_seed": 33406695
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "rotten",
+          2
+        ]
+      ],
+      "final_seed": 324721188
+    },
+    {
+      "kind": "stall",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "rotten",
+          1
+        ]
+      ],
+      "final_seed": 2709482403
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "knife",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "butane",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "cstove",
+          1
+        ],
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "noodle",
+          1
+        ],
+        [
+          "rotten",
+          1
+        ]
+      ],
+      "final_seed": 1910858278
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "mianxian",
+          1
+        ],
+        [
+          "noodle",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "cstove",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "kitchen",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "noodle",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "plank",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "hammer",
+          1
+        ],
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "plank",
+          2
+        ],
+        [
+          "bandage",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "hammer",
+          1
+        ],
+        [
+          "bandage",
+          2
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "tissue",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "wardrobe",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "water",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "tapw",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "water",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "patch",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "bucket",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "cstove",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "knife",
+          1
+        ],
+        [
+          "patch",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "radio",
+          1
+        ],
+        [
+          "battery",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "knife",
+          1
+        ],
+        [
+          "hose",
+          1
+        ],
+        [
+          "battery",
+          3
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "bat",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "hardware",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "hose",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "pineapple",
+          3
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "can",
+          1
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "canfruit",
+          1
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "canfruit",
+          1
+        ],
+        [
+          "pineapple",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "can",
+          1
+        ],
+        [
+          "pineapple",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "canfruit",
+          1
+        ],
+        [
+          "pineapple",
+          6
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "canfruit",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "altar",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "pineapple",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 0,
+      "items": [
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 3519870697
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 1,
+      "items": [
+        [
+          "noodle",
+          2
+        ]
+      ],
+      "final_seed": 2165703038
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 29,
+      "items": [
+        [
+          "rawegg",
+          3
+        ]
+      ],
+      "final_seed": 2903714250
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 305419896,
+      "items": [
+        [
+          "vtx",
+          1
+        ],
+        [
+          "can",
+          2
+        ]
+      ],
+      "final_seed": 2229145243
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 20261024,
+      "items": [
+        [
+          "water",
+          2
+        ],
+        [
+          "seeds",
+          1
+        ]
+      ],
+      "final_seed": 978822947
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 2147483648,
+      "items": [
+        [
+          "lipo",
+          1
+        ],
+        [
+          "umbrella",
+          1
+        ],
+        [
+          "cloth",
+          1
+        ]
+      ],
+      "final_seed": 3623775277
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 4294967280,
+      "items": [
+        [
+          "frame",
+          1
+        ]
+      ],
+      "final_seed": 3711716761
+    },
+    {
+      "kind": "unknown",
+      "minute": 5460,
+      "initial_seed": 4294967295,
+      "items": [
+        [
+          "huntsg",
+          1
+        ]
+      ],
+      "final_seed": 579071060
+    }
+  ]
+}

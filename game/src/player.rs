@@ -1,12 +1,12 @@
-//! Player capsule: keyboard + virtual-joystick movement, building collision.
+//! Player (a 白面人 rig, see `human`): keyboard + virtual-joystick movement, building collision.
 
 use bevy::prelude::*;
 
-use crate::city::{MAP_HALF, Obstacles};
+use crate::city::Obstacles;
 use crate::combat::GameState;
 
 pub const PLAYER_RADIUS: f32 = 0.45;
-const SPEED: f32 = 7.0;
+const SPEED: f32 = 3.4;
 
 #[derive(Component)]
 pub struct Player;
@@ -47,6 +47,7 @@ pub struct PlayerPlugin;
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MoveInput>()
+            .configure_sets(Update, MoveSet.after(crate::game_flow::FlowSet))
             .add_systems(Startup, spawn_player)
             .add_systems(
                 Update,
@@ -55,62 +56,32 @@ impl Plugin for PlayerPlugin {
     }
 }
 
+/// On the street in front of the door of the original's start home.
 pub fn spawn_point() -> Vec3 {
-    // Middle of the central street crossing
-    let starts = crate::city::block_starts();
-    let mid = starts.len() / 2;
-    let c = starts[mid] - 3.5;
-    Vec3::new(c, 0.0, c)
+    let p = crate::map::world().spawn;
+    Vec3::new(p.x, 0.0, p.y)
 }
 
-fn spawn_player(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+fn spawn_player(mut commands: Commands) {
+    commands.spawn((
+        Player,
+        crate::human::Humanoid::player(),
+        Transform::from_translation(spawn_point()),
+        Visibility::default(),
+    ));
+}
+
+fn keyboard_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    modal: Option<Res<crate::ui::UiModal>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
+    mut input: ResMut<MoveInput>,
 ) {
-    let body = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.15, 0.55, 0.95), // bright jacket so the player reads at a glance
-        perceptual_roughness: 0.8,
-        ..default()
-    });
-    let accent = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.95, 0.80, 0.25),
-        emissive: LinearRgba::rgb(0.4, 0.3, 0.05),
-        ..default()
-    });
-    commands
-        .spawn((
-            Player,
-            Transform::from_translation(spawn_point()),
-            Visibility::default(),
-        ))
-        .with_children(|p| {
-            p.spawn((
-                Mesh3d(meshes.add(Capsule3d::new(PLAYER_RADIUS, 0.9))),
-                MeshMaterial3d(body),
-                Transform::from_xyz(0.0, 0.9, 0.0),
-            ));
-            // Unlit ground ring: keeps the player findable behind faded buildings
-            p.spawn((
-                Mesh3d(meshes.add(Torus::new(0.62, 0.78))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(1.0, 0.85, 0.2),
-                    unlit: true,
-                    ..default()
-                })),
-                Transform::from_xyz(0.0, 0.06, 0.0).with_scale(Vec3::new(1.0, 0.2, 1.0)),
-                bevy::light::NotShadowCaster,
-            ));
-            // "Rifle" stub shows the facing direction (local -Z is forward)
-            p.spawn((
-                Mesh3d(meshes.add(Cuboid::new(0.14, 0.14, 0.8))),
-                MeshMaterial3d(accent),
-                Transform::from_xyz(0.25, 1.05, -0.45),
-            ));
-        });
-}
-
-fn keyboard_input(keys: Res<ButtonInput<KeyCode>>, mut input: ResMut<MoveInput>) {
+    if modal.is_some_and(|m| m.blocks_input()) || pause.is_some_and(|p| p.0) {
+        input.keys = Vec2::ZERO;
+        input.stick = Vec2::ZERO;
+        return;
+    }
     let mut v = Vec2::ZERO;
     if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
         v.y += 1.0;
@@ -127,36 +98,9 @@ fn keyboard_input(keys: Res<ButtonInput<KeyCode>>, mut input: ResMut<MoveInput>)
     input.keys = v.normalize_or_zero();
 }
 
-/// Pushes a circle out of every building footprint and keeps it on the map.
-pub fn resolve_collisions(mut p: Vec2, radius: f32, obstacles: &Obstacles) -> Vec2 {
-    for o in &obstacles.0 {
-        if !o.contains(p, radius) {
-            continue;
-        }
-        let closest = p.clamp(o.min, o.max);
-        let d = p - closest;
-        let len = d.length();
-        if len > 1e-4 {
-            if len < radius {
-                p = closest + d / len * radius;
-            }
-        } else {
-            // Centre is inside the box: exit through the nearest face
-            let exits = [
-                (p.x - o.min.x, Vec2::new(o.min.x - radius, p.y)),
-                (o.max.x - p.x, Vec2::new(o.max.x + radius, p.y)),
-                (p.y - o.min.y, Vec2::new(p.x, o.min.y - radius)),
-                (o.max.y - p.y, Vec2::new(p.x, o.max.y + radius)),
-            ];
-            p = exits
-                .iter()
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .map(|e| e.1)
-                .unwrap_or(p);
-        }
-    }
-    let lim = MAP_HALF - radius;
-    p.clamp(Vec2::splat(-lim), Vec2::splat(lim))
+/// Pushes a circle out of every wall / cover segment and keeps it on the map (main.ts `collide`).
+pub fn resolve_collisions(p: Vec2, radius: f32, obstacles: &Obstacles) -> Vec2 {
+    obstacles.collide(p, radius)
 }
 
 fn move_player(
@@ -164,20 +108,107 @@ fn move_player(
     input: Res<MoveInput>,
     state: Res<GameState>,
     obstacles: Res<Obstacles>,
+    modal: Option<Res<crate::ui::UiModal>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
+    campaign: Option<Res<crate::game_flow::Campaign>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    command: Option<Res<crate::input::PlayerInput>>,
+    mut needs: Option<ResMut<crate::worldplay::PlayerNeeds>>,
+    inventory: Option<Res<crate::inventory::Inventory>>,
+    selected: Option<Res<crate::roles::SelectedRole>>,
     mut player: Single<&mut Transform, With<Player>>,
 ) {
-    if state.over {
+    if state.over
+        || modal.is_some_and(|m| m.blocks_input())
+        || pause.is_some_and(|p| p.0)
+        || campaign.is_some_and(|c| c.sleeping)
+    {
         return;
     }
     let dir = screen_to_ground(input.combined());
     if dir.length_squared() < 1e-4 {
         return;
     }
-    let pos = player.translation.xz() + dir * SPEED * time.delta_secs();
+    let fatigue = needs.as_ref().map_or(10.0, |n| n.fatigue);
+    let crouch = command.as_ref().is_some_and(|c| c.crouch);
+    let running = !crouch
+        && fatigue < 95.0
+        && (keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+            || command
+                .as_ref()
+                .is_some_and(|c| c.stick > 0.93 || c.retreat > 0.0));
+    let mut speed = if crouch {
+        1.6
+    } else if running {
+        6.0
+    } else {
+        SPEED
+    };
+    if fatigue > 80.0 {
+        speed *= 0.7;
+    }
+    let carry = selected.as_ref().map_or(1.0, |s| s.role().skills.carry);
+    if inventory
+        .as_ref()
+        .is_some_and(|i| i.weight() > 12.0 * carry)
+    {
+        speed *= 0.8;
+    }
+    if state.stun > 0.0 {
+        speed *= 0.25;
+    }
+    if running && let Some(ref mut needs) = needs {
+        needs.fatigue = (needs.fatigue + time.delta_secs() * 0.25).min(100.0);
+    }
+    let pos = player.translation.xz() + dir * speed * time.delta_secs();
     let pos = resolve_collisions(pos, PLAYER_RADIUS, &obstacles);
     player.translation.x = pos.x;
     player.translation.z = pos.y;
     // Face the movement direction (local -Z forward)
     let target = player.translation + Vec3::new(dir.x, 0.0, dir.y);
     player.look_at(target, Vec3::Y);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Playtest report: WASD / arrows did nothing. Keys reach `MoveInput.keys` and move the player
+    /// (the report did not reproduce under Xvfb either; most likely the window had no focus).
+    #[test]
+    fn keys_move_the_player() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<MoveInput>()
+            .init_resource::<GameState>()
+            .insert_resource(Obstacles(crate::map::world().clone()))
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_systems(Update, (keyboard_input, move_player).chain());
+        let e = app.world_mut().spawn((Player, Transform::default())).id();
+        for (key, screen) in [
+            (KeyCode::KeyD, Vec2::X),
+            (KeyCode::ArrowUp, Vec2::Y),
+            (KeyCode::KeyA, -Vec2::X),
+            (KeyCode::ArrowDown, -Vec2::Y),
+        ] {
+            app.world_mut().get_mut::<Transform>(e).unwrap().translation = spawn_point();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(std::time::Duration::from_millis(100));
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .release(key);
+            let moved =
+                app.world().get::<Transform>(e).unwrap().translation.xz() - spawn_point().xz();
+            let want = screen_to_ground(screen) * SPEED * 0.1;
+            assert!(
+                moved.distance(want) < 1e-3,
+                "{key:?}: {moved:?} vs {want:?}"
+            );
+        }
+    }
 }

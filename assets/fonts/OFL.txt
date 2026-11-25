@@ -1,4 +1,4 @@
 Noto Sans TC is licensed under the SIL Open Font License 1.1.
 https://scripts.sil.org/OFL
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Noto'.
-This subset contains only the Traditional Chinese glyphs used by the game-flow UI.
+This subset contains the Traditional Chinese glyphs and symbols drawn by the game, including story copy. Rebuild with tools/subset_ui_font.py.
