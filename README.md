@@ -40,6 +40,7 @@ game/                 crate `defend_taipei`: all gameplay + desktop binary `defe
   src/touch.rs        floating virtual joystick + pinch zoom
   src/combat.rs       waves, hostiles, auto-fire, HP, restart
   src/hud.rs          HP bar, stats, game-over banner
+  src/chunk/          256 m tile streaming, near/mid/far LOD, mesh chunking, vertex compact (off until a map provider enables it)
 mobile/               crate `defend_taipei_android`: cdylib with `#[bevy_main]` (GameActivity entry)
 android/              Gradle project (from Bevy's examples/mobile/android_example), GameActivity
 .github/workflows/    CI: desktop fmt/clippy/build + arm64 APK artifact

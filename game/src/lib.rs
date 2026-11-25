@@ -7,6 +7,7 @@ use bevy::{prelude::*, window::WindowMode};
 
 mod audio;
 mod camera;
+pub mod chunk;
 mod city;
 pub mod combat;
 pub mod game_flow;
@@ -69,6 +70,7 @@ pub fn run() {
             audio::AudioPlugin,
             hud::HudPlugin,
             ui::FlowUiPlugin,
+            chunk::ChunkPlugin,
         ))
         .run();
 }
