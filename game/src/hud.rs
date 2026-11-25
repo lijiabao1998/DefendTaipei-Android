@@ -89,11 +89,13 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
+            left: px(12),
             right: px(12),
             bottom: px(10),
             ..default()
         },
         Text::new(hint),
+        TextLayout::new(Justify::Right, LineBreak::WordOrCharacter),
         font(13.0),
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.75)),
     ));
