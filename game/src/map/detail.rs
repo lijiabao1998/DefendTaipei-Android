@@ -231,7 +231,10 @@ pub fn windows(b: &Bld, kit: &WindowKit, out: &mut Parts) {
                 hex(0xe8e4d8),
             );
         }
-        if !broken {
+        // Mat::Glass is an opaque reflective pane. It can cover an unlit room,
+        // but would completely hide the emissive occupied-room pane behind it.
+        // Lit rooms retain their curtains, sash frames and exterior iron cage.
+        if !broken && !lit {
             let sl = (r.f() - 0.5) * 0.5;
             let a1 = -WW / 4.0 + sl.max(0.0);
             let a2 = WW / 4.0 + sl.min(0.0);
@@ -1276,6 +1279,37 @@ pub fn near_roof(b: &Bld) -> Parts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn emissive_windows_are_not_hidden_behind_opaque_glazing() {
+        let world = super::super::world();
+        let mut building = world
+            .blds
+            .iter()
+            .find(|b| !b.wins.is_empty())
+            .unwrap()
+            .clone();
+        building.wins.truncate(1);
+        let kit = WindowKit::new();
+        let mut occupied = 0;
+        for id in 0..64 {
+            building.id = id;
+            let mut parts = Parts::default();
+            windows(&building, &kit, &mut parts);
+            if parts.0.contains_key(&Mat::Lamp) {
+                occupied += 1;
+                assert!(
+                    !parts.0.contains_key(&Mat::Glass),
+                    "opaque glass hides an occupied window"
+                );
+                assert!(
+                    parts.0.contains_key(&Mat::Metal),
+                    "occupied window loses sash/cage frame"
+                );
+            }
+        }
+        assert!(occupied >= 8);
+    }
 
     #[test]
     fn frontage_life_keeps_doors_and_roadways_clear_with_a_bounded_mesh() {

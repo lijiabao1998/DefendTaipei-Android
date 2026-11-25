@@ -600,6 +600,9 @@ fn add_marker_label(
     let width = (copy.chars().count() as f32 * 12.0).max(32.0);
     let r = ScreenRect::new(p.x - width * 0.5, p.y + 10.0, width, 18.0);
     if rect.contains(r.min) && r.max.x < rect.max.x && r.max.y < rect.max.y {
+        // POI/note names take precedence over street names in a crowded block.
+        // The pins remain visible even if a neighbouring label is displaced.
+        labels.retain(|existing| !existing.rect.intersects(r));
         labels.push(Label {
             rect: r,
             copy: copy.into(),

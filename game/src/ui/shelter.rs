@@ -724,19 +724,8 @@ fn make_frame(
         ] {
             frame.button(rect, label.to_owned(), action, true);
         }
-        if !notice.text.is_empty() {
-            let width = (toolbar[4].max.x - toolbar[0].min.x).min(600.0);
-            frame.text(
-                ScreenRect::new(
-                    (viewport.x - width) * 0.5,
-                    viewport.y * 0.5 - 24.0,
-                    width,
-                    48.0,
-                ),
-                notice.text.clone(),
-                14.0,
-            );
-        }
+        // Gameplay notices share the HUD context slot and expire there. A fixed
+        // screen-centre toast obscured the radio card on short portrait phones.
         return frame;
     };
 

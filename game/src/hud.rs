@@ -9,7 +9,7 @@ use crate::input::{HudLayout, Orientation, ScreenRect, orientation, safe_insets}
 use crate::inventory::{Inventory, item};
 use crate::survival::{Shelter, ShelterEnvironment, is_night};
 use crate::ui::{PauseOpen, UiModal};
-use crate::worldplay::{InteractionHint, PlayerNeeds, ScavengeState};
+use crate::worldplay::{InteractionHint, PlayerNeeds, ScavengeState, WorldNotice};
 
 const METER_COLORS: [Color; 4] = [
     Color::srgb(0.80, 0.24, 0.20),
@@ -245,6 +245,12 @@ fn condition_text(
     labels.join(" · ")
 }
 
+#[derive(Default)]
+struct NoticeToast {
+    last: String,
+    remaining: f32,
+}
+
 #[derive(SystemParam)]
 struct HudWorld<'w> {
     game: Res<'w, GameState>,
@@ -257,6 +263,7 @@ struct HudWorld<'w> {
     stance: Option<Res<'w, PlayerStance>>,
     scavenge: Option<Res<'w, ScavengeState>>,
     hint: Option<Res<'w, InteractionHint>>,
+    notice: Option<Res<'w, WorldNotice>>,
     lang: Res<'w, Language>,
 }
 
@@ -316,6 +323,8 @@ fn update_hud(
     >,
     mut hint_text: Query<&mut Text, (With<HintText>, Without<HudLabel>)>,
     mut geometry: ResMut<HudGeometry>,
+    time: Res<Time>,
+    mut toast: Local<NoticeToast>,
 ) {
     let playing = flow.get() == &GameFlow::Playing && !modal.open && !pause.0;
     let viewport = windows.iter().next().map_or(Vec2::new(1280.0, 720.0), |w| {
@@ -332,6 +341,7 @@ fn update_hud(
         stance,
         scavenge,
         hint,
+        notice,
         lang,
     } = world;
     let conditions = condition_text(
@@ -353,12 +363,22 @@ fn update_hud(
         };
         place(&mut node, layout.card);
     }
+    let notice_text = notice.as_ref().map_or("", |notice| notice.text.as_str());
+    if toast.last != notice_text {
+        toast.last = notice_text.to_owned();
+        toast.remaining = if notice_text.is_empty() { 0.0 } else { 4.5 };
+    }
+    if flow.get() != &GameFlow::Playing {
+        toast.remaining = 0.0;
+    }
+    let occluded = campaign.notice_t > 0.0 && layout.banner.intersects(layout.hint);
+    if playing && !occluded {
+        toast.remaining = (toast.remaining - time.delta_secs()).max(0.0);
+    }
+    let show_toast = toast.remaining > 0.0;
     let hint_available = hint.as_ref().is_some_and(|h| !h.label.is_empty());
     for (mut visible, mut node) in &mut hints {
-        *visible = if playing
-            && hint_available
-            && !(campaign.notice_t > 0.0 && layout.banner.intersects(layout.hint))
-        {
+        *visible = if playing && (hint_available || show_toast) && !occluded {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -487,12 +507,16 @@ fn update_hud(
     for (meter, mut node) in &mut fills {
         node.width = percent(values[meter.0]);
     }
-    if let Some(hint) = hint {
-        let copy = format!("{}\n{}", hint.label, hint.detail);
-        for mut text in &mut hint_text {
-            if text.0 != copy {
-                text.0 = copy.clone();
-            }
+    let hint_copy = if show_toast {
+        toast.last.clone()
+    } else {
+        hint.map_or(String::new(), |hint| {
+            format!("{}\n{}", hint.label, hint.detail)
+        })
+    };
+    for mut text in &mut hint_text {
+        if text.0 != hint_copy {
+            text.0 = hint_copy.clone();
         }
     }
 }
@@ -628,5 +652,40 @@ mod tests {
                 .all(|v| *v == Visibility::Hidden)
         );
         assert!(app.world().resource::<HudGeometry>().banner.is_none());
+
+        // Reproduce the compact warning/radio scene that exposed a midpoint
+        // toast covering the report. Feedback must occupy the context slot.
+        app.world_mut().resource_mut::<PauseOpen>().0 = false;
+        app.world_mut().resource_mut::<GameState>().bleed = true;
+        app.world_mut().insert_resource(WorldNotice {
+            text: "Door closed".to_owned(),
+        });
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&mut Window, With<PrimaryWindow>>();
+        query
+            .single_mut(app.world_mut())
+            .unwrap()
+            .resolution
+            .set_physical_resolution(320, 640);
+        app.update();
+        let banner = app.world().resource::<HudGeometry>().banner.unwrap();
+        let mut query = app.world_mut().query_filtered::<&Node, With<HintRoot>>();
+        let node = query.single(app.world()).unwrap();
+        let Val::Px(x) = node.left else {
+            panic!("hint x must be absolute")
+        };
+        let Val::Px(y) = node.top else {
+            panic!("hint y must be absolute")
+        };
+        let Val::Px(w) = node.width else {
+            panic!("hint width must be absolute")
+        };
+        let Val::Px(h) = node.height else {
+            panic!("hint height must be absolute")
+        };
+        assert!(!banner.intersects(ScreenRect::new(x, y, w, h)));
+        let mut query = app.world_mut().query_filtered::<&Text, With<HintText>>();
+        assert_eq!(query.single(app.world()).unwrap().0, "Door closed");
     }
 }

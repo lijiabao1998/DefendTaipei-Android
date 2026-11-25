@@ -57,13 +57,13 @@ pub fn lighting_profile(minute: f32, power: bool, rain: f32, wet: f32) -> Lighti
     let daylight = smooth((minute - 330.0) / 90.0) * (1.0 - smooth((minute - 1050.0) / 120.0));
     let night = 1.0 - daylight;
     let rain = rain.clamp(0.0, 1.0);
-    let night_ambient = if power { 120.0 } else { 65.0 };
+    let night_ambient = if power { 260.0 } else { 95.0 };
     LightingProfile {
         daylight,
         night,
         lamp_strength: if power { night } else { 0.0 },
         ambient: (night_ambient + (600.0 - night_ambient) * daylight) * (1.0 - rain * 0.24),
-        sun: (120.0 + 11880.0 * daylight) * (1.0 - rain * 0.65),
+        sun: (220.0 + 11780.0 * daylight) * (1.0 - rain * 0.65),
         wetness: wet.clamp(0.0, 1.0),
     }
 }
@@ -322,7 +322,7 @@ fn update_lights(
             transform.translation = site.p;
             light.color = site.color;
             light.range = if site.sign { 6.0 } else { 11.5 };
-            light.intensity = strength * if site.sign { 360.0 } else { 1650.0 };
+            light.intensity = strength * if site.sign { 2400.0 } else { 16000.0 };
             evidence.active_lights += 1;
         } else {
             light.intensity = 0.0;

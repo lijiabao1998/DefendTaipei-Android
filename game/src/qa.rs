@@ -530,6 +530,8 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             needs.thirst = 18.0;
             needs.fatigue = 82.0;
             world.resource_mut::<crate::combat::GameState>().bleed = true;
+            world.resource_mut::<Campaign>().notice_t = 12.0;
+            world.resource_mut::<crate::worldplay::WorldNotice>().text = "流血，需要止血。".into();
         }
         Action::Journal => {
             world.write_message(OpenPanel(PanelKind::Journal));
@@ -786,6 +788,21 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         enter_stage(world, run, stage)?;
     }
     run.frame += 1;
+    if run.frame == SETTLE_FRAMES / 2
+        && matches!(
+            stage.action,
+            Action::Rain | Action::Night | Action::Blackout
+        )
+    {
+        // The explicit clock/weather fixture can dispatch several catch-up
+        // broadcasts at once. Preserve their received-history flags, but clear
+        // their overlays so the weather/lighting evidence shows the street.
+        world.resource_mut::<Campaign>().notice_t = 0.0;
+        world
+            .resource_mut::<crate::worldplay::WorldNotice>()
+            .text
+            .clear();
+    }
     if run.frame > MAX_STAGE_FRAMES {
         return Err(format!(
             "Stage {} did not complete: flow={:?}",

@@ -29,7 +29,9 @@ the same inventory/weapon resources that combat consumes.
 The contextual prompt and Interact toolbar label read `worldplay::InteractionHint`.
 That resource is calculated by the same target selector that executes Interact, so
 the UI does not independently guess whether a door, cabinet or water fixture is the
-next action. Hint text stays clear of the movement controls and map button. HUD and
+next action. Hint text stays clear of the movement controls and map button. Gameplay feedback
+shares this context slot for a short interval instead of covering the centre of the
+screen or a radio report; panel status messages remain available in their footer. HUD and
 radio hit regions are removed while a panel, map, pause screen or non-playing flow
 is active.
 

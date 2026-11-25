@@ -45,7 +45,9 @@ systems.
   transitions; patrol and survival rules retain their existing gameplay night times.
 - The existing shared window/lamp and horizontal/vertical sign materials become
   emissive with darkness while electricity is available. Cutting power immediately
-  disables that emission and all pooled spill lights. Parked vehicles' headlamp
+  disables that emission and all pooled spill lights. Occupied-room panes retain
+  their curtains, frames and iron cages; opaque reflective glazing no longer covers
+  the emissive pane and hides the room light. Parked vehicles' headlamp
   housings use passive vertex-colour geometry, so municipal power does not switch
   every parked car's headlights on.
 - A fixed pool of **four street lights and two sign lights** is repositioned to nearby
@@ -72,7 +74,8 @@ measured physical-phone performance remains a separate check.
 
 Unit checks cover smooth day/dusk/night transitions, immediate power-off behavior,
 rain/wet daylight reduction, deterministic and range-limited light selection, bounded
-rain geometry and roof exclusion. The frontage check builds real nearby world geometry
+rain geometry, roof exclusion and occupied panes remaining visible through their
+window frames. The frontage check builds real nearby world geometry
 and checks mesh budgets, carriageway separation and the entire moving-door corridor.
 
 Native QA can inspect `AtmosphereState` for actual submitted `active_lights` and

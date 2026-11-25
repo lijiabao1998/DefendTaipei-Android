@@ -318,9 +318,13 @@ fn label(
 }
 
 fn button(marker: impl Component, rect: ScreenRect, font: &UiFont, text: &str) -> impl Bundle {
+    // A Bevy Text leaf does not vertically centre its own glyphs through flex
+    // alignment. Inset the line box while preserving the full finger target.
+    let mut node = placed_node(rect, true);
+    node.padding = UiRect::vertical(px(((rect.height() - 26.0) * 0.5).max(0.0)));
     (
         marker,
-        placed_node(rect, true),
+        node,
         BackgroundColor(Color::srgb(0.14, 0.16, 0.15)),
         BorderColor::all(Color::srgba(0.95, 0.85, 0.55, 0.8)),
         Text::new(text),
