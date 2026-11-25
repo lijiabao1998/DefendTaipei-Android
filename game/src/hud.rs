@@ -43,7 +43,7 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
             Node {
                 position_type: PositionType::Absolute,
                 left: px(12),
-                top: px(12),
+                top: px(76),
                 flex_direction: FlexDirection::Column,
                 row_gap: px(6),
                 padding: UiRect::all(px(8)),

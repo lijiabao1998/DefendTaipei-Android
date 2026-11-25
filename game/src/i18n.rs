@@ -61,9 +61,11 @@ mod tests {
     /// Symbols the subset always keeps, even before a screen uses them.
     const EXTRA_SYMBOLS: &str = "°←↑→↓▶";
 
-    /// Noto Sans CJK has no color emoji and no U+23ED (⏭). Variation selectors
-    /// are not glyphs we draw. The skip button uses ▶ instead.
-    const SKIP: &[char] = &['\u{fe0e}', '\u{fe0f}', '📱', '📻', '⏭'];
+    /// Variation selectors are not glyphs. U+23ED (⏭) is not in Noto Sans CJK;
+    /// the skip button draws ▶. Story lines are scanned with every other string,
+    /// so a missing story character fails this test. Emoji are rewritten to words
+    /// before they are drawn.
+    const SKIP: &[char] = &['\u{fe0e}', '\u{fe0f}', '⏭'];
 
     #[test]
     fn traditional_chinese_is_the_default() {
