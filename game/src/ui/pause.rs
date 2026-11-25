@@ -1,14 +1,16 @@
-//! Esc pause. This is a screen on top of [`GameFlow::Playing`], not a new state.
+//! Pause screen on top of [`GameFlow::Playing`]. It is not a flow state.
+//!
+//! Visibility follows [`super::TogglePause`]. This module does not read the keyboard.
 
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::audio::SfxEvent;
 use crate::game_flow::{GameFlow, RestartGame};
 use crate::i18n::{Language, UiFont, tr};
-use crate::input::{GamePause, PlayerInput, ScreenRect};
+use crate::input::ScreenRect;
 
 use super::layout::pause_layout;
-use super::{ConsumedPresses, StateScoped};
+use super::{ConsumedPresses, PauseOpen, StateScoped, TogglePause};
 
 #[derive(Component)]
 pub(super) struct PauseRoot;
@@ -25,8 +27,8 @@ pub(super) struct PauseHeading;
 pub(super) fn drive_pause(
     mut commands: Commands,
     flow: Res<State<GameFlow>>,
-    player: Res<PlayerInput>,
-    mut pause: ResMut<GamePause>,
+    mut pause: ResMut<PauseOpen>,
+    mut toggles: MessageReader<TogglePause>,
     consumed: Res<ConsumedPresses>,
     windows: Query<&Window, With<PrimaryWindow>>,
     font: Res<UiFont>,
@@ -36,9 +38,8 @@ pub(super) fn drive_pause(
     existing: Query<Entity, With<PauseRoot>>,
 ) {
     if !matches!(flow.get(), GameFlow::Playing) {
-        if pause.0 {
-            pause.0 = false;
-        }
+        toggles.clear();
+        close(&mut commands, &mut pause, &existing);
         return;
     }
     let viewport = windows
@@ -55,21 +56,27 @@ pub(super) fn drive_pause(
         .points
         .iter()
         .any(|point| layout.menu.contains(*point));
-    if pause.0 {
-        if player.pause || on_resume {
-            close(&mut commands, &mut pause, &existing);
-            sfx.write(SfxEvent::Clink { dist: 0.0 });
-        } else if on_menu {
-            restart.write(RestartGame);
-            sfx.write(SfxEvent::Clink { dist: 0.0 });
-            close(&mut commands, &mut pause, &existing);
-        }
-        return;
+    let mut open = pause.0;
+    for _ in toggles.read() {
+        open = !open;
     }
-    if player.pause && existing.is_empty() {
-        pause.0 = true;
+    if open && on_resume {
+        open = false;
+    } else if open && on_menu {
+        restart.write(RestartGame);
+        open = false;
+    }
+    let changed = open != pause.0;
+    pause.0 = open;
+    if changed {
         sfx.write(SfxEvent::Clink { dist: 0.0 });
+    }
+    if open && existing.is_empty() {
         spawn_pause(&mut commands, viewport, &font, *lang);
+    } else if !open {
+        for entity in &existing {
+            commands.entity(entity).despawn();
+        }
     }
 }
 
@@ -116,7 +123,7 @@ pub(super) fn place_pause(
 
 fn close(
     commands: &mut Commands,
-    pause: &mut GamePause,
+    pause: &mut PauseOpen,
     existing: &Query<Entity, With<PauseRoot>>,
 ) {
     pause.0 = false;

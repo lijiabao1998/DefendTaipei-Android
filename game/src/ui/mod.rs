@@ -13,8 +13,15 @@ mod screens;
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::game_flow::GameFlow;
-use crate::input::GamePause;
 use crate::roles::SelectedRole;
+
+/// Show or hide the pause screen. Input (Esc) sends this; the UI does not read keys.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct TogglePause;
+
+/// Whether the pause screen is up. Flipped by [`TogglePause`].
+#[derive(Resource, Default)]
+pub(super) struct PauseOpen(pub bool);
 
 /// Bevy 0.20 renamed `StateScoped` to [`DespawnOnExit`]. Same marker: the entity
 /// and its children despawn when `GameFlow` leaves this value.
@@ -34,6 +41,8 @@ impl Plugin for FlowUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedRole>()
             .init_resource::<ConsumedPresses>()
+            .init_resource::<PauseOpen>()
+            .add_message::<TogglePause>()
             .add_systems(OnEnter(GameFlow::Title), screens::enter_title)
             .add_systems(
                 PreUpdate,
@@ -51,15 +60,14 @@ impl Plugin for FlowUiPlugin {
                     pause::drive_pause,
                     pause::place_pause,
                 )
-                    .after(crate::i18n::apply_font)
-                    .after(crate::input::InputSet),
+                    .after(crate::i18n::apply_font),
             );
     }
 }
 
 fn consume_ui_clicks(
     flow: Res<State<GameFlow>>,
-    pause: Res<GamePause>,
+    pause: Res<PauseOpen>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut touches: ResMut<Touches>,
