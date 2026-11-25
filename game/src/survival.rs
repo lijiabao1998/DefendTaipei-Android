@@ -282,9 +282,11 @@ impl Shelter {
             "mask" | "battery" | "noodle" | "mianxian" | "roufong" => 2.0,
             _ => 1.0,
         };
-        let scarce = ["rice", "can", "noodle", "pill", "bandage", "medkit", "water"]
-            .iter()
-            .any(|part| key.contains(part));
+        let scarce = [
+            "rice", "can", "noodle", "pill", "bandage", "medkit", "water",
+        ]
+        .into_iter()
+        .any(|part| key.contains(part));
         js_round(if scarce { base * self.scarcity } else { base }).max(1)
     }
 
@@ -386,9 +388,9 @@ impl Shelter {
             } else if g.mood < 15.0 {
                 out.push(match lang {
                     Language::ZhTw => format!("{name}整天不說話，眼神空洞（憂鬱）。"),
-                    Language::En => format!(
-                        "{name} has been silent all day, staring blankly (depressed)."
-                    ),
+                    Language::En => {
+                        format!("{name} has been silent all day, staring blankly (depressed).")
+                    }
                 });
             }
         }
@@ -419,9 +421,9 @@ impl Shelter {
             };
             out.push(match lang {
                 Language::ZhTw => format!("🔦 半夜有人撬窗，偷走了一些{what}。"),
-                Language::En => format!(
-                    "🔦 Someone forced a window during the night and stole some {what}."
-                ),
+                Language::En => {
+                    format!("🔦 Someone forced a window during the night and stole some {what}.")
+                }
             });
         }
         if let Some(g) = self.group.iter_mut().find(|g| !g.here && !g.dead)
@@ -431,9 +433,7 @@ impl Shelter {
             let role = g.role(lang);
             out.push(match lang {
                 Language::ZhTw => format!("🚪 {role}敲門求收留，你讓他進來了。"),
-                Language::En => format!(
-                    "🚪 {role} knocked, asking for shelter. You let them in."
-                ),
+                Language::En => format!("🚪 {role} knocked, asking for shelter. You let them in."),
             });
         }
         let index = (rng.next() * 7.0).floor() as usize;
