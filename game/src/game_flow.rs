@@ -6,7 +6,7 @@
 
 use bevy::prelude::*;
 
-use crate::city::{Lcg, MAP_HALF, Obstacles};
+use crate::city::{Lcg, Obstacles};
 use crate::combat::{Enemy, EnemyKind, GameState, PlayerDied, ResetCombat, SpawnEnemy};
 use crate::player::Player;
 use crate::story::{
@@ -368,9 +368,7 @@ fn occupation_pressure(
         let angle = campaign.rng.range(0.0, std::f32::consts::TAU);
         let radius = campaign.rng.range(26.0, 34.0);
         let point = origin + Vec2::from_angle(angle) * radius;
-        if point.abs().max_element() > MAP_HALF - 1.0
-            || obstacles.0.iter().any(|o| o.contains(point, 0.8))
-        {
+        if obstacles.blocked(point, 0.8) {
             continue;
         }
         let night = campaign.rng.range(0.0, 1.0) > 0.75;

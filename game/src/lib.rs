@@ -10,9 +10,12 @@ mod camera;
 mod city;
 pub mod combat;
 pub mod game_flow;
+mod geom;
 mod hud;
+mod human;
 pub mod i18n;
 pub mod input;
+pub mod map;
 mod player;
 pub mod roles;
 mod story;
@@ -51,14 +54,15 @@ pub fn run() {
                     ..default()
                 }),
         )
-        .insert_resource(ClearColor(Color::srgb(0.60, 0.64, 0.67)))
+        .insert_resource(ClearColor(Color::srgb(0.08, 0.075, 0.07)))
         .insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.81, 0.89, 1.0),
             brightness: 600.0,
             ..default()
         })
         .add_plugins((
-            city::CityPlugin,
+            map::MapPlugin,
+            human::HumanPlugin,
             player::PlayerPlugin,
             camera::CameraPlugin,
             i18n::I18nPlugin,

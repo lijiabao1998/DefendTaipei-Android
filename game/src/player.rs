@@ -1,8 +1,8 @@
-//! Player capsule: keyboard + virtual-joystick movement, building collision.
+//! Player (a 白面人 rig, see `human`): keyboard + virtual-joystick movement, building collision.
 
 use bevy::prelude::*;
 
-use crate::city::{MAP_HALF, Obstacles};
+use crate::city::Obstacles;
 use crate::combat::GameState;
 
 pub const PLAYER_RADIUS: f32 = 0.45;
@@ -55,59 +55,19 @@ impl Plugin for PlayerPlugin {
     }
 }
 
+/// On the street in front of the door of the original's start home.
 pub fn spawn_point() -> Vec3 {
-    // Middle of the central street crossing
-    let starts = crate::city::block_starts();
-    let mid = starts.len() / 2;
-    let c = starts[mid] - 3.5;
-    Vec3::new(c, 0.0, c)
+    let p = crate::map::world().spawn;
+    Vec3::new(p.x, 0.0, p.y)
 }
 
-fn spawn_player(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let body = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.15, 0.55, 0.95), // bright jacket so the player reads at a glance
-        perceptual_roughness: 0.8,
-        ..default()
-    });
-    let accent = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.95, 0.80, 0.25),
-        emissive: LinearRgba::rgb(0.4, 0.3, 0.05),
-        ..default()
-    });
-    commands
-        .spawn((
-            Player,
-            Transform::from_translation(spawn_point()),
-            Visibility::default(),
-        ))
-        .with_children(|p| {
-            p.spawn((
-                Mesh3d(meshes.add(Capsule3d::new(PLAYER_RADIUS, 0.9))),
-                MeshMaterial3d(body),
-                Transform::from_xyz(0.0, 0.9, 0.0),
-            ));
-            // Unlit ground ring: keeps the player findable behind faded buildings
-            p.spawn((
-                Mesh3d(meshes.add(Torus::new(0.62, 0.78))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(1.0, 0.85, 0.2),
-                    unlit: true,
-                    ..default()
-                })),
-                Transform::from_xyz(0.0, 0.06, 0.0).with_scale(Vec3::new(1.0, 0.2, 1.0)),
-                bevy::light::NotShadowCaster,
-            ));
-            // "Rifle" stub shows the facing direction (local -Z is forward)
-            p.spawn((
-                Mesh3d(meshes.add(Cuboid::new(0.14, 0.14, 0.8))),
-                MeshMaterial3d(accent),
-                Transform::from_xyz(0.25, 1.05, -0.45),
-            ));
-        });
+fn spawn_player(mut commands: Commands) {
+    commands.spawn((
+        Player,
+        crate::human::Humanoid::player(),
+        Transform::from_translation(spawn_point()),
+        Visibility::default(),
+    ));
 }
 
 fn keyboard_input(keys: Res<ButtonInput<KeyCode>>, mut input: ResMut<MoveInput>) {
@@ -127,36 +87,9 @@ fn keyboard_input(keys: Res<ButtonInput<KeyCode>>, mut input: ResMut<MoveInput>)
     input.keys = v.normalize_or_zero();
 }
 
-/// Pushes a circle out of every building footprint and keeps it on the map.
-pub fn resolve_collisions(mut p: Vec2, radius: f32, obstacles: &Obstacles) -> Vec2 {
-    for o in &obstacles.0 {
-        if !o.contains(p, radius) {
-            continue;
-        }
-        let closest = p.clamp(o.min, o.max);
-        let d = p - closest;
-        let len = d.length();
-        if len > 1e-4 {
-            if len < radius {
-                p = closest + d / len * radius;
-            }
-        } else {
-            // Centre is inside the box: exit through the nearest face
-            let exits = [
-                (p.x - o.min.x, Vec2::new(o.min.x - radius, p.y)),
-                (o.max.x - p.x, Vec2::new(o.max.x + radius, p.y)),
-                (p.y - o.min.y, Vec2::new(p.x, o.min.y - radius)),
-                (o.max.y - p.y, Vec2::new(p.x, o.max.y + radius)),
-            ];
-            p = exits
-                .iter()
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .map(|e| e.1)
-                .unwrap_or(p);
-        }
-    }
-    let lim = MAP_HALF - radius;
-    p.clamp(Vec2::splat(-lim), Vec2::splat(lim))
+/// Pushes a circle out of every wall / cover segment and keeps it on the map (main.ts `collide`).
+pub fn resolve_collisions(p: Vec2, radius: f32, obstacles: &Obstacles) -> Vec2 {
+    obstacles.collide(p, radius)
 }
 
 fn move_player(
