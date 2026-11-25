@@ -15,8 +15,10 @@ pub struct TouchPlugin;
 
 impl Plugin for TouchPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Pinch>()
-            .add_systems(Update, pinch_zoom.after(InputSet));
+        app.init_resource::<Pinch>().add_systems(
+            Update,
+            pinch_zoom.after(InputSet).after(crate::game_flow::FlowSet),
+        );
     }
 }
 
@@ -24,9 +26,15 @@ impl Plugin for TouchPlugin {
 fn pinch_zoom(
     touches: Res<Touches>,
     control: Res<TouchControl>,
+    modal: Option<Res<crate::ui::UiModal>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
     mut pinch: ResMut<Pinch>,
     mut zoom: ResMut<CameraZoom>,
 ) {
+    if modal.is_some_and(|m| m.blocks_input()) || pause.is_some_and(|p| p.0) {
+        pinch.previous = None;
+        return;
+    }
     let mut free = touches.iter().filter(|touch| !control.claims(touch.id()));
     let (Some(a), Some(b)) = (free.next(), free.next()) else {
         pinch.previous = None;
