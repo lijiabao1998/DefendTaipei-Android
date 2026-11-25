@@ -172,9 +172,13 @@ wait_log 'DTPERF fps=' 1 180
 wait_log 'DTUI flow=Title ' 1
 capture 01-title-portrait 390 844
 
-# TitleLayout: New game is the right bottom button. Prologue skip is below its
-# phone copy, and these taps never rely on tapping through the selection cards.
-tap_wait 287 768 'DTUI action=NewGame$' 'DTUI flow=Prologue '
+# The real title flow has separate survivor and departure pages. Visiting them
+# does not clear the existing save or start the campaign; only Depart does.
+tap_wait 195 667 'DTUI action=ChooseSurvivor$'
+capture 01a-survivor-portrait 390 844
+tap_wait 262 784 'DTUI action=ReviewDeparture$'
+capture 01b-departure-portrait 390 844
+tap_wait 262 784 'DTUI action=NewGame$' 'DTUI flow=Prologue '
 capture 02-prologue-portrait 390 844
 tap_wait 195 328 'DTUI action=Skip$' 'DTUI flow=Playing '
 capture 03-playing-portrait 390 844
@@ -222,7 +226,7 @@ tap_wait 195 464 'DTUI action=SaveMenu$' 'DTUI flow=Title '
 # checkpoint too, so a stale menu save cannot pass the post-Continue assertion.
 read_save menu-save
 capture 08-title-with-save 390 844
-tap_wait 104 768 'DTUI action=Continue$' 'DTUI flow=Playing '
+tap_wait 195 599 'DTUI action=Continue$' 'DTUI flow=Playing '
 tap_wait 122 787 'DTUI panel=Some\(Shelter\)$'
 capture 09-continued-shelter 390 844
 # A second prayer is disabled. Saving again captures the restored state.
@@ -261,6 +265,8 @@ alive
 refresh_log
 [[ "$(log_count 'DTUI action=Save$')" == 2 ]]
 [[ "$(log_count 'DTUI action=Continue$')" == 1 ]]
+[[ "$(log_count 'DTUI action=ChooseSurvivor$')" == 1 ]]
+[[ "$(log_count 'DTUI action=ReviewDeparture$')" == 1 ]]
 [[ "$(log_count 'DTUI action=NewGame$')" == 1 ]]
 [[ "$(log_count 'DTUI action=Pray$')" == 1 ]]
 

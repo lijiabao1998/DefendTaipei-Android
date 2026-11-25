@@ -25,7 +25,7 @@ pub const TIN_PAL: [(u32, u32); 9] = [
     (0x5a7ea0, 4),
     (0x7a5a40, 2),
 ];
-pub const ARCADE_TILE_N: usize = 3;
+pub const ARCADE_TILE_N: usize = 4;
 /// Shop sign atlas (tools/generate_signs.py): 4 × 5 cells of 256 × 64.
 pub const SIGN_COLS: f32 = 4.0;
 pub const SIGN_ROWS: f32 = 5.0;
@@ -193,6 +193,47 @@ fn wall_tex(wi: usize) -> Canvas {
         rgba(30.0, 40.0, 25.0, 0.0),
         rgba(30.0, 40.0, 25.0, 0.55),
     ); // damp at base
+    // Coarse damp bloom and flaking render survive the gameplay camera's mip level.
+    // Damage is concentrated around joints and ledges rather than uniformly darkening
+    // the whole facade: pale lime deposits remain against dark rain-soaked patches.
+    for patch in 0..7 {
+        let x = if patch % 2 == 0 {
+            r.f() * 48.0
+        } else {
+            208.0 + r.f() * 48.0
+        };
+        let y = 20.0 + r.f() * 220.0;
+        c.radial(
+            x,
+            y,
+            18.0 + r.f() * 24.0,
+            1.6,
+            rgba(40.0, 43.0, 32.0, 0.32),
+            rgba(40.0, 43.0, 32.0, 0.0),
+        );
+        c.grad_rect_v(
+            x + 2.0,
+            y,
+            1.0 + r.f() * 3.0,
+            50.0,
+            y,
+            y + 50.0,
+            rgba(226.0, 219.0, 196.0, 0.5),
+            rgba(226.0, 219.0, 196.0, 0.0),
+        );
+    }
+    for _ in 0..4 {
+        let x = r.f() * 256.0;
+        let y = 12.0 + r.f() * 190.0;
+        let pts = [
+            (x, y),
+            (x - 4.0, y + 14.0),
+            (x + 2.0, y + 27.0),
+            (x - 1.0, y + 43.0),
+            (x + 5.0, y + 52.0),
+        ];
+        c.polyline(&pts, 0.75, rgba(44.0, 42.0, 35.0, 0.5));
+    }
     // window with rusty iron bars (鐵窗); some broken
     let broken = wi % 3 == 1;
     c.fill_rect(60.0, 46.0, 136.0, 108.0, css("#1e252c"));
@@ -334,35 +375,45 @@ fn cracks(c: &mut Canvas, r: &mut Rng, n: usize, steps: usize, jump: f32, col: [
     }
 }
 
+/// Asphalt has one neutral aggregate tone. Independently jittering RGB channels produced
+/// green / purple repair squares at street scale; repair edges now follow irregular cuts.
 fn road_tex() -> Canvas {
-    noise_tex("#3c3e41", 77, 2500, 0.07, |c, r| {
-        for _ in 0..5 {
-            let col = rgba(
-                20.0 + r.f() * 30.0,
-                20.0 + r.f() * 30.0,
-                25.0 + r.f() * 30.0,
-                0.6,
-            );
-            let (x, y, w, h) = (
-                r.f() * 220.0,
-                r.f() * 220.0,
-                20.0 + r.f() * 60.0,
-                15.0 + r.f() * 40.0,
-            );
-            c.fill_rect(x, y, w, h, col);
-        } // asphalt patches
-        cracks(c, r, 5, 4, 14.0, rgba(25.0, 25.0, 25.0, 0.22));
-        for _ in 0..6 {
+    noise_tex("#393b3c", 77, 4800, 0.045, |c, r| {
+        for _ in 0..4 {
+            let v = 32.0 + r.f() * 16.0;
+            let (x, y) = (r.f() * 256.0, r.f() * 256.0);
+            let (rx, ry) = (12.0 + r.f() * 30.0, 8.0 + r.f() * 22.0);
+            let pts: Vec<_> = (0..12)
+                .map(|i| {
+                    let a = i as f32 * std::f32::consts::TAU / 12.0;
+                    let j = 0.8 + r.f() * 0.25;
+                    (x + a.cos() * rx * j, y + a.sin() * ry * j)
+                })
+                .collect();
+            c.fill_poly(&pts, rgba(v, v + 1.0, v + 2.0, 0.5));
+            let mut edge = pts.clone();
+            edge.push(pts[0]);
+            c.polyline(&edge, 0.8, rgba(21.0, 22.0, 23.0, 0.32));
+        }
+        cracks(c, r, 7, 6, 16.0, rgba(19.0, 20.0, 21.0, 0.38));
+        for _ in 0..8 {
             let (x, y) = (r.f() * 256.0, r.f() * 256.0);
             c.radial(
                 x,
                 y,
-                20.0,
+                12.0 + r.f() * 24.0,
                 0.6,
-                rgba(10.0, 10.0, 12.0, 0.16),
-                rgba(10.0, 10.0, 12.0, 0.0),
+                rgba(15.0, 16.0, 17.0, 0.22),
+                rgba(15.0, 16.0, 17.0, 0.0),
             );
-        } // oil stains
+        }
+        // Exposed aggregate. Small, high-frequency flecks remain aggregate rather than
+        // becoming a second large repair pattern when mipmapped on a phone.
+        for _ in 0..2100 {
+            let (x, y) = (r.f() * 256.0, r.f() * 256.0);
+            let v = 76.0 + r.f() * 20.0;
+            c.fill_rect(x, y, 0.6, 0.6, rgba(v, v, v - 2.0, 0.12));
+        }
     })
 }
 
@@ -382,7 +433,6 @@ const SIDE_COL: [[f32; 3]; 5] = [
     [176.0, 162.0, 140.0],
     [120.0, 104.0, 92.0],
 ];
-const MORTAR: [f32; 4] = [60.0 / 255.0, 56.0 / 255.0, 50.0 / 255.0, 0.85];
 
 /// paving.ts `rgb(c, j, r)`: the colour with a random ±j/2 brightness.
 fn jit(c: [f32; 3], j: f32, r: &mut Lehmer) -> [f32; 4] {
@@ -423,12 +473,13 @@ fn grime(c: &mut Canvas, r: &mut Lehmer, w: f32, h: f32, n: usize) {
     }
 }
 
-/// Sidewalk bricks (paving.ts `sidewalkTex`): herringbone field of 10×20 cm in a grey / earth mix
-/// with a 30×30 border course; 1 texture = 2 m.
+/// Taipei 10 × 20 cm concrete pavers, paired in alternating directions. Each
+/// 20 × 20 cm cell is filled once: the old overlapping dominoes left dark pinholes.
+/// The 2 m repeat stays aligned across streamed road pieces.
 fn sidewalk_tex() -> Canvas {
     let mut r = Lehmer(7);
     let mut c = Canvas::new(512, 512);
-    c.fill_rect(0.0, 0.0, 512.0, 512.0, MORTAR);
+    c.fill_rect(0.0, 0.0, 512.0, 512.0, css("#514e47"));
     let u = 25.6;
     let pal = [
         SIDE_COL[0],
@@ -437,31 +488,65 @@ fn sidewalk_tex() -> Canvas {
         SIDE_COL[0],
         SIDE_COL[3],
     ];
-    for y in -2i32..22 {
-        for x in -2i32..22 {
-            let px = (x * 2 + y.rem_euclid(2)) as f32 * u;
-            let py = y as f32 * u;
-            let vert = (x + y).rem_euclid(2) == 0;
-            let col = jit(
-                pal[(r.f() * pal.len() as f32) as usize % pal.len()],
-                0.12,
-                &mut r,
-            );
-            if vert {
-                c.fill_rect(px + 1.0, py + 1.0, u - 2.0, 2.0 * u - 2.0, col);
-            } else {
-                c.fill_rect(px + 1.0, py + 1.0, 2.0 * u - 2.0, u - 2.0, col);
+    for cy in 0..10 {
+        for cx in 0..10 {
+            let vertical = (cx + cy) % 2 == 1;
+            for half in 0..2 {
+                let px = (cx * 2) as f32 * u + if vertical { half as f32 * u } else { 0.0 };
+                let py = (cy * 2) as f32 * u + if vertical { 0.0 } else { half as f32 * u };
+                let (bw, bh) = if vertical { (u, 2.0 * u) } else { (2.0 * u, u) };
+                let col = jit(
+                    pal[(r.f() * pal.len() as f32) as usize % pal.len()],
+                    0.18,
+                    &mut r,
+                );
+                c.fill_rect(px + 0.9, py + 0.9, bw - 1.8, bh - 1.8, col);
+                c.line(
+                    px + 1.6,
+                    py + 1.6,
+                    px + bw - 1.6,
+                    py + 1.6,
+                    0.65,
+                    rgba(214.0, 207.0, 192.0, 0.28),
+                );
+                if r.f() < 0.12 {
+                    let x = px + 2.0 + r.f() * (bw - 4.0);
+                    c.fill_poly(
+                        &[
+                            (x - 3.0, py + 0.8),
+                            (x + 4.0, py + 0.8),
+                            (x + 1.5, py + 4.6),
+                        ],
+                        rgba(65.0, 62.0, 55.0, 0.65),
+                    );
+                }
+                if r.f() < 0.045 {
+                    c.line(
+                        px + 2.0,
+                        py + bh * 0.22,
+                        px + bw * 0.53,
+                        py + bh * 0.55,
+                        0.8,
+                        rgba(54.0, 52.0, 46.0, 0.6),
+                    );
+                    c.line(
+                        px + bw * 0.53,
+                        py + bh * 0.55,
+                        px + bw - 1.0,
+                        py + bh * 0.8,
+                        0.8,
+                        rgba(54.0, 52.0, 46.0, 0.6),
+                    );
+                }
             }
         }
     }
-    let mut x = 0.0;
-    while x < 512.0 {
-        c.fill_rect(x, 0.0, u * 3.0, u * 3.0, MORTAR);
-        let col = jit([110.0, 108.0, 104.0], 0.1, &mut r);
-        c.fill_rect(x + 1.5, 1.5, u * 3.0 - 3.0, u * 3.0 - 3.0, col);
-        x += u * 3.0;
+    grime(&mut c, &mut r, 512.0, 512.0, 26);
+    for _ in 0..4200 {
+        let (x, y) = (r.f() * 512.0, r.f() * 512.0);
+        let v = 60.0 + r.f() * 160.0;
+        c.fill_rect(x, y, 0.9, 0.9, rgba(v, v - 2.0, v - 5.0, 0.24));
     }
-    grime(&mut c, &mut r, 512.0, 512.0, 14);
     c
 }
 
@@ -470,8 +555,20 @@ fn sidewalk_tex() -> Canvas {
 fn lot_tex() -> Canvas {
     let mut r = Lehmer(31);
     let mut c = Canvas::new(512, 512);
-    c.fill_rect(0.0, 0.0, 512.0, 512.0, css("#8a8680"));
-    for _ in 0..1800 {
+    c.fill_rect(0.0, 0.0, 512.0, 512.0, css("#77766d"));
+    for row in 0..4 {
+        for col in 0..4 {
+            let base = jit([132.0, 128.0, 117.0], 0.24, &mut r);
+            c.fill_rect(
+                col as f32 * 128.0 + 1.0,
+                row as f32 * 128.0 + 1.0,
+                126.0,
+                126.0,
+                base,
+            );
+        }
+    }
+    for _ in 0..3200 {
         let v = 110.0 + r.f() * 70.0;
         let (x, y, w, h) = (
             r.f() * 512.0,
@@ -482,12 +579,15 @@ fn lot_tex() -> Canvas {
         c.fill_rect(x, y, w, h, rgba(v, v - 3.0, v - 9.0, 0.25));
     }
     let u = 6.4;
+    // Small, faded repairs sit within the worn concrete, rather than forming a
+    // conspicuous repeating checker across the whole lot at gameplay distance.
     for _ in 0..2 {
-        let w = (2.0 + (r.f() * 6.0).floor()) * u * 3.0;
-        let h = (2.0 + (r.f() * 5.0).floor()) * u * 3.0;
+        let w = (2.0 + (r.f() * 4.0).floor()) * u * 3.0;
+        let h = (2.0 + (r.f() * 3.0).floor()) * u * 3.0;
         let x0 = (r.f() * 512.0 / (u * 3.0)).floor() * u * 3.0;
         let y0 = (r.f() * 512.0 / (u * 3.0)).floor() * u * 3.0;
-        let col = SIDE_COL[(r.f() * SIDE_COL.len() as f32) as usize % SIDE_COL.len()];
+        let source = SIDE_COL[(r.f() * SIDE_COL.len() as f32) as usize % SIDE_COL.len()];
+        let col = std::array::from_fn(|i| [132.0, 128.0, 117.0][i] * 0.65 + source[i] * 0.35);
         let brick = r.f() < 0.4;
         let (sx, sy) = if brick {
             (u * 2.0, u)
@@ -504,8 +604,8 @@ fn lot_tex() -> Canvas {
                 };
             while x < x0 + w {
                 let (xx, yy) = (x.rem_euclid(512.0), y.rem_euclid(512.0));
-                c.fill_rect(xx, yy, sx, sy, MORTAR);
-                let cc = jit(col, 0.14, &mut r);
+                c.fill_rect(xx, yy, sx, sy, rgba(78.0, 75.0, 67.0, 0.38));
+                let cc = jit(col, 0.10, &mut r);
                 c.fill_rect(xx + 1.2, yy + 1.2, sx - 2.4, sy - 2.4, cc);
                 x += sx;
             }
@@ -513,7 +613,7 @@ fn lot_tex() -> Canvas {
         }
     }
     // slab joints + cracks
-    let joint = rgba(40.0, 38.0, 34.0, 0.45);
+    let joint = rgba(37.0, 36.0, 30.0, 0.65);
     let mut x = 0.0;
     while x <= 512.0 {
         c.line(x, 0.0, x, 512.0, 1.2, joint);
@@ -528,7 +628,14 @@ fn lot_tex() -> Canvas {
             y += (r.f() - 0.5) * 40.0;
             pts.push((x, y));
         }
-        c.polyline(&pts, 0.8, joint);
+        c.polyline(&pts, 1.2, joint);
+        if let Some(&(bx, by)) = pts.get(3) {
+            c.polyline(
+                &[(bx, by), (bx - 8.0, by + 9.0), (bx - 20.0, by + 12.0)],
+                0.7,
+                joint,
+            );
+        }
     }
     // moss in joints
     for _ in 0..60 {
@@ -537,7 +644,7 @@ fn lot_tex() -> Canvas {
         let (y, h) = (r.f() * 512.0, 4.0 + r.f() * 20.0);
         c.fill_rect(x, y, 3.0, h, rgba(70.0, 95.0, 50.0, a));
     }
-    grime(&mut c, &mut r, 512.0, 512.0, 22);
+    grime(&mut c, &mut r, 512.0, 512.0, 38);
     c
 }
 
@@ -566,21 +673,112 @@ fn floor_tex() -> Canvas {
     c
 }
 
-/// 騎樓 mosaic / ceramic tiles (arcade.ts `tileTex`).
+/// Individual shop owners' floors (paving.ts ARC_STYLES): maroon ceramic,
+/// beige/brown checker, grey slate and green/white mosaic. One texture spans 1 m.
+fn arcade_tile_tex(style: usize) -> Canvas {
+    let (n, palette, mortar, checker): (usize, &[[f32; 3]], &str, bool) = match style {
+        0 => (
+            4,
+            &[
+                [150.0, 80.0, 70.0],
+                [140.0, 72.0, 64.0],
+                [160.0, 92.0, 80.0],
+            ],
+            "#5a4038",
+            false,
+        ),
+        1 => (
+            5,
+            &[[200.0, 186.0, 160.0], [120.0, 90.0, 70.0]],
+            "#6a5a4a",
+            true,
+        ),
+        2 => (
+            3,
+            &[
+                [120.0, 122.0, 120.0],
+                [108.0, 110.0, 112.0],
+                [134.0, 132.0, 126.0],
+            ],
+            "#3a3a3a",
+            false,
+        ),
+        _ => (
+            10,
+            &[
+                [210.0, 214.0, 206.0],
+                [110.0, 150.0, 120.0],
+                [200.0, 204.0, 196.0],
+            ],
+            "#777a70",
+            false,
+        ),
+    };
+    let mut r = Lehmer(31 + style as u64 * 17);
+    let mut c = Canvas::new(256, 256);
+    c.fill_rect(0.0, 0.0, 256.0, 256.0, css(mortar));
+    let cell = 256.0 / n as f32;
+    for y in 0..n {
+        for x in 0..n {
+            let k = if checker {
+                (x + y) % 2
+            } else {
+                (r.f() * palette.len() as f32) as usize % palette.len()
+            };
+            let col = jit(palette[k], 0.14, &mut r);
+            let (px, py) = (x as f32 * cell, y as f32 * cell);
+            c.fill_rect(px + 1.0, py + 1.0, cell - 2.0, cell - 2.0, col);
+            if r.f() < 0.15 {
+                c.fill_poly(
+                    &[
+                        (px + 1.0, py + 1.0),
+                        (px + 7.0, py + 1.0),
+                        (px + 1.0, py + 6.0),
+                    ],
+                    rgba(66.0, 62.0, 52.0, 0.8),
+                );
+            }
+        }
+    }
+    grime(&mut c, &mut r, 256.0, 256.0, 18);
+    c
+}
+
+/// Small glazed column tiles, with streaked mortar and chips at the joints.
 fn tile_tex(base: &str, line: &str, n: usize, seed: u64) -> Canvas {
     let mut r = Rng(seed);
     let mut c = Canvas::new(128, 128);
     c.fill_rect(0.0, 0.0, 128.0, 128.0, css(base));
     let cell = 128.0 / n as f32;
-    for _ in 0..200 {
-        let (x, y) = (r.f() * 128.0, r.f() * 128.0);
-        let a = r.f() * 0.08;
-        c.fill_rect(x, y, cell, cell, rgba(0.0, 0.0, 0.0, a));
+    for row in 0..n {
+        for col in 0..n {
+            let a = r.f() * 0.14;
+            c.fill_rect(
+                col as f32 * cell,
+                row as f32 * cell,
+                cell,
+                cell,
+                rgba(32.0, 35.0, 27.0, a),
+            );
+        }
     }
     for i in 0..=n {
         let p = i as f32 * cell;
-        c.fill_rect(p - 1.0, 0.0, 2.0, 128.0, css(line));
-        c.fill_rect(0.0, p - 1.0, 128.0, 2.0, css(line));
+        c.fill_rect(p - 0.6, 0.0, 1.2, 128.0, css(line));
+        c.fill_rect(0.0, p - 0.6, 128.0, 1.2, css(line));
+    }
+    for _ in 0..12 {
+        let x = r.f() * 128.0;
+        c.grad_rect_v(
+            x,
+            0.0,
+            2.0 + r.f() * 5.0,
+            128.0,
+            0.0,
+            128.0,
+            rgba(42.0, 41.0, 31.0, 0.35),
+            rgba(42.0, 41.0, 31.0, 0.0),
+        );
     }
     c
 }
@@ -833,14 +1031,9 @@ pub fn build_materials(
     let walk_t = tex(sidewalk_tex());
     let curb_t = tex(curb_tex());
     let floor_t = tex(floor_tex());
-    let arc_t: Vec<Handle<Image>> = [
-        ("#b8a890", "#7a6a58", 8, 31),
-        ("#c8bca8", "#8a7e6a", 6, 32),
-        ("#9a8a7a", "#6a5a4a", 10, 33),
-    ]
-    .iter()
-    .map(|&(b, l, n, s)| tex(tile_tex(b, l, n, s)))
-    .collect();
+    let arc_t: Vec<Handle<Image>> = (0..ARCADE_TILE_N)
+        .map(|style| tex(arcade_tile_tex(style)))
+        .collect();
     let col_t = tex(tile_tex("#c9b9a0", "#8a7a64", 8, 34));
     let shut_t = tex(shutter_tex());
     let tin_t = tex(tin_tex());
@@ -905,9 +1098,9 @@ pub fn build_materials(
         }),
         arcade_floor: arc_t
             .into_iter()
-            .map(|t| mats.add(std(Some(t), 0.55)))
+            .map(|t| mats.add(std(Some(t), 0.82)))
             .collect(),
-        column: mats.add(std(Some(col_t), 0.45)),
+        column: mats.add(std(Some(col_t), 0.85)),
         shutter: mats.add(StandardMaterial {
             metallic: 0.4,
             ..std(Some(shut_t), 0.6)
@@ -962,5 +1155,22 @@ pub fn build_materials(
             depth_bias: 4.0,
             ..default()
         }),
+    }
+}
+
+#[cfg(test)]
+mod weathering_tests {
+    use super::*;
+
+    #[test]
+    fn road_repairs_remain_neutral_under_every_mip() {
+        let c = road_tex();
+        // Prevent the former independent RGB patch RNG from returning green / purple
+        // repairs. Mip averaging cannot introduce a greater channel spread.
+        assert!(c.px.iter().all(|p| {
+            let high = p[..3].iter().copied().fold(f32::MIN, f32::max);
+            let low = p[..3].iter().copied().fold(f32::MAX, f32::min);
+            high - low < 0.035
+        }));
     }
 }

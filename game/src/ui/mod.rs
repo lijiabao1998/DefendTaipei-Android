@@ -8,8 +8,12 @@
 
 mod layout;
 mod pause;
+mod portrait;
 mod screens;
 mod shelter;
+mod title;
+
+pub(crate) use title::{TitleAction, TitleMenu, TitlePage};
 
 pub use shelter::{OpenPanel, PanelKind, UiModal};
 
@@ -43,14 +47,24 @@ pub struct FlowUiPlugin;
 impl Plugin for FlowUiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedRole>()
+            .init_resource::<TitleMenu>()
+            .init_resource::<title::TitleAssets>()
+            .init_resource::<title::TitleCache>()
             .init_resource::<ConsumedPresses>()
             .init_resource::<PauseOpen>()
             .init_resource::<UiModal>()
             .init_resource::<shelter::PanelState>()
             .init_resource::<shelter::RenderCache>()
             .add_message::<TogglePause>()
+            .add_message::<TitleAction>()
             .add_message::<OpenPanel>()
-            .add_systems(OnEnter(GameFlow::Title), screens::enter_title)
+            .add_systems(OnEnter(GameFlow::Title), title::reset)
+            .add_systems(
+                Update,
+                (title::pointer_actions, title::apply_actions)
+                    .chain()
+                    .before(crate::game_flow::FlowSet),
+            )
             .add_systems(
                 PreUpdate,
                 consume_ui_clicks.after(bevy::input::InputSystems),
@@ -62,7 +76,6 @@ impl Plugin for FlowUiPlugin {
                     screens::ensure_screens,
                     screens::restyle,
                     screens::refresh_copy,
-                    screens::title_clicks,
                     screens::prologue_clicks,
                     screens::death_clicks,
                     pause::drive_pause
@@ -74,7 +87,7 @@ impl Plugin for FlowUiPlugin {
             );
         app.add_systems(
             PostUpdate,
-            shelter::render_panels.before(bevy::ui::UiSystems::Prepare),
+            (shelter::render_panels, title::render).before(bevy::ui::UiSystems::Prepare),
         );
     }
 }
