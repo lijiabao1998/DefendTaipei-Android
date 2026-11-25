@@ -111,6 +111,9 @@ struct PlayingBanner;
 #[derive(Component)]
 struct PlayingBannerText;
 
+#[derive(Component)]
+struct PlayingBannerFooter;
+
 /// Ordered clock/story stage. Shelter dawn and world vitals follow it.
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FlowSet;
@@ -145,10 +148,15 @@ impl Plugin for GameFlowPlugin {
                     reclaim,
                     sync_over,
                     sync_prologue_banner,
-                    sync_playing_banner,
                 )
                     .chain()
                     .in_set(FlowSet),
+            )
+            .add_systems(
+                PostUpdate,
+                sync_playing_banner
+                    .after(crate::hud::HudSet)
+                    .before(bevy::ui::UiSystems::Prepare),
             );
     }
 }
@@ -449,25 +457,36 @@ fn sync_prologue_banner(
     }
 }
 
-fn banner_font() -> TextFont {
-    TextFont {
-        font_size: FontSize::Px(16.0),
-        ..default()
-    }
-}
-
-/// The radio/phone banner. Evacuation is handled at the actual map sites.
+/// The phone/radio banner shares the HUD geometry and opens the journal on tap.
+/// The full original report is available in that journal even on a short phone.
 fn sync_playing_banner(
     mut commands: Commands,
     state: Res<State<GameFlow>>,
     campaign: Res<Campaign>,
     modal: Option<Res<crate::ui::UiModal>>,
-    card: Option<Single<&mut Visibility, With<PlayingBanner>>>,
-    body: Option<Single<&mut Text, With<PlayingBannerText>>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
+    lang: Option<Res<crate::i18n::Language>>,
+    geometry: Option<Res<crate::hud::HudGeometry>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    card: Option<Single<(&mut Visibility, &mut Node), With<PlayingBanner>>>,
+    body: Option<Single<&mut Text, (With<PlayingBannerText>, Without<PlayingBannerFooter>)>>,
+    footer: Option<Single<&mut Text, (With<PlayingBannerFooter>, Without<PlayingBannerText>)>>,
 ) {
     if !matches!(state.get(), GameFlow::Playing) {
         return;
     }
+    let viewport = windows.iter().next().map_or(Vec2::new(1280.0, 720.0), |w| {
+        Vec2::new(w.width(), w.height())
+    });
+    let rect = geometry
+        .as_ref()
+        .and_then(|g| g.banner)
+        .unwrap_or_else(|| crate::hud::survival_hud_layout(viewport, false).banner);
+    let footer_copy = crate::i18n::tr(
+        lang.as_ref().map_or(crate::i18n::Language::ZhTw, |l| **l),
+        "點一下查看通報與日誌",
+        "Tap to read reports and journal",
+    );
     let Some(mut card) = card else {
         commands
             .spawn((
@@ -475,36 +494,66 @@ fn sync_playing_banner(
                 DespawnOnExit(GameFlow::Playing),
                 Node {
                     position_type: PositionType::Absolute,
-                    top: px(12),
-                    left: px(16),
-                    right: px(16),
-                    max_height: px(120),
-                    padding: UiRect::all(px(10)),
+                    left: px(rect.min.x),
+                    top: px(rect.min.y),
+                    width: px(rect.width()),
+                    height: px(rect.height()),
+                    padding: UiRect::all(px(8)),
+                    border: UiRect::left(px(3)),
+                    border_radius: BorderRadius::all(px(5)),
                     overflow: Overflow::clip(),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(4),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.05, 0.07, 0.11)),
+                BackgroundColor(Color::srgba(0.05, 0.07, 0.10, 0.94)),
+                BorderColor::all(Color::srgb(0.52, 0.64, 0.77)),
                 GlobalZIndex(25),
                 Visibility::Hidden,
+                Pickable::IGNORE,
             ))
-            .with_child((
-                PlayingBannerText,
-                Text::new(""),
-                banner_font(),
-                TextColor(Color::srgb(0.86, 0.93, 1.0)),
-                TextLayout::justify(Justify::Left),
-            ));
+            .with_children(|parent| {
+                parent.spawn((
+                    PlayingBannerText,
+                    Node {
+                        width: percent(100),
+                        height: px(rect.height() - 35.0),
+                        overflow: Overflow::clip(),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    Text::new(""),
+                    TextFont::from_font_size(FontSize::Px(12.0)),
+                    TextColor(Color::srgb(0.86, 0.93, 1.0)),
+                    TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
+                ));
+                parent.spawn((
+                    PlayingBannerFooter,
+                    Text::new(footer_copy),
+                    TextFont::from_font_size(FontSize::Px(10.0)),
+                    TextColor(Color::srgb(0.75, 0.69, 0.50)),
+                ));
+            });
         return;
     };
-    let show =
-        campaign.notice_t > 0.0 && !campaign.notice.is_empty() && !modal.is_some_and(|m| m.open);
-    **card = if show {
+    let show = campaign.notice_t > 0.0
+        && !campaign.notice.is_empty()
+        && !modal.is_some_and(|m| m.open)
+        && !pause.is_some_and(|p| p.0);
+    *card.0 = if show {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
+    card.1.left = px(rect.min.x);
+    card.1.top = px(rect.min.y);
+    card.1.width = px(rect.width());
+    card.1.height = px(rect.height());
     if show && let Some(mut body) = body {
         body.0 = campaign.notice.clone();
+    }
+    if let Some(mut footer) = footer {
+        footer.0 = footer_copy.to_owned();
     }
 }
 

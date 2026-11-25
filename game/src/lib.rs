@@ -10,6 +10,7 @@ mod camera;
 pub mod chunk;
 mod city;
 pub mod combat;
+pub mod doors;
 pub mod game_flow;
 mod geom;
 mod hud;
@@ -28,6 +29,7 @@ mod story;
 pub mod survival;
 mod touch;
 pub mod ui;
+pub mod worldmap;
 pub mod worldplay;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
@@ -105,6 +107,9 @@ pub fn run() {
             survival::ShelterPlugin,
             worldplay::WorldPlayPlugin,
             save::SavePlugin,
+            doors::DoorPlugin,
+            worldmap::WorldMapPlugin,
+            map::atmosphere::AtmospherePlugin,
         ));
     #[cfg(not(target_os = "android"))]
     if qa_mode {

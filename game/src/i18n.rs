@@ -101,6 +101,9 @@ mod tests {
         let mut chars: BTreeSet<char> = EXTRA_SYMBOLS.chars().collect();
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
         walk(&root, &mut chars);
+        for road in &crate::map::world().roads {
+            chars.extend(road.name.chars());
+        }
         chars
     }
 

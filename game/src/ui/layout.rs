@@ -316,6 +316,8 @@ fn overlay_layout(viewport: Vec2, top_gap: f32) -> DeathLayout {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PauseLayout {
+    pub frame: ScreenRect,
+    pub summary: ScreenRect,
     pub heading: ScreenRect,
     pub resume: ScreenRect,
     pub menu: ScreenRect,
@@ -330,7 +332,26 @@ pub fn pause_layout(viewport: Vec2) -> PauseLayout {
     let height = 72.0;
     let gap = 12.0;
     let top = ((viewport.y - height * 2.0 - gap) * 0.5).max(insets.top + 48.0);
+    let summary_y = if viewport.y < 600.0 {
+        insets.top
+    } else {
+        top - 110.0
+    };
+    let frame_top = (summary_y - 14.0).max(4.0);
     PauseLayout {
+        frame: ScreenRect::new(
+            (x - 12.0).max(4.0),
+            frame_top,
+            (button_w + 24.0).min(viewport.x - 8.0),
+            (top + height * 2.0 + gap + 76.0 - frame_top)
+                .min(viewport.y - insets.bottom - frame_top),
+        ),
+        summary: ScreenRect::new(
+            x,
+            summary_y,
+            button_w,
+            if viewport.y < 600.0 { 28.0 } else { 48.0 },
+        ),
         heading: ScreenRect::new(x, (top - 48.0).max(insets.top), button_w, 40.0),
         resume: ScreenRect::new(x, top, button_w, height),
         menu: ScreenRect::new(x, top + height + gap, button_w, height),

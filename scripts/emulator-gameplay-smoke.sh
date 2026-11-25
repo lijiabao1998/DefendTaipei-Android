@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Interactive smoke test for a disposable Android emulator, not a user's phone.
 # Installs the APK, starts a fresh office-worker game, exercises the real touch
-# panels, then verifies that deposit/prayer survive Save -> Menu -> Continue.
+# panels and map annotations, then verifies that both survive Save -> Menu -> Continue.
 # The screenshots are evidence for visual review; this script does not perform OCR.
 set -euo pipefail
 
@@ -183,6 +183,21 @@ capture 02-prologue-portrait 390 844
 tap_wait 195 328 'DTUI action=Skip$' 'DTUI flow=Playing '
 capture 03-playing-portrait 390 844
 
+# The map tool creates a note only when the finger is released. tap_wait takes
+# its log baseline before the one-second press and waits after the matching UP.
+# Reopening while Supplies remains selected catches the held-button regression:
+# the opening finger must never become an annotation on the paper beneath it.
+tap_wait 334 576 'DTMAP open=true$'
+tap 104 719
+tap_wait 220 350 'DTMAP notes=1$'
+tap_wait 342 65 'DTMAP open=false$'
+tap_wait 334 576 'DTMAP open=true$'
+capture 03a-map-supply-portrait 390 844
+refresh_log
+[[ "$(log_count 'DTMAP notes=')" == 1 ]]
+[[ "$(log_count 'DTMAP notes=1$')" == 1 ]]
+tap_wait 342 65 'DTMAP open=false$'
+
 # Bottom toolbar: Bag, Shelter, Barter, Interact, Pause.
 tap_wait 50 787 'DTUI panel=Some\(Inventory\)$'
 capture 04-inventory-portrait 390 844
@@ -215,7 +230,10 @@ assert stock.get("coffee", 0) == 1 and stock.get("noodle", 0) == 1, stock
 assert stock.get("water", 0) == 3 and stock.get("rice", 0) == 2, stock
 assert save["shelter"]["pray_day"] == save["shelter"]["day"] == 1
 assert not save["shelter"]["upgrades"], "Unaffordable build should remain disabled"
-print("Deposit, once-per-day prayer and disabled build verified in actual Android save.")
+assert len(save["map"]["notes"]) == 1, save["map"]["notes"]
+assert save["map"]["notes"][0]["kind"] == "supplies", save["map"]["notes"]
+assert len(save["map"]["revealed"]) > 0, "Starting area was not discovered"
+print("Deposit, once-per-day prayer, disabled build and map note verified in actual Android save.")
 PY
 
 tap_wait 332 77 'DTUI panel=None$'
@@ -245,7 +263,10 @@ for field in ("day", "stash", "upgrades", "pray_day", "group", "karma"):
 assert after["inventory"] == before["inventory"]
 assert clock(after) > clock(menu) >= clock(before), (clock(before), clock(menu), clock(after))
 assert after["player"]["position"] == before["player"]["position"]
-print("Continue restored shelter, inventory and position without resetting or duplicate dawn/prayer.")
+assert before["map"]["notes"] == menu["map"]["notes"] == after["map"]["notes"]
+assert len(after["map"]["notes"]) == 1 and after["map"]["notes"][0]["kind"] == "supplies"
+assert set(before["map"]["revealed"]) <= set(menu["map"]["revealed"]) <= set(after["map"]["revealed"])
+print("Continue restored shelter, inventory, position, map notes and discovery without resetting or duplicate dawn/prayer.")
 PY
 
 # Native sensor activity: rotate the live session, then inspect both the shelter
@@ -261,6 +282,17 @@ adb shell settings put system user_rotation 0
 adb emu sensor set acceleration 0:9.8:0
 sleep 4
 capture 12-barter-portrait 390 844
+
+# Inspect the restored map in both orientations. Reopening after Continue still
+# has the mark tool selected; holding the map button must not create a second note.
+tap_wait 332 77 'DTUI panel=None$'
+tap_wait 334 576 'DTMAP open=true$'
+capture 13-map-restored-portrait 390 844
+adb shell settings put system user_rotation 1
+adb emu sensor set acceleration 9.8:0:0
+sleep 4
+capture 14-map-restored-landscape 844 390
+tap_wait 776 35 'DTMAP open=false$'
 alive
 refresh_log
 [[ "$(log_count 'DTUI action=Save$')" == 2 ]]
@@ -269,11 +301,15 @@ refresh_log
 [[ "$(log_count 'DTUI action=ReviewDeparture$')" == 1 ]]
 [[ "$(log_count 'DTUI action=NewGame$')" == 1 ]]
 [[ "$(log_count 'DTUI action=Pray$')" == 1 ]]
+[[ "$(log_count 'DTMAP open=true$')" == 3 ]]
+[[ "$(log_count 'DTMAP open=false$')" == 3 ]]
+[[ "$(log_count 'DTMAP notes=')" == 1 ]]
+[[ "$(log_count 'DTMAP notes=1$')" == 1 ]]
 
 adb logcat -d >"$OUT_DIR/logcat.txt"
 if grep -En 'panicked at|FATAL EXCEPTION|Fatal signal|AM crashed:|Native crash|error\[B000' "$OUT_DIR/logcat.txt"; then
   echo "Runtime crash signature found" >&2
   exit 1
 fi
-grep -E 'DTUI|DTPERF' "$OUT_DIR/logcat.txt" >"$OUT_DIR/events.txt"
-printf '%s\n' 'Android gameplay smoke passed: touch panels, persistence and orientation.'
+grep -E 'DTUI|DTMAP|DTPERF' "$OUT_DIR/logcat.txt" >"$OUT_DIR/events.txt"
+printf '%s\n' 'Android gameplay smoke passed: touch panels, map marking, held-pointer capture, persistence and orientation.'

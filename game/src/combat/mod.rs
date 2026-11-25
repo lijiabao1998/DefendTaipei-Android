@@ -651,9 +651,10 @@ fn soldiers_think(
         if !s.alive() || !s.active(env.night) {
             continue;
         }
+        let previous = s.pos;
         let out = soldier::tick(s, &c, &mut rng.0);
         if let Some(obs) = obstacles.as_deref() {
-            s.pos = resolve_collisions(s.pos, SOLDIER_RADIUS, obs);
+            s.pos = obs.move_circle(previous, s.pos, SOLDIER_RADIUS);
         }
         tf.translation.x = s.pos.x;
         tf.translation.z = s.pos.y;
@@ -686,7 +687,7 @@ fn soldiers_think(
             let away = (pp - s.pos).normalize_or_zero() * MELEE_KNOCKBACK;
             let kb = pp + away;
             let kb = obstacles.as_deref().map_or(kb, |o| {
-                resolve_collisions(kb, crate::player::PLAYER_RADIUS, o)
+                resolve_collisions(pp, kb, crate::player::PLAYER_RADIUS, o)
             });
             ptf.translation.x = kb.x;
             ptf.translation.z = kb.y;

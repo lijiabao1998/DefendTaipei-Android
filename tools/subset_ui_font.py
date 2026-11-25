@@ -13,6 +13,7 @@ downloaded on first use to the path in `NOTO_SANS_TC` or `/tmp/fonts`.
 from __future__ import annotations
 
 import os
+import json
 import urllib.request
 from pathlib import Path
 
@@ -29,6 +30,10 @@ def main() -> None:
     chars = set(EXTRA)
     for path in rust_files(root):
         scan_strings(path.read_text(encoding="utf-8"), chars)
+    # The survivor map prints real street labels from the bundled OSM data.
+    world = json.loads((root / "assets/data/wanhua.json").read_text(encoding="utf-8"))
+    for road in world["roads"]:
+        chars.update(road.get("n", ""))
     text_path = Path("/tmp/fonts/chars.txt")
     text_path.parent.mkdir(parents=True, exist_ok=True)
     text_path.write_text("".join(sorted(chars)), encoding="utf-8")

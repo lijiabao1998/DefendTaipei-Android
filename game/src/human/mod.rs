@@ -601,7 +601,7 @@ fn lcg(s: &mut u32) -> f32 {
 /// A few 萬華 residents out on the street around the start.
 fn spawn_civilians(mut commands: Commands) {
     let w = crate::map::world();
-    let obs = crate::map::Obstacles(w.clone());
+    let obs = crate::map::Obstacles::new(w.clone());
     let mut seed = 0x51_7e_u32;
     let mut n = 0;
     for _ in 0..400 {
@@ -677,7 +677,7 @@ fn drive_civilians(
             continue;
         }
         let dir = d.normalize();
-        let np = obstacles.collide(p + dir * c.speed * dt, 0.35);
+        let np = obstacles.move_circle(p, p + dir * c.speed * dt, 0.35);
         if np.distance(p) < c.speed * dt * 0.3 {
             c.target = p; // stuck: pick another errand
         }

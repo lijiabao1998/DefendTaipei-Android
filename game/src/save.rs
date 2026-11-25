@@ -27,6 +27,7 @@ use crate::player::{MoveInput, Player};
 use crate::roles::{Gender, ROLES, SelectedRole};
 use crate::story::{PRO_NEWS, WANHUA_DISTRICTS};
 use crate::survival::{DawnTracker, Shelter, ShelterEnvironment};
+use crate::worldmap::MapProgress;
 use crate::worldplay::{PlayerNeeds, ScavengeState};
 
 const SAVE_VERSION: u32 = 1;
@@ -89,6 +90,8 @@ struct SaveFile {
     environment: ShelterEnvironment,
     needs: PlayerNeeds,
     world: ScavengeState,
+    #[serde(default)]
+    map: MapProgress,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -189,6 +192,9 @@ impl SaveFile {
         if !self.inventory.is_valid() || !self.shelter.is_valid() || !self.environment.is_valid() {
             return Err(SaveError::Invalid("Invalid inventory or shelter state"));
         }
+        if !self.map.validate() {
+            return Err(SaveError::Invalid("Invalid map exploration or notes"));
+        }
         if [self.needs.hunger, self.needs.thirst, self.needs.fatigue]
             .iter()
             .any(|value| !finite_range(*value, 0.0, 100.0))
@@ -196,6 +202,16 @@ impl SaveFile {
             return Err(SaveError::Invalid("Invalid survival needs"));
         }
         let world = &self.world;
+        if world.closed_doors.len() > map.blds.len()
+            || world.closed_doors.iter().collect::<HashSet<_>>().len() != world.closed_doors.len()
+            || world.closed_doors.iter().any(|id| {
+                map.blds
+                    .get(*id as usize)
+                    .is_none_or(|b| b.id != *id || b.door.is_none())
+            })
+        {
+            return Err(SaveError::Invalid("Invalid saved doors"));
+        }
         let loot_ids: HashSet<&str> = world.loot.iter().map(|(id, _)| id.as_str()).collect();
         if [&world.searched, &world.asked, &world.night_seen]
             .iter()
@@ -494,6 +510,10 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
         environment: *world.resource::<ShelterEnvironment>(),
         needs: world.resource::<PlayerNeeds>().clone(),
         world: world.resource::<ScavengeState>().clone(),
+        map: world
+            .get_resource::<MapProgress>()
+            .cloned()
+            .unwrap_or_default(),
     };
     save.validate()?;
     Ok(save)
@@ -547,7 +567,13 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     world.insert_resource(save.shelter);
     world.insert_resource(save.environment);
     world.insert_resource(save.needs);
+    if let Some(obstacles) = world.get_resource::<crate::map::Obstacles>() {
+        obstacles.doors().replace_closed(&save.world.closed_doors);
+        crate::doors::protect_position(obstacles, transform.translation.xz());
+        save.world.closed_doors = obstacles.doors().closed_ids();
+    }
     world.insert_resource(save.world);
+    world.insert_resource(save.map);
     if let Some(mut input) = world.get_resource_mut::<MoveInput>() {
         *input = MoveInput::default();
     }
@@ -674,6 +700,7 @@ mod tests {
             environment: ShelterEnvironment::default(),
             needs: PlayerNeeds::default(),
             world: ScavengeState::default(),
+            map: MapProgress::default(),
         }
     }
 
@@ -741,6 +768,103 @@ mod tests {
         save.world.searched.clear();
         save.role_id = "unknown-role".into();
         assert!(save.validate().is_err());
+    }
+
+    #[test]
+    fn legacy_saves_without_map_and_door_fields_preserve_their_open_passages() {
+        let mut json = serde_json::to_value(sample()).unwrap();
+        json.as_object_mut().unwrap().remove("map");
+        json["world"]
+            .as_object_mut()
+            .unwrap()
+            .remove("closed_doors");
+        let saved = decode(&serde_json::to_vec(&json).unwrap()).unwrap();
+        assert_eq!(saved.player.hp, 73.0);
+        assert_eq!(saved.campaign.game_min, 1800.0);
+        assert_eq!(saved.map, MapProgress::default());
+        assert!(saved.world.closed_doors.is_empty());
+    }
+
+    #[test]
+    fn nonempty_exploration_and_note_survive_real_save_snapshot_and_continue() {
+        let mut saved = sample();
+        let point = Vec2::new(saved.player.position[0], saved.player.position[2]);
+        saved.map.reveal(point, 38.0);
+        assert!(saved.map.add_note(
+            point + Vec2::new(12.0, -8.0),
+            crate::worldmap::NoteKind::Supplies
+        ));
+        let expected = saved.map.clone();
+        let slot = TempSlot::new();
+        write_slot(&slot.path(), &saved).unwrap();
+        let mut world = World::new();
+        world.spawn((Player, Transform::default()));
+        world.insert_resource(NextState::<GameFlow>::Unchanged);
+        world.init_resource::<Messages<LoadCompleted>>();
+        restore(&mut world, read_slot(&slot.path()).unwrap()).unwrap();
+        assert_eq!(world.resource::<MapProgress>(), &expected);
+        assert_eq!(snapshot(&mut world).unwrap().map, expected);
+    }
+
+    #[test]
+    fn door_deltas_roundtrip_and_reject_unknown_or_duplicate_buildings() {
+        let id = crate::map::world()
+            .blds
+            .iter()
+            .find(|b| b.door.is_some())
+            .unwrap()
+            .id;
+        let mut saved = sample();
+        saved.world.closed_doors = vec![id];
+        let loaded = decode(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(loaded.world.closed_doors, vec![id]);
+        saved.world.closed_doors.push(id);
+        assert!(saved.validate().is_err());
+        saved.world.closed_doors = vec![u32::MAX];
+        assert!(saved.validate().is_err());
+    }
+
+    #[test]
+    fn continue_restores_shared_door_collision_and_protects_a_saved_threshold() {
+        let map = crate::map::world().clone();
+        let (id, door) = map
+            .blds
+            .iter()
+            .find_map(|b| b.door.map(|d| (b.id, d)))
+            .unwrap();
+        let mut saved = sample();
+        saved.world.closed_doors = vec![id];
+        saved.player.position = [door.p.x + door.n.x, 0.0, door.p.y + door.n.y];
+        let mut world = World::new();
+        world.spawn((Player, Transform::default()));
+        world.insert_resource(NextState::<GameFlow>::Unchanged);
+        world.init_resource::<Messages<LoadCompleted>>();
+        world.insert_resource(crate::map::Obstacles::new(map));
+        restore(&mut world, saved).unwrap();
+        assert!(
+            !world
+                .resource::<crate::map::Obstacles>()
+                .doors()
+                .is_open(id)
+        );
+        let mut saved = sample();
+        saved.world.closed_doors = vec![id];
+        saved.player.position = [door.p.x, 0.0, door.p.y];
+        restore(&mut world, saved).unwrap();
+        assert!(
+            world
+                .resource::<crate::map::Obstacles>()
+                .doors()
+                .is_open(id)
+        );
+        assert!(world.resource::<ScavengeState>().closed_doors.is_empty());
+        let pos = world
+            .query_filtered::<&Transform, With<Player>>()
+            .single(&world)
+            .unwrap()
+            .translation
+            .xz();
+        assert_eq!(pos, door.p, "Continue must not teleport the player");
     }
 
     #[test]

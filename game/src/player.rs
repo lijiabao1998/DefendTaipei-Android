@@ -98,9 +98,10 @@ fn keyboard_input(
     input.keys = v.normalize_or_zero();
 }
 
-/// Pushes a circle out of every wall / cover segment and keeps it on the map (main.ts `collide`).
-pub fn resolve_collisions(p: Vec2, radius: f32, obstacles: &Obstacles) -> Vec2 {
-    obstacles.collide(p, radius)
+/// Sweeps a circle through walls, cover and live doors without skipping a thin
+/// obstacle on a long frame, then keeps it within the playable map.
+pub fn resolve_collisions(from: Vec2, to: Vec2, radius: f32, obstacles: &Obstacles) -> Vec2 {
+    obstacles.move_circle(from, to, radius)
 }
 
 fn move_player(
@@ -161,7 +162,7 @@ fn move_player(
         needs.fatigue = (needs.fatigue + time.delta_secs() * 0.25).min(100.0);
     }
     let pos = player.translation.xz() + dir * speed * time.delta_secs();
-    let pos = resolve_collisions(pos, PLAYER_RADIUS, &obstacles);
+    let pos = resolve_collisions(player.translation.xz(), pos, PLAYER_RADIUS, &obstacles);
     player.translation.x = pos.x;
     player.translation.z = pos.y;
     // Face the movement direction (local -Z forward)
@@ -181,7 +182,7 @@ mod tests {
         app.init_resource::<Time>()
             .init_resource::<MoveInput>()
             .init_resource::<GameState>()
-            .insert_resource(Obstacles(crate::map::world().clone()))
+            .insert_resource(Obstacles::new(crate::map::world().clone()))
             .init_resource::<ButtonInput<KeyCode>>()
             .add_systems(Update, (keyboard_input, move_player).chain());
         let e = app.world_mut().spawn((Player, Transform::default())).id();

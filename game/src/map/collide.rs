@@ -12,7 +12,7 @@ use crate::combat::world::CombatWorld;
 
 /// The map's collision world. Cheap to clone (shared).
 #[derive(Resource, Clone)]
-pub struct Obstacles(pub Arc<WorldData>);
+pub struct Obstacles(pub Arc<WorldData>, crate::doors::DoorRuntime);
 
 /// A wall / cover hit along a segment query.
 #[derive(Clone, Copy, Debug)]
@@ -40,12 +40,21 @@ fn seg_inter(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> Option<(f32, f32)> {
 }
 
 impl Obstacles {
+    pub fn new(world: Arc<WorldData>) -> Self {
+        let doors = crate::doors::DoorRuntime::new(&world);
+        Self(world, doors)
+    }
+
+    pub fn doors(&self) -> &crate::doors::DoorRuntime {
+        &self.1
+    }
+
     pub fn world(&self) -> &WorldData {
         &self.0
     }
 
     /// Segments whose grid cells the line p→q passes (los / shotRay walk).
-    fn segs_along(&self, p: Vec2, q: Vec2, mut f: impl FnMut(&Seg)) {
+    fn segs_along(&self, p: Vec2, q: Vec2, mut f: impl FnMut(&Seg, bool)) {
         let d = q - p;
         let n = (d.length() / (CELL * 0.5)).ceil() as i32 + 1;
         let mut seen: HashSet<u32> = HashSet::new();
@@ -54,10 +63,11 @@ impl Obstacles {
             let k = ((pt.x / CELL).floor() as i32, (pt.y / CELL).floor() as i32);
             for &s in self.0.segs_in_cell(k) {
                 if seen.insert(s) {
-                    f(&self.0.segs[s as usize]);
+                    f(&self.0.segs[s as usize], false);
                 }
             }
         }
+        self.1.along(p, q, |seg| f(seg, true));
     }
 
     /// collide(): push a circle of radius r out of every wall / cover segment and keep it
@@ -75,24 +85,54 @@ impl Obstacles {
                     p = c + o / l * r;
                 }
             }
+            self.1.near(p, r, |s| {
+                let d = s.b - s.a;
+                let t = ((p - s.a).dot(d) / d.length_squared().max(1e-12)).clamp(0.0, 1.0);
+                let c = s.a + d * t;
+                let offset = p - c;
+                if offset.length_squared() < r * r {
+                    let normal = if offset.length_squared() > 1e-12 {
+                        offset.normalize()
+                    } else {
+                        Vec2::new(-d.y, d.x).normalize_or_zero()
+                    };
+                    p = c + normal * r;
+                }
+            });
         }
         p.clamp(self.0.min, self.0.max)
     }
 
+    /// Substeps keep a long Android frame / NPC tick from crossing a closed
+    /// aperture in one jump. Ordinary 60 Hz walking still uses a single step.
+    pub fn move_circle(&self, from: Vec2, to: Vec2, radius: f32) -> Vec2 {
+        let delta = to - from;
+        let steps = (delta.length() / (radius.max(0.1) * 0.5)).ceil().max(1.0) as u32;
+        let step = delta / steps as f32;
+        let mut pos = from;
+        for _ in 0..steps {
+            pos = self.collide(pos + step, radius);
+        }
+        pos
+    }
+
     /// Would a circle at p overlap a wall, a building or the map edge?
     pub fn blocked(&self, p: Vec2, r: f32) -> bool {
+        let mut door = false;
+        self.1.near(p, r, |s| door |= seg_dist(p, s.a, s.b) < r);
         p.x < self.0.min.x + r
             || p.y < self.0.min.y + r
             || p.x > self.0.max.x - r
             || p.y > self.0.max.y - r
             || !self.0.free(p, r)
             || self.0.bld_at(p).is_some()
+            || door
     }
 
     /// los(): no wall or cover crosses p→q.
     pub fn los(&self, p: Vec2, q: Vec2) -> bool {
         let mut clear = true;
-        self.segs_along(p, q, |s| {
+        self.segs_along(p, q, |s, _| {
             if clear && seg_inter(p, q, s.a, s.b).is_some() {
                 clear = false;
             }
@@ -104,7 +144,7 @@ impl Obstacles {
     /// at q. Cover lower than the ray is skipped.
     pub fn segment_hit(&self, p: Vec2, q: Vec2, y0: f32, y1: f32) -> Option<SegmentHit> {
         let mut best: Option<SegmentHit> = None;
-        self.segs_along(p, q, |s| {
+        self.segs_along(p, q, |s, _| {
             if let Some((t, _)) = seg_inter(p, q, s.a, s.b) {
                 if best.is_some_and(|b| b.t <= t) {
                     return;
@@ -133,7 +173,7 @@ impl Obstacles {
         let d = q - p;
         let len = d.length().max(1e-6);
         let mut best = 1.0f32;
-        self.segs_along(p, q, |s| {
+        self.segs_along(p, q, |s, door| {
             let e = s.b - s.a;
             let den = d.x * e.y - d.y * e.x;
             if den.abs() < 1e-9 {
@@ -141,7 +181,7 @@ impl Obstacles {
             }
             let t = ((s.a.x - p.x) * e.y - (s.a.y - p.y) * e.x) / den;
             let u = ((s.a.x - p.x) * d.y - (s.a.y - p.y) * d.x) / den;
-            if t < 0.0 || t > best || !(0.0..=1.0).contains(&u) || t * len < own {
+            if t < 0.0 || t > best || !(0.0..=1.0).contains(&u) || (!door && t * len < own) {
                 return;
             }
             if s.h.is_some_and(|h| ys + (yt - ys) * t > h) {
@@ -186,6 +226,12 @@ impl Obstacles {
                 best = Some((d, s.h));
             }
         }
+        self.1.near(p, r, |s| {
+            let d = seg_dist(p, s.a, s.b);
+            if d < r && best.is_none_or(|b| d < b.0) {
+                best = Some((d, s.h));
+            }
+        });
         best.map(|b| b.1.unwrap_or(99.0) <= 1.6)
     }
 
