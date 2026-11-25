@@ -52,6 +52,41 @@ struct Label {
     backing: bool,
 }
 
+const PLAYER_RING_RADIUS: f32 = 8.5;
+const PLAYER_DOT_RADIUS: f32 = 5.5;
+
+/// One logical-screen shape drives both the rasterized pointer and label exclusion.
+/// Its directional bounds keep adjacent names visible when the arrow points away.
+struct PlayerPointer {
+    center: Vec2,
+    arrow: [Vec2; 3],
+}
+
+impl PlayerPointer {
+    fn new(center: Vec2, heading: f32) -> Self {
+        let direction = Vec2::new(heading.sin(), heading.cos());
+        let tangent = Vec2::new(direction.y, -direction.x);
+        Self {
+            center,
+            arrow: [
+                center + direction * 15.0,
+                center + direction * 4.0 + tangent * 5.0,
+                center + direction * 4.0 - tangent * 5.0,
+            ],
+        }
+    }
+
+    fn bounds(&self) -> ScreenRect {
+        let mut min = self.center - PLAYER_RING_RADIUS;
+        let mut max = self.center + PLAYER_RING_RADIUS;
+        for point in self.arrow {
+            min = min.min(point);
+            max = max.max(point);
+        }
+        ScreenRect { min, max }
+    }
+}
+
 pub(super) fn render(
     mut commands: Commands,
     flow: Res<State<GameFlow>>,
@@ -512,16 +547,23 @@ fn draw_paper(
             INK,
         );
     }
-    let p = px(player);
-    c.fill_ellipse(p.x, p.y, 8.5 * ratio, 8.5 * ratio, css("#f5eed9"));
-    c.fill_ellipse(p.x, p.y, 5.5 * ratio, 5.5 * ratio, css("#ae3e2c"));
-    let direction = Vec2::new(heading.sin(), heading.cos());
-    let tangent = Vec2::new(direction.y, -direction.x);
-    let arrow = [
-        p + direction * 15.0 * ratio,
-        p + direction * 4.0 * ratio + tangent * 5.0 * ratio,
-        p + direction * 4.0 * ratio - tangent * 5.0 * ratio,
-    ];
+    let pointer = PlayerPointer::new(view.screen(player, rect), heading);
+    let p = (pointer.center - rect.min) * ratio;
+    c.fill_ellipse(
+        p.x,
+        p.y,
+        PLAYER_RING_RADIUS * ratio,
+        PLAYER_RING_RADIUS * ratio,
+        css("#f5eed9"),
+    );
+    c.fill_ellipse(
+        p.x,
+        p.y,
+        PLAYER_DOT_RADIUS * ratio,
+        PLAYER_DOT_RADIUS * ratio,
+        css("#ae3e2c"),
+    );
+    let arrow = pointer.arrow.map(|p| (p - rect.min) * ratio);
     c.fill_poly(&arrow.map(|p| (p.x, p.y)), css("#ae3e2c"));
     let scale_metres = if view.scale > 2.0 {
         25.0
@@ -552,6 +594,10 @@ fn draw_paper(
         size: 13.0,
         backing: true,
     });
+    // Labels are native UI layered above the canvas. Drawing the player last in the
+    // image alone cannot protect it from a road-name backing at the same location.
+    let player_bounds = pointer.bounds();
+    labels.retain(|label| !label.rect.intersects(player_bounds));
     (c, labels)
 }
 
@@ -744,6 +790,63 @@ fn button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_map_labels_leave_the_actual_player_pointer_visible() {
+        let data = crate::map::world();
+        // Actual start-home/player position from the Android save/continue smoke.
+        // The nearby 昆明街160巷 label previously hid all but six arrow-tip pixels.
+        let home = Vec2::new(146.527_24, -132.237_72);
+        assert!(data.bld_at(home).is_some());
+        let rect = map_layout(Vec2::new(390.0, 844.0)).content;
+        let mut view = MapView::default();
+        view.center_on(home);
+        let mut progress = MapProgress::default();
+        progress.reveal(home, super::super::REVEAL_RADIUS);
+        let forward = Transform::default().rotation * Vec3::NEG_Z;
+        let default_heading = forward.x.atan2(forward.z);
+        for heading in [default_heading, 0.0, std::f32::consts::FRAC_PI_2] {
+            let (canvas, labels) = draw_paper(
+                data,
+                &view,
+                &progress,
+                rect,
+                home,
+                heading,
+                home,
+                None,
+                Language::ZhTw,
+            );
+            let pointer = PlayerPointer::new(view.screen(home, rect), heading);
+            assert!(
+                labels
+                    .iter()
+                    .all(|label| !label.rect.intersects(pointer.bounds()))
+            );
+            let shelter_visible = labels.iter().any(|label| label.copy == "避難所");
+            assert_eq!(
+                shelter_visible,
+                heading != 0.0,
+                "keep shelter unless the arrow crosses it"
+            );
+            // The actual raster still contains a substantial red circle and arrow,
+            // and the UI bounds above guarantee that no later label covers them.
+            let center = pointer.center - rect.min;
+            let red_pixels = canvas
+                .px
+                .iter()
+                .enumerate()
+                .filter(|(i, color)| {
+                    let p = Vec2::new((i % canvas.w) as f32, (i / canvas.w) as f32);
+                    p.distance(center) < 17.0 && color[0] > 0.6 && color[1] < 0.3 && color[2] < 0.25
+                })
+                .count();
+            assert!(
+                red_pixels > 100,
+                "player raster lost its circle/arrow: {red_pixels}"
+            );
+        }
+    }
 
     #[test]
     fn clipping_a_long_road_keeps_it_in_view_and_discards_parallel_outside_lines() {
