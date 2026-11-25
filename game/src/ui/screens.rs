@@ -438,14 +438,17 @@ pub(super) fn title_clicks(
             selected.id = ROLES[index].id;
             pressed = true;
         } else if layout.continue_game.contains(*point) && save.available {
+            println!("DTUI action=Continue");
             continue_event.write(ContinueGame);
             pressed = true;
         } else if layout.start.contains(*point) {
+            println!("DTUI action=NewGame");
             start_event.write(StartGame);
             pressed = true;
         }
     }
     if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
+        println!("DTUI action=NewGame");
         start_event.write(StartGame);
         pressed = true;
     }
@@ -514,6 +517,7 @@ pub(super) fn prologue_clicks(
         .iter()
         .any(|point| skip_rect.contains(*point));
     if on_button || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::Escape]) {
+        println!("DTUI action=Skip");
         skip.write(SkipPrologue);
         sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
@@ -527,6 +531,15 @@ pub(super) fn ensure_screens(
     prologue: Query<Entity, With<PrologueRoot>>,
     endings: Query<Entity, With<EndingRoot>>,
 ) {
+    if flow.is_changed() {
+        let viewport = viewport_of(&windows);
+        println!(
+            "DTUI flow={:?} viewport={}x{}",
+            flow.get(),
+            viewport.x,
+            viewport.y
+        );
+    }
     match flow.get().clone() {
         GameFlow::Prologue if prologue.is_empty() => {
             spawn_overlay(

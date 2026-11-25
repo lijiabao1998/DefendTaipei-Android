@@ -45,33 +45,103 @@ PY
 tap() {
   # Keep the press across a software-rendered frame, so down/up cannot both be
   # missed between two updates on a slow CI emulator.
-  adb shell input swipe "$1" "$2" "$1" "$2" 180
+  adb shell input swipe "$1" "$2" "$1" "$2" 1000
   sleep 1
 }
 
 alive() {
   local process_id
-  process_id="$(adb shell pidof -s "$PKG" | tr -d '\r')"
-  [[ -n "$process_id" ]] || { echo "Game process exited" >&2; exit 1; }
+  process_id="$(adb shell pidof -s "$PKG" | tr -d '\r' || true)"
+  [[ -n "$process_id" ]] || { echo "Game process exited" >&2; return 1; }
 }
 
-wait_log() {
-  local pattern="$1"
-  for _ in {1..45}; do
-    adb logcat -d >"$OUT_DIR/logcat-current.txt"
-    if grep -Eq "$pattern" "$OUT_DIR/logcat-current.txt"; then
+wait_pid() {
+  local deadline=$((SECONDS + 30)) process_id
+  while (( SECONDS < deadline )); do
+    process_id="$(adb shell pidof -s "$PKG" | tr -d '\r' || true)"
+    if [[ -n "$process_id" ]]; then
+      printf 'Started game process: %s\n' "$process_id"
       return 0
     fi
-    alive
     sleep 1
   done
-  echo "Missing runtime evidence: $pattern" >&2
+  echo "Game process did not start within 30 seconds" >&2
   return 1
 }
 
+refresh_log() {
+  adb logcat -d >"$OUT_DIR/logcat-current.txt" || return 1
+  if grep -En 'panicked at|FATAL EXCEPTION|Fatal signal|AM crashed:|Native crash|error\[B000' "$OUT_DIR/logcat-current.txt"; then
+    echo "Runtime crash signature found" >&2
+    return 1
+  fi
+}
+
+log_count() {
+  # grep prints zero but returns1 when there is no match.
+  grep -Ec "$1" "$OUT_DIR/logcat-current.txt" || true
+}
+
+wait_log() {
+  local pattern="$1" wanted="${2:-1}" deadline=$((SECONDS + ${3:-45}))
+  while (( SECONDS < deadline )); do
+    alive || return 1
+    refresh_log || return 1
+    if (( $(log_count "$pattern") >= wanted )); then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Missing fresh runtime evidence: $pattern (wanted $wanted)" >&2
+  return 1
+}
+
+tap_wait() {
+  local x="$1" y="$2" pattern="$3" flow="${4:-}" wanted flow_wanted=0
+  alive || return 1
+  refresh_log || return 1
+  # Take both baselines before input: the app may process it during the swipe.
+  wanted=$(( $(log_count "$pattern") + 1 ))
+  if [[ -n "$flow" ]]; then
+    flow_wanted=$(( $(log_count "$flow") + 1 ))
+  fi
+  tap "$x" "$y"
+  wait_log "$pattern" "$wanted" || return 1
+  if [[ -n "$flow" ]]; then
+    wait_log "$flow" "$flow_wanted" 90
+  fi
+}
+
 read_save() {
-  adb exec-out run-as "$PKG" cat "files/$SAVE_NAME" >"$OUT_DIR/$1.json"
-  python3 -m json.tool "$OUT_DIR/$1.json" >/dev/null
+  adb exec-out run-as "$PKG" cat "files/$SAVE_NAME" >"$OUT_DIR/$1.json" || return 1
+  python3 -m json.tool "$OUT_DIR/$1.json" >/dev/null || return 1
+}
+
+wait_save() {
+  local name="$1" previous="${2:-}" deadline=$((SECONDS + 45))
+  while (( SECONDS < deadline )); do
+    alive || return 1
+    refresh_log || return 1
+    if read_save "$name" 2>/dev/null && python3 - "$OUT_DIR/$name.json" "$previous" <<'PY'
+import json
+import sys
+
+current = json.load(open(sys.argv[1], encoding="utf-8"))
+def clock(save):
+    return save["campaign"]["game_min"] + save["campaign"]["clock_remainder"]
+if sys.argv[2]:
+    previous = json.load(open(sys.argv[2], encoding="utf-8"))
+    if clock(current) <= clock(previous):
+        sys.exit(1)
+print("Fresh saved campaign clock:", clock(current))
+PY
+    then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "Save did not complete with a fresh campaign clock: $name" >&2
+  return 1
 }
 
 adb install -r -t "$APK"
@@ -85,40 +155,40 @@ adb shell settings put system accelerometer_rotation 1
 adb shell settings put system user_rotation 0
 adb emu sensor set acceleration 0:9.8:0
 adb logcat -c
-adb shell am start -n "$ACTIVITY"
-wait_log 'DTPERF fps='
-sleep 6
+adb shell am start -W -n "$ACTIVITY"
+# Activity launch and process naming are asynchronous. Absence is tolerated only
+# during this bounded startup phase; later waits fail immediately if it exits.
+wait_pid
+wait_log 'DTPERF fps=' 1 180
+wait_log 'DTUI flow=Title ' 1
 capture 01-title-portrait 390 844
 
 # TitleLayout: New game is the right bottom button. Prologue skip is below its
 # phone copy, and these taps never rely on tapping through the selection cards.
-tap 287 768
+tap_wait 287 768 'DTUI action=NewGame$' 'DTUI flow=Prologue '
 capture 02-prologue-portrait 390 844
-tap 195 328
-sleep 3
+tap_wait 195 328 'DTUI action=Skip$' 'DTUI flow=Playing '
 capture 03-playing-portrait 390 844
 
 # Bottom toolbar: Bag, Shelter, Barter, Interact, Pause.
-tap 50 787
-wait_log 'DTUI panel=Some\(Inventory\)'
+tap_wait 50 787 'DTUI panel=Some\(Inventory\)$'
 capture 04-inventory-portrait 390 844
-tap 332 77
-tap 122 787
-wait_log 'DTUI panel=Some\(Shelter\)'
+tap_wait 332 77 'DTUI panel=None$'
+tap_wait 122 787 'DTUI panel=Some\(Shelter\)$'
 capture 05-shelter-before-actions 390 844
 
 # At the initial home, Deposit and Pray are the first two shelter rows.
 # Board windows is disabled because the office worker has no planks.
-tap 323 225
-wait_log 'DTUI action=Deposit'
-tap 323 279
-wait_log 'DTUI action=Pray'
+tap_wait 323 225 'DTUI action=Deposit$'
+tap_wait 323 279 'DTUI action=Pray$'
 tap 323 333
 capture 06-shelter-after-actions 390 844
-tap 323 777
-wait_log 'DTUI action=Save'
-sleep 2
-read_save before-menu
+previous_save=""
+if read_save pre-manual 2>/dev/null; then
+  previous_save="$OUT_DIR/pre-manual.json"
+fi
+tap_wait 323 777 'DTUI action=Save$'
+wait_save before-menu "$previous_save"
 python3 - "$OUT_DIR/before-menu.json" <<'PY'
 import json
 import sys
@@ -135,30 +205,32 @@ assert not save["shelter"]["upgrades"], "Unaffordable build should remain disabl
 print("Deposit, once-per-day prayer and disabled build verified in actual Android save.")
 PY
 
-tap 332 77
-tap 340 787
+tap_wait 332 77 'DTUI panel=None$'
+tap_wait 340 787 'DTUI pause=true$'
 capture 07-pause-portrait 390 844
-tap 195 464
-sleep 2
+tap_wait 195 464 'DTUI action=SaveMenu$' 'DTUI flow=Title '
+# Title is reached only after SaveAndMenu completes the write. Keep that exact
+# checkpoint too, so a stale menu save cannot pass the post-Continue assertion.
+read_save menu-save
 capture 08-title-with-save 390 844
-tap 104 768
-sleep 3
-tap 122 787
+tap_wait 104 768 'DTUI action=Continue$' 'DTUI flow=Playing '
+tap_wait 122 787 'DTUI panel=Some\(Shelter\)$'
 capture 09-continued-shelter 390 844
 # A second prayer is disabled. Saving again captures the restored state.
 tap 323 279
-tap 323 777
-sleep 2
-read_save after-continue
-python3 - "$OUT_DIR/before-menu.json" "$OUT_DIR/after-continue.json" <<'PY'
+tap_wait 323 777 'DTUI action=Save$'
+wait_save after-continue "$OUT_DIR/menu-save.json"
+python3 - "$OUT_DIR/before-menu.json" "$OUT_DIR/menu-save.json" "$OUT_DIR/after-continue.json" <<'PY'
 import json
 import sys
 
-before, after = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+before, menu, after = (json.load(open(path, encoding="utf-8")) for path in sys.argv[1:])
+def clock(save):
+    return save["campaign"]["game_min"] + save["campaign"]["clock_remainder"]
 for field in ("day", "stash", "upgrades", "pray_day", "group", "karma"):
     assert after["shelter"][field] == before["shelter"][field], field
 assert after["inventory"] == before["inventory"]
-assert after["campaign"]["game_min"] >= before["campaign"]["game_min"]
+assert clock(after) > clock(menu) >= clock(before), (clock(before), clock(menu), clock(after))
 assert after["player"]["position"] == before["player"]["position"]
 print("Continue restored shelter, inventory and position without resetting or duplicate dawn/prayer.")
 PY
@@ -170,14 +242,18 @@ adb emu sensor set acceleration 9.8:0:0
 sleep 4
 capture 10-shelter-landscape 844 390
 # Panel: tabs across y=76..114 at this viewport; Barter is the third tab.
-tap 518 95
-wait_log 'DTUI panel=Some\(Trade\)'
+tap_wait 518 95 'DTUI panel=Some\(Trade\)$'
 capture 11-barter-landscape 844 390
 adb shell settings put system user_rotation 0
 adb emu sensor set acceleration 0:9.8:0
 sleep 4
 capture 12-barter-portrait 390 844
 alive
+refresh_log
+[[ "$(log_count 'DTUI action=Save$')" == 2 ]]
+[[ "$(log_count 'DTUI action=Continue$')" == 1 ]]
+[[ "$(log_count 'DTUI action=NewGame$')" == 1 ]]
+[[ "$(log_count 'DTUI action=Pray$')" == 1 ]]
 
 adb logcat -d >"$OUT_DIR/logcat.txt"
 if grep -En 'panicked at|FATAL EXCEPTION|Fatal signal|AM crashed:|Native crash|error\[B000' "$OUT_DIR/logcat.txt"; then

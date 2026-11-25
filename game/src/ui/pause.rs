@@ -67,11 +67,13 @@ pub(super) fn drive_pause(
     if open && on_resume {
         open = false;
     } else if open && on_menu {
+        println!("DTUI action=SaveMenu");
         save_menu.write(SaveAndMenu);
     }
     let changed = open != pause.0;
     pause.0 = open;
     if changed {
+        println!("DTUI pause={open}");
         sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
     if open && existing.is_empty() {
