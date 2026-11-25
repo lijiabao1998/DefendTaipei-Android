@@ -14,6 +14,7 @@ pub mod canvas;
 pub mod collide;
 pub mod data;
 pub mod detail;
+pub mod evac;
 pub mod street;
 pub mod textures;
 
@@ -27,6 +28,7 @@ use build::{BuildingMeshes, Mat, Parts};
 pub use collide::{Obstacles, SegmentHit};
 pub use data::{ATTRIBUTION, WorldData};
 use detail::WindowKit;
+pub use evac::{BoatSpot, EvacMarker, EvacSites};
 use textures::MapMaterials;
 
 use crate::player::Player;
@@ -280,10 +282,24 @@ impl Plugin for MapPlugin {
             .init_resource::<MapReady>()
             .init_resource::<Streamer>()
             .init_resource::<DetailState>()
-            .add_systems(Startup, (setup_map, install_combat_world, spawn_cover))
+            .add_systems(
+                Startup,
+                (
+                    setup_map,
+                    install_combat_world,
+                    spawn_cover,
+                    evac::spawn_evac,
+                ),
+            )
             .add_systems(
                 Update,
-                (stream_chunks, near_detail, ready_check, lift_cover),
+                (
+                    stream_chunks,
+                    near_detail,
+                    ready_check,
+                    lift_cover,
+                    evac::update_evac,
+                ),
             )
             .add_systems(PostUpdate, cutaway.after(TransformSystems::Propagate));
     }
