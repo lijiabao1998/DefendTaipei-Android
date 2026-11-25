@@ -13,6 +13,8 @@ use crate::input::ScreenRect;
 use crate::roles::{Gender, ROLES, Role, SelectedRole};
 
 use super::layout::{death_layout, title_layout};
+use super::pause::{MenuButton, PauseHeading, ResumeButton};
+use super::{ConsumedPresses, StateScoped};
 
 #[derive(Component)]
 pub(super) struct TitleRoot;
@@ -58,7 +60,12 @@ pub(super) fn enter_title(
     let viewport = viewport_of(&windows);
     let layout = title_layout(viewport);
     commands
-        .spawn((TitleRoot, dimmer(), GlobalZIndex(40)))
+        .spawn((
+            TitleRoot,
+            StateScoped(GameFlow::Title),
+            dimmer(),
+            GlobalZIndex(40),
+        ))
         .with_children(|parent| {
             parent.spawn(labeled(
                 HeadingText,
@@ -117,28 +124,29 @@ pub(super) fn enter_title(
         });
 }
 
-pub(super) fn despawn_title(mut commands: Commands, roots: Query<Entity, With<TitleRoot>>) {
-    for entity in &roots {
-        commands.entity(entity).despawn();
-    }
-}
-
 pub(super) fn restyle(
     flow: Res<State<GameFlow>>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut nodes: Query<(
-        &mut Node,
-        &mut TextFont,
-        Option<&HeadingText>,
-        Option<&IntroText>,
-        Option<&DetailText>,
-        Option<&GenderButton>,
-        Option<&LangButton>,
-        Option<&RoleButton>,
-        Option<&StartButton>,
-        Option<&RestartButton>,
-        Option<&SkipButton>,
-    )>,
+    mut nodes: Query<
+        (
+            &mut Node,
+            &mut TextFont,
+            Option<&HeadingText>,
+            Option<&IntroText>,
+            Option<&DetailText>,
+            Option<&GenderButton>,
+            Option<&LangButton>,
+            Option<&RoleButton>,
+            Option<&StartButton>,
+            Option<&RestartButton>,
+            Option<&SkipButton>,
+        ),
+        (
+            Without<ResumeButton>,
+            Without<MenuButton>,
+            Without<PauseHeading>,
+        ),
+    >,
 ) {
     let viewport = viewport_of(&windows);
     let title = matches!(flow.get(), GameFlow::Title).then(|| title_layout(viewport));
@@ -222,18 +230,25 @@ pub(super) fn refresh_copy(
     selected: Res<SelectedRole>,
     game: Res<GameState>,
     campaign: Res<Campaign>,
-    mut texts: Query<(
-        &mut Text,
-        Option<&HeadingText>,
-        Option<&IntroText>,
-        Option<&DetailText>,
-        Option<&GenderButton>,
-        Option<&LangButton>,
-        Option<&RoleButton>,
-        Option<&StartButton>,
-        Option<&RestartButton>,
-        Option<&SkipButton>,
-    )>,
+    mut texts: Query<
+        (
+            &mut Text,
+            Option<&HeadingText>,
+            Option<&IntroText>,
+            Option<&DetailText>,
+            Option<&GenderButton>,
+            Option<&LangButton>,
+            Option<&RoleButton>,
+            Option<&StartButton>,
+            Option<&RestartButton>,
+            Option<&SkipButton>,
+        ),
+        (
+            Without<ResumeButton>,
+            Without<MenuButton>,
+            Without<PauseHeading>,
+        ),
+    >,
 ) {
     let state = flow.get().clone();
     let day = (game.survived / 1440.0).floor() as i32 + 1;
@@ -282,7 +297,7 @@ pub(super) fn refresh_copy(
                 .to_string(),
             ),
             GameFlow::Prologue if skip.is_some() => {
-                Some(tr(*lang, "跳過開場 ⏭", "Skip intro ⏭").to_string())
+                Some(tr(*lang, "跳過開場 ▶", "Skip intro ▶").to_string())
             }
             GameFlow::GameOver(ending) => {
                 ending_line(*ending, *lang, day, game.kills, campaign.reclaimed.len(), heading.is_some(), intro.is_some(), detail.is_some(), restart.is_some())
@@ -299,10 +314,9 @@ pub(super) fn refresh_copy(
 
 pub(super) fn title_clicks(
     flow: Res<State<GameFlow>>,
-    mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    touches: Res<Touches>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    consumed: Res<ConsumedPresses>,
     mut lang: ResMut<Language>,
     mut selected: ResMut<SelectedRole>,
     mut start_event: MessageWriter<StartGame>,
@@ -318,23 +332,23 @@ pub(super) fn title_clicks(
     };
     let layout = title_layout(Vec2::new(window.width(), window.height()));
     let mut pressed = false;
-    for point in just_pressed(window.cursor_position(), &mouse, &touches) {
-        if layout.male.contains(point) {
+    for point in &consumed.points {
+        if layout.male.contains(*point) {
             selected.gender = Gender::Male;
             pressed = true;
-        } else if layout.female.contains(point) {
+        } else if layout.female.contains(*point) {
             selected.gender = Gender::Female;
             pressed = true;
-        } else if layout.lang_zh.contains(point) {
+        } else if layout.lang_zh.contains(*point) {
             *lang = Language::ZhTw;
             pressed = true;
-        } else if layout.lang_en.contains(point) {
+        } else if layout.lang_en.contains(*point) {
             *lang = Language::En;
             pressed = true;
-        } else if let Some(index) = layout.roles.iter().position(|rect| rect.contains(point)) {
+        } else if let Some(index) = layout.roles.iter().position(|rect| rect.contains(*point)) {
             selected.id = ROLES[index].id;
             pressed = true;
-        } else if layout.start.contains(point) {
+        } else if layout.start.contains(*point) {
             start_event.write(StartGame);
             pressed = true;
         }
@@ -364,20 +378,21 @@ pub(super) fn title_clicks(
 
 pub(super) fn death_clicks(
     flow: Res<State<GameFlow>>,
-    mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    touches: Res<Touches>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    consumed: Res<ConsumedPresses>,
     mut restart: MessageWriter<RestartGame>,
     mut sfx: MessageWriter<SfxEvent>,
 ) {
     if !matches!(flow.get(), GameFlow::GameOver(_)) {
         return;
     }
-    // Any tap counts: the skeleton already restarts the world on a touch while
-    // `GameState.over` is set, and the labeled button is that same tap.
-    let tapped =
-        touches.iter_just_pressed().next().is_some() || mouse.just_pressed(MouseButton::Left);
-    if tapped || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::KeyR]) {
+    let restart_rect = death_layout(viewport_of(&windows)).restart;
+    let on_button = consumed
+        .points
+        .iter()
+        .any(|point| restart_rect.contains(*point));
+    if on_button || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::KeyR]) {
         restart.write(RestartGame);
         sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
@@ -385,24 +400,27 @@ pub(super) fn death_clicks(
 
 pub(super) fn prologue_clicks(
     flow: Res<State<GameFlow>>,
-    mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
-    touches: Res<Touches>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    consumed: Res<ConsumedPresses>,
     mut skip: MessageWriter<SkipPrologue>,
     mut sfx: MessageWriter<SfxEvent>,
 ) {
     if !matches!(flow.get(), GameFlow::Prologue) {
         return;
     }
-    let tapped =
-        touches.iter_just_pressed().next().is_some() || mouse.just_pressed(MouseButton::Left);
-    if tapped || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::Escape]) {
+    let skip_rect = death_layout(viewport_of(&windows)).restart;
+    let on_button = consumed
+        .points
+        .iter()
+        .any(|point| skip_rect.contains(*point));
+    if on_button || keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::Escape]) {
         skip.write(SkipPrologue);
         sfx.write(SfxEvent::Clink { dist: 0.0 });
     }
 }
 
-pub(super) fn sync_overlay_screens(
+pub(super) fn ensure_screens(
     mut commands: Commands,
     flow: Res<State<GameFlow>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -410,27 +428,36 @@ pub(super) fn sync_overlay_screens(
     prologue: Query<Entity, With<PrologueRoot>>,
     endings: Query<Entity, With<EndingRoot>>,
 ) {
-    let want_prologue = matches!(flow.get(), GameFlow::Prologue);
-    let want_ending = matches!(flow.get(), GameFlow::GameOver(_));
-    if want_prologue && prologue.is_empty() {
-        spawn_overlay(&mut commands, viewport_of(&windows), &font, false);
-    }
-    if !want_prologue {
-        for entity in &prologue {
-            commands.entity(entity).despawn();
+    match flow.get().clone() {
+        GameFlow::Prologue if prologue.is_empty() => {
+            spawn_overlay(
+                &mut commands,
+                viewport_of(&windows),
+                &font,
+                false,
+                GameFlow::Prologue,
+            );
         }
-    }
-    if want_ending && endings.is_empty() {
-        spawn_overlay(&mut commands, viewport_of(&windows), &font, true);
-    }
-    if !want_ending {
-        for entity in &endings {
-            commands.entity(entity).despawn();
+        GameFlow::GameOver(ending) if endings.is_empty() => {
+            spawn_overlay(
+                &mut commands,
+                viewport_of(&windows),
+                &font,
+                true,
+                GameFlow::GameOver(ending),
+            );
         }
+        _ => {}
     }
 }
 
-fn spawn_overlay(commands: &mut Commands, viewport: Vec2, font: &UiFont, ending: bool) {
+fn spawn_overlay(
+    commands: &mut Commands,
+    viewport: Vec2,
+    font: &UiFont,
+    ending: bool,
+    state: GameFlow,
+) {
     let layout = death_layout(viewport);
     let color = if ending {
         Color::srgb(0.86, 0.22, 0.18)
@@ -460,11 +487,12 @@ fn spawn_overlay(commands: &mut Commands, viewport: Vec2, font: &UiFont, ending:
             Color::srgb(0.95, 0.93, 0.86),
         ));
         if ending {
-            parent.spawn(choice(
+            parent.spawn(choice_bg(
                 RestartButton,
                 layout.restart,
                 layout.body_font + 2.0,
                 font,
+                Color::srgb(0.55, 0.12, 0.1),
             ));
         } else {
             parent.spawn(choice(
@@ -475,15 +503,12 @@ fn spawn_overlay(commands: &mut Commands, viewport: Vec2, font: &UiFont, ending:
             ));
         }
     };
-    if ending {
-        commands
-            .spawn((EndingRoot, dimmer(), GlobalZIndex(40)))
-            .with_children(|parent| spawn(parent));
+    let mut root = if ending {
+        commands.spawn((EndingRoot, StateScoped(state), dimmer(), GlobalZIndex(40)))
     } else {
-        commands
-            .spawn((PrologueRoot, dimmer(), GlobalZIndex(40)))
-            .with_children(|parent| spawn(parent));
-    }
+        commands.spawn((PrologueRoot, StateScoped(state), dimmer(), GlobalZIndex(40)))
+    };
+    root.with_children(|parent| spawn(parent));
 }
 
 fn ending_line(
@@ -607,14 +632,30 @@ fn labeled(
 }
 
 fn choice(marker: impl Component, rect: ScreenRect, size: f32, font: &UiFont) -> impl Bundle {
+    choice_bg(
+        marker,
+        rect,
+        size,
+        font,
+        Color::srgba(0.16, 0.13, 0.1, 0.92),
+    )
+}
+
+fn choice_bg(
+    marker: impl Component,
+    rect: ScreenRect,
+    size: f32,
+    font: &UiFont,
+    background: Color,
+) -> impl Bundle {
     (
         marker,
         placed(rect),
-        BackgroundColor(Color::srgba(0.16, 0.13, 0.1, 0.92)),
+        BackgroundColor(background),
         BorderColor::all(Color::srgba(0.85, 0.7, 0.4, 0.45)),
         Text::new(""),
         TextFont::from_font_size(FontSize::Px(size)).with_font(font.0.clone()),
-        TextColor(Color::srgb(0.96, 0.93, 0.84)),
+        TextColor(Color::srgb(0.98, 0.94, 0.9)),
         TextLayout::justify(Justify::Center),
     )
 }
@@ -644,7 +685,11 @@ fn dimmer() -> impl Bundle {
             height: percent(100.0),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.04, 0.03, 0.025, 0.93)),
+        BackgroundColor(Color::srgb(0.04, 0.03, 0.025)),
+        Pickable {
+            should_block_lower: true,
+            is_hoverable: true,
+        },
     )
 }
 
@@ -677,21 +722,4 @@ fn detail_line(role: &Role, gender: Gender, lang: Language) -> String {
         role.blurb(lang),
         role.perks(lang).join("・")
     )
-}
-
-fn just_pressed(
-    cursor: Option<Vec2>,
-    mouse: &ButtonInput<MouseButton>,
-    touches: &Touches,
-) -> Vec<Vec2> {
-    let mut points = Vec::new();
-    if mouse.just_pressed(MouseButton::Left)
-        && let Some(cursor) = cursor
-    {
-        points.push(cursor);
-    }
-    for touch in touches.iter_just_pressed() {
-        points.push(touch.position());
-    }
-    points
 }

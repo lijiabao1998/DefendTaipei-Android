@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 
+use crate::game_flow::GameFlow;
 use crate::input::{Orientation, ScreenRect, orientation, safe_insets};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -140,6 +141,37 @@ pub fn death_layout(viewport: Vec2) -> DeathLayout {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PauseLayout {
+    pub heading: ScreenRect,
+    pub resume: ScreenRect,
+    pub menu: ScreenRect,
+}
+
+pub fn pause_layout(viewport: Vec2) -> PauseLayout {
+    let insets = safe_insets(viewport);
+    let inner_w = (viewport.x - insets.left - insets.right).max(1.0);
+    let button_w = inner_w.min(420.0);
+    let x = insets.left + (inner_w - button_w) * 0.5;
+    let height = 72.0;
+    let gap = 12.0;
+    let top = ((viewport.y - height * 2.0 - gap) * 0.5).max(insets.top + 48.0);
+    PauseLayout {
+        heading: ScreenRect::new(x, (top - 48.0).max(insets.top), button_w, 40.0),
+        resume: ScreenRect::new(x, top, button_w, height),
+        menu: ScreenRect::new(x, top + height + gap, button_w, height),
+    }
+}
+
+/// True when a pointer press lands on a screen this UI owns.
+/// Those presses are consumed so they do not fall through to the flow overlay.
+pub fn control_hit(flow: &GameFlow, _viewport: Vec2, _point: Vec2, paused: bool) -> bool {
+    match flow {
+        GameFlow::Title | GameFlow::Prologue | GameFlow::GameOver(_) => true,
+        GameFlow::Playing => paused,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +218,22 @@ mod tests {
             assert!(layout.restart.height() >= 64.0);
             inside(layout.restart, viewport);
         }
+    }
+
+    #[test]
+    fn menu_screens_consume_the_pointer() {
+        let viewport = Vec2::new(1280.0, 720.0);
+        let female = title_layout(viewport).female.center();
+        assert!(control_hit(&GameFlow::Title, viewport, female, false));
+        assert!(control_hit(&GameFlow::Prologue, viewport, female, false));
+        assert!(control_hit(
+            &GameFlow::GameOver(crate::game_flow::Ending::Death),
+            viewport,
+            female,
+            false
+        ));
+        assert!(!control_hit(&GameFlow::Playing, viewport, female, false));
+        assert!(control_hit(&GameFlow::Playing, viewport, female, true));
+        assert!(pause_layout(viewport).resume.height() >= 64.0);
     }
 }

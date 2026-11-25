@@ -1,11 +1,17 @@
 //! Heads-up display: HP bar, kills, reclaimed districts, control hint.
 //! Title, prologue, and endings are drawn by the UI plugin. Game flow owns the state.
+//!
+//! Ammo and weapon are slots until combat publishes that resource. Time reads
+//! [`GameState::survived`].
 
 use bevy::prelude::*;
 
 use crate::combat::GameState;
-use crate::game_flow::Campaign;
+use crate::game_flow::{Campaign, GameFlow};
 use crate::story::WANHUA_DISTRICTS;
+
+#[derive(Component)]
+struct HudRoot;
 
 #[derive(Component)]
 struct StatsText;
@@ -32,6 +38,8 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands
         .spawn((
+            HudRoot,
+            Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
                 left: px(12),
@@ -83,6 +91,8 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
         "WASD／左側搖桿移動・直向「打」射擊・「蹲」長按撤退"
     };
     commands.spawn((
+        HudRoot,
+        Visibility::Hidden,
         Node {
             position_type: PositionType::Absolute,
             left: px(12),
@@ -98,17 +108,32 @@ fn spawn_hud(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn update_hud(
+    flow: Res<State<GameFlow>>,
     state: Res<GameState>,
     campaign: Res<Campaign>,
+    mut roots: Query<&mut Visibility, With<HudRoot>>,
     mut stats: Single<&mut Text, With<StatsText>>,
     mut fill: Single<(&mut Node, &mut BackgroundColor), With<HpFill>>,
 ) {
-    if !state.is_changed() && !campaign.is_changed() {
+    let playing = matches!(flow.get(), GameFlow::Playing);
+    let shown = if playing {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut visibility in &mut roots {
+        if *visibility != shown {
+            *visibility = shown;
+        }
+    }
+    if !playing || (!state.is_changed() && !campaign.is_changed() && !flow.is_changed()) {
         return;
     }
     let hint = campaign.reclaimed.last().map(String::as_str).unwrap_or("—");
+    let total = state.survived.max(0.0) as u32;
+    let clock = format!("{:02}:{:02}", total / 60, total % 60);
     stats.0 = format!(
-        "HP {:>3.0}   擊倒 {}   已奪回 {}/{}   {}",
+        "HP {:>3.0}   擊倒 {}   已奪回 {}/{}   {}\n彈藥 —　武器 —　{clock}",
         state.hp,
         state.kills,
         campaign.reclaimed.len(),

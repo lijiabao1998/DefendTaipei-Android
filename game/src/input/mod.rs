@@ -30,6 +30,10 @@ const MOUSE: u64 = u64::MAX;
 /// `aim` stays zero in this slice: the original aims by dragging a scoped
 /// weapon, which the skeleton does not have. `stick` is the pad deflection
 /// after the dead zone; the original starts running above 0.93.
+///
+/// `fire` is the rising edge of a click or the portrait 打 button, so one
+/// press is one shot. `reload`, `interact`, `slot`, and `pause` are the same
+/// kind of edge for R, E, the number keys, and Esc.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
 pub struct PlayerInput {
     pub r#move: Vec2,
@@ -41,7 +45,19 @@ pub struct PlayerInput {
     pub retreat: f32,
     /// Stick length in 0..=1 after the 0.12 dead zone. Run when this is above 0.93.
     pub stick: f32,
+    /// R, this frame only.
+    pub reload: bool,
+    /// E, this frame only.
+    pub interact: bool,
+    /// Digit or numpad key pressed this frame. `Some(0)` is the 0 key.
+    pub slot: Option<u8>,
+    /// Esc, this frame only. The pause screen reads this; it is not a flow state.
+    pub pause: bool,
 }
+
+/// Esc opens this. While it is set, gameplay fields on [`PlayerInput`] stay clear.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GamePause(pub bool);
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct InputSet;
@@ -69,6 +85,7 @@ pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<PlayerInput>()
+            .init_resource::<GamePause>()
             .init_resource::<TouchControl>()
             .configure_sets(Update, InputSet.before(crate::player::move_system_set()))
             .add_systems(Startup, spawn_controls)
@@ -210,6 +227,7 @@ fn sample_pointers(
 fn gather_player_input(
     time: Res<Time>,
     flow: Res<State<GameFlow>>,
+    pause: Res<GamePause>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
@@ -218,12 +236,16 @@ fn gather_player_input(
     mut move_input: ResMut<MoveInput>,
     mut player: ResMut<PlayerInput>,
 ) {
+    let edges = read_key_edges(&keys);
     let Some(window) = windows.iter().next() else {
         clear_input(&mut player, &mut hands, &mut move_input);
         return;
     };
-    if flow.get() != &GameFlow::Playing {
+    if flow.get() != &GameFlow::Playing || pause.0 {
         clear_input(&mut player, &mut hands, &mut move_input);
+        if flow.get() == &GameFlow::Playing {
+            player.pause = edges.pause;
+        }
         return;
     }
 
@@ -238,7 +260,9 @@ fn gather_player_input(
         keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]),
         keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]),
     );
-    let mouse_on_pad = hands.claims(MOUSE);
+    let touch_fire = pointers
+        .iter()
+        .any(|pointer| pointer.just_pressed && hands.fire_id == Some(pointer.id));
     let retreat = if frame.retreat {
         RETREAT_SECS
     } else {
@@ -247,7 +271,7 @@ fn gather_player_input(
     *player = PlayerInput {
         r#move: combine_move(key, stick_vec),
         aim: Vec2::ZERO,
-        fire: frame.fire || (mouse.pressed(MouseButton::Left) && !mouse_on_pad),
+        fire: touch_fire || mouse_fire_edge(&mouse, hands.claims(MOUSE)),
         crouch: hands.crouch,
         retreat,
         stick: if stick_vec == Vec2::ZERO {
@@ -255,8 +279,59 @@ fn gather_player_input(
         } else {
             frame.joy.deflection()
         },
+        reload: edges.reload,
+        interact: edges.interact,
+        slot: edges.slot,
+        pause: edges.pause,
     };
     move_input.stick = stick_vec;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct KeyEdges {
+    pub reload: bool,
+    pub interact: bool,
+    pub pause: bool,
+    pub slot: Option<u8>,
+}
+
+pub(crate) fn read_key_edges(keys: &ButtonInput<KeyCode>) -> KeyEdges {
+    const SLOTS: [(KeyCode, u8); 20] = [
+        (KeyCode::Digit1, 1),
+        (KeyCode::Digit2, 2),
+        (KeyCode::Digit3, 3),
+        (KeyCode::Digit4, 4),
+        (KeyCode::Digit5, 5),
+        (KeyCode::Digit6, 6),
+        (KeyCode::Digit7, 7),
+        (KeyCode::Digit8, 8),
+        (KeyCode::Digit9, 9),
+        (KeyCode::Digit0, 0),
+        (KeyCode::Numpad1, 1),
+        (KeyCode::Numpad2, 2),
+        (KeyCode::Numpad3, 3),
+        (KeyCode::Numpad4, 4),
+        (KeyCode::Numpad5, 5),
+        (KeyCode::Numpad6, 6),
+        (KeyCode::Numpad7, 7),
+        (KeyCode::Numpad8, 8),
+        (KeyCode::Numpad9, 9),
+        (KeyCode::Numpad0, 0),
+    ];
+    KeyEdges {
+        reload: keys.just_pressed(KeyCode::KeyR),
+        interact: keys.just_pressed(KeyCode::KeyE),
+        pause: keys.just_pressed(KeyCode::Escape),
+        slot: SLOTS
+            .into_iter()
+            .find(|(key, _)| keys.just_pressed(*key))
+            .map(|(_, slot)| slot),
+    }
+}
+
+/// Left click that is not already claimed by the pad or a portrait button.
+pub(crate) fn mouse_fire_edge(mouse: &ButtonInput<MouseButton>, claimed: bool) -> bool {
+    mouse.just_pressed(MouseButton::Left) && !claimed
 }
 
 fn sync_widgets(
@@ -346,4 +421,41 @@ fn place(node: &mut Node, rect: ScreenRect) {
     node.top = px(rect.min.y);
     node.width = px(rect.width());
     node.height = px(rect.height());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_edges_cover_wasd_arrows_reload_interact_numbers_and_esc() {
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::KeyR);
+        keys.press(KeyCode::KeyE);
+        keys.press(KeyCode::Escape);
+        keys.press(KeyCode::Digit4);
+        keys.press(KeyCode::ArrowUp);
+        keys.press(KeyCode::KeyA);
+        let edges = read_key_edges(&keys);
+        assert!(edges.reload && edges.interact && edges.pause);
+        assert_eq!(edges.slot, Some(4));
+        let movement = keyboard_vector(true, false, true, false);
+        assert!(movement.y > 0.0 && movement.x < 0.0);
+
+        keys.clear();
+        keys.press(KeyCode::Numpad0);
+        assert_eq!(read_key_edges(&keys).slot, Some(0));
+        assert!(!read_key_edges(&keys).reload);
+    }
+
+    #[test]
+    fn mouse_fire_is_the_press_edge() {
+        let mut mouse = ButtonInput::default();
+        mouse.press(MouseButton::Left);
+        assert!(mouse_fire_edge(&mouse, false));
+        assert!(!mouse_fire_edge(&mouse, true));
+        mouse.clear();
+        assert!(mouse.pressed(MouseButton::Left));
+        assert!(!mouse_fire_edge(&mouse, false));
+    }
 }
