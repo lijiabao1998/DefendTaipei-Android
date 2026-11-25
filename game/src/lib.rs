@@ -17,6 +17,7 @@ mod perf;
 mod player;
 pub mod roles;
 mod story;
+pub mod survival;
 mod touch;
 pub mod ui;
 
@@ -74,6 +75,7 @@ pub fn run() {
             hud::HudPlugin,
             ui::FlowUiPlugin,
             perf::PerfPlugin,
+            survival::ShelterPlugin,
         ))
         .run();
 }
