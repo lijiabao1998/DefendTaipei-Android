@@ -10,9 +10,10 @@ use bevy::prelude::*;
 
 use crate::combat::{GameState, PlayerDied, ResetCombat};
 use crate::story::{
-    ALL_CLEAR_ID, AM765_STATION, AlertKind, DistrictReclaimed, EvacComplete, EvacRoute, PRO_NEWS,
-    RunStoryEvent, StoryAlert, StoryBroadcast, StoryEmit, WANHUA_DISTRICTS, event_by_id,
-    script_by_id,
+    ALL_CLEAR_ID, AM765_STATION, AlertKind, CATALOG_AT, DistrictReclaimed, EVAC_STANDIN,
+    EvacComplete, EvacRoute, GAME_MINUTES_PER_REAL_SECOND, PRO_NEWS, PROLOGUE_START_MIN,
+    RunStoryEvent, StoryAlert, StoryBroadcast, StoryEmit, TIMELINE, WANHUA_DISTRICTS, evac_open,
+    event_by_id, script_by_id,
 };
 
 /// Single source of truth for where the session is.
@@ -54,7 +55,13 @@ pub struct Campaign {
     prologue_t: f32,
     news_i: usize,
     raid: bool,
-    /// Phone / radio line. The prologue banner reads it; nothing draws it in play.
+    /// Family-group message during the air raid (`updatePrologue` stage 2).
+    family: bool,
+    /// In-game minutes from 00:00 on day 1. The prologue pins this to 07:20.
+    pub game_min: f32,
+    /// Helicopter or boat already taken. Closes the window the way `UT.ev.ex` does.
+    evac_taken: bool,
+    /// Phone / radio line. The prologue card and the in-play card read it.
     notice: String,
     notice_t: f32,
     fired: Vec<String>,
@@ -67,6 +74,9 @@ impl Default for Campaign {
             prologue_t: 0.0,
             news_i: 0,
             raid: false,
+            family: false,
+            game_min: 0.0,
+            evac_taken: false,
             notice: String::new(),
             notice_t: 0.0,
             fired: Vec::new(),
@@ -80,6 +90,17 @@ struct PrologueBanner;
 
 #[derive(Component)]
 struct PrologueBannerText;
+
+/// In-play phone / radio card. Despawns on leaving [`GameFlow::Playing`], so an ending is only the UI screen.
+#[derive(Component)]
+struct PlayingBanner;
+
+#[derive(Component)]
+struct PlayingBannerText;
+
+/// Stand-in for walking into the riverside pad or meeting the boat. Only spawned with the in-play card.
+#[derive(Component, Clone, Copy)]
+struct EvacChoice(EvacRoute);
 
 pub struct GameFlowPlugin;
 
@@ -98,12 +119,15 @@ impl Plugin for GameFlowPlugin {
             .add_systems(
                 Update,
                 (
+                    evac_input,
                     apply_flow,
                     prologue,
+                    advance_story,
                     story_events,
                     reclaim,
                     sync_over,
                     sync_prologue_banner,
+                    sync_playing_banner,
                 )
                     .chain(),
             );
@@ -132,17 +156,21 @@ fn apply_flow(
     } else if !starts.is_empty() {
         starts.clear();
         *campaign = Campaign::default();
+        campaign.game_min = PROLOGUE_START_MIN;
         resets.write(ResetCombat);
         next.set(GameFlow::Prologue);
     }
     if matches!(state.get(), GameFlow::Prologue) && !skips.is_empty() {
         skips.clear();
+        campaign.notice.clear();
+        campaign.notice_t = 0.0;
         next.set(GameFlow::Playing);
     } else {
         skips.clear();
     }
     if matches!(state.get(), GameFlow::Playing | GameFlow::Prologue) && !deaths.is_empty() {
         deaths.clear();
+        campaign.notice_t = 0.0;
         next.set(GameFlow::GameOver(Ending::Death));
     } else {
         deaths.clear();
@@ -156,6 +184,7 @@ fn apply_flow(
             alerts.write(StoryAlert {
                 kind: AlertKind::Clear,
             });
+            campaign.notice_t = 0.0;
             next.set(GameFlow::GameOver(ending));
         }
     }
@@ -186,9 +215,11 @@ fn prologue(
         alerts.write(StoryAlert {
             kind: AlertKind::Alert,
         });
-        campaign.notice =
-            "⚠️ 國家級警報\n飛彈空襲警報！共軍部隊於淡水河沿岸登陸，請立即就近避難，遠離窗戶。"
-                .into();
+        campaign.notice = "⚠️ 國家級警報\n飛彈空襲警報！共軍部隊於淡水河沿岸登陸，請立即就近避難，遠離窗戶。\n\n📢 防空廣播：「這不是演習！這不是演習！請民眾立即進入地下室或避難處所……」".into();
+        campaign.notice_t = 8.0;
+    } else if campaign.raid && !campaign.family && campaign.prologue_t > 5.0 {
+        campaign.family = true;
+        campaign.notice = "📱 家族群組\n你在哪？？西園路那邊有軍車開進來了！不要出門！\n\n街口傳來履帶聲——穿著陌生迷彩的士兵封鎖了路口。".into();
         campaign.notice_t = 8.0;
     } else if campaign.raid && campaign.prologue_t > 16.0 {
         next.set(GameFlow::Playing);
@@ -197,6 +228,90 @@ fn prologue(
         campaign.notice_t = 0.0;
     }
     campaign.notice_t = (campaign.notice_t - time.delta_secs()).max(0.0);
+}
+
+fn deliver(
+    campaign: &mut Campaign,
+    alerts: &mut MessageWriter<StoryAlert>,
+    broadcasts: &mut MessageWriter<StoryBroadcast>,
+    event: &crate::story::StoryEvent,
+) {
+    if campaign.fired.iter().any(|id| id == event.id) {
+        return;
+    }
+    campaign.fired.push(event.id.to_string());
+    campaign.notice = event.text.to_string();
+    campaign.notice_t = if event.id == ALL_CLEAR_ID { 10.0 } else { 8.0 };
+    for step in event.emits {
+        match step {
+            StoryEmit::Broadcast(id) => {
+                if let Some(script) = script_by_id(id) {
+                    broadcasts.write(StoryBroadcast {
+                        id: script.id,
+                        station: AM765_STATION,
+                        text: script.text,
+                    });
+                }
+            }
+            StoryEmit::AlertTest => {
+                alerts.write(StoryAlert {
+                    kind: AlertKind::Test,
+                });
+            }
+            StoryEmit::Alert => {
+                alerts.write(StoryAlert {
+                    kind: AlertKind::Alert,
+                });
+            }
+            StoryEmit::AlertClear => {
+                alerts.write(StoryAlert {
+                    kind: AlertKind::Clear,
+                });
+            }
+        }
+    }
+}
+
+/// `updateStory`: each `STORY` row once, when `gameMin` reaches it. 📻 lines also start the radio bed.
+/// Act-1 catalog ids fire at the minutes in [`CATALOG_AT`].
+fn advance_story(
+    time: Res<Time>,
+    state: Res<State<GameFlow>>,
+    mut game: ResMut<GameState>,
+    mut campaign: ResMut<Campaign>,
+    mut alerts: MessageWriter<StoryAlert>,
+    mut broadcasts: MessageWriter<StoryBroadcast>,
+) {
+    if !matches!(state.get(), GameFlow::Playing) {
+        return;
+    }
+    let dt = time.delta_secs();
+    campaign.game_min += dt * GAME_MINUTES_PER_REAL_SECOND;
+    game.survived = campaign.game_min;
+    campaign.notice_t = (campaign.notice_t - dt).max(0.0);
+    for line in TIMELINE {
+        if campaign.game_min < line.minute as f32 || campaign.fired.iter().any(|id| id == line.id) {
+            continue;
+        }
+        campaign.fired.push(line.id.to_string());
+        campaign.notice = format!("{}\n{}", line.who, line.text);
+        campaign.notice_t = 7.0;
+        if line.radio {
+            broadcasts.write(StoryBroadcast {
+                id: line.id,
+                station: line.who,
+                text: line.text,
+            });
+        }
+    }
+    for &(minute, id) in CATALOG_AT {
+        if campaign.game_min < minute as f32 {
+            continue;
+        }
+        if let Some(event) = event_by_id(id) {
+            deliver(&mut campaign, &mut alerts, &mut broadcasts, event);
+        }
+    }
 }
 
 fn story_events(
@@ -211,43 +326,7 @@ fn story_events(
             campaign.notice_t = 4.0;
             continue;
         };
-        if campaign.fired.iter().any(|id| id == event.id) {
-            continue;
-        }
-        campaign.fired.push(event.id.to_string());
-        campaign.notice = event.text.to_string();
-        campaign.notice_t = 8.0;
-        for step in event.emits {
-            match step {
-                StoryEmit::Broadcast(id) => {
-                    if let Some(script) = script_by_id(id) {
-                        broadcasts.write(StoryBroadcast {
-                            id: script.id,
-                            station: AM765_STATION,
-                            text: script.text,
-                        });
-                    }
-                }
-                StoryEmit::AlertTest => {
-                    alerts.write(StoryAlert {
-                        kind: AlertKind::Test,
-                    });
-                }
-                StoryEmit::Alert => {
-                    alerts.write(StoryAlert {
-                        kind: AlertKind::Alert,
-                    });
-                }
-                StoryEmit::AlertClear => {
-                    alerts.write(StoryAlert {
-                        kind: AlertKind::Clear,
-                    });
-                }
-            }
-        }
-        if event.id == ALL_CLEAR_ID {
-            campaign.notice_t = 10.0;
-        }
+        deliver(&mut campaign, &mut alerts, &mut broadcasts, event);
     }
 }
 
@@ -256,6 +335,8 @@ fn reclaim(
     mut next: ResMut<NextState<GameFlow>>,
     mut campaign: ResMut<Campaign>,
     mut taken: MessageReader<DistrictReclaimed>,
+    mut alerts: MessageWriter<StoryAlert>,
+    mut broadcasts: MessageWriter<StoryBroadcast>,
 ) {
     for district in taken.read() {
         if WANHUA_DISTRICTS.contains(&district.name.as_str())
@@ -269,6 +350,10 @@ fn reclaim(
     if matches!(state.get(), GameFlow::Playing)
         && campaign.reclaimed.len() >= WANHUA_DISTRICTS.len()
     {
+        if let Some(event) = event_by_id(ALL_CLEAR_ID) {
+            deliver(&mut campaign, &mut alerts, &mut broadcasts, event);
+        }
+        campaign.notice_t = 0.0;
         next.set(GameFlow::GameOver(Ending::Reclaimed));
     }
 }
@@ -331,5 +416,150 @@ fn sync_prologue_banner(
     };
     if show && let Some(mut body) = body {
         body.0 = campaign.notice.clone();
+    }
+}
+
+fn banner_font() -> TextFont {
+    TextFont {
+        font_size: FontSize::Px(16.0),
+        ..default()
+    }
+}
+
+/// H / B, or the stand-in buttons, finish an evacuation while the window is open.
+fn evac_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    state: Res<State<GameFlow>>,
+    mut campaign: ResMut<Campaign>,
+    mut evacs: MessageWriter<EvacComplete>,
+) {
+    if !matches!(state.get(), GameFlow::Playing)
+        || !evac_open(campaign.game_min, campaign.evac_taken)
+    {
+        return;
+    }
+    let route = if keys.just_pressed(KeyCode::KeyB) {
+        Some(EvacRoute::Boat)
+    } else if keys.just_pressed(KeyCode::KeyH) {
+        Some(EvacRoute::Helicopter)
+    } else {
+        None
+    };
+    if let Some(route) = route {
+        campaign.evac_taken = true;
+        evacs.write(EvacComplete { route });
+    }
+}
+
+fn on_evac_button(
+    activate: On<bevy::ui_widgets::Activate>,
+    state: Res<State<GameFlow>>,
+    choices: Query<&EvacChoice>,
+    mut campaign: ResMut<Campaign>,
+    mut evacs: MessageWriter<EvacComplete>,
+) {
+    if !matches!(state.get(), GameFlow::Playing)
+        || !evac_open(campaign.game_min, campaign.evac_taken)
+    {
+        return;
+    }
+    let Ok(choice) = choices.get(activate.entity) else {
+        return;
+    };
+    campaign.evac_taken = true;
+    evacs.write(EvacComplete { route: choice.0 });
+}
+
+/// Radio and phone lines during play, plus the stand-in evac controls.
+/// [`DespawnOnExit`] drops the card when an ending (or the title) begins.
+fn sync_playing_banner(
+    mut commands: Commands,
+    state: Res<State<GameFlow>>,
+    campaign: Res<Campaign>,
+    card: Option<Single<&mut Visibility, With<PlayingBanner>>>,
+    body: Option<Single<&mut Text, With<PlayingBannerText>>>,
+    mut buttons: Query<&mut Visibility, (With<EvacChoice>, Without<PlayingBanner>)>,
+) {
+    if !matches!(state.get(), GameFlow::Playing) {
+        return;
+    }
+    let Some(mut card) = card else {
+        commands
+            .spawn((
+                PlayingBanner,
+                DespawnOnExit(GameFlow::Playing),
+                Node {
+                    position_type: PositionType::Absolute,
+                    top: px(12),
+                    left: px(16),
+                    right: px(16),
+                    padding: UiRect::all(px(10)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(8),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.03, 0.06, 0.1, 0.92)),
+                GlobalZIndex(70),
+                Visibility::Hidden,
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    PlayingBannerText,
+                    Text::new(""),
+                    banner_font(),
+                    TextColor(Color::srgb(0.86, 0.93, 1.0)),
+                    TextLayout::justify(Justify::Left),
+                ));
+                for (route, label, color) in [
+                    (
+                        EvacRoute::Helicopter,
+                        "H　直升機・河濱撤離區",
+                        Color::srgb(0.15, 0.38, 0.24),
+                    ),
+                    (
+                        EvacRoute::Boat,
+                        "B　小艇・聯絡人接應",
+                        Color::srgb(0.12, 0.28, 0.42),
+                    ),
+                ] {
+                    parent
+                        .spawn((
+                            bevy::ui_widgets::Button,
+                            bevy::ui_widgets::ActivateOnPress,
+                            EvacChoice(route),
+                            Node {
+                                padding: UiRect::axes(px(12), px(8)),
+                                ..default()
+                            },
+                            BackgroundColor(color),
+                            Visibility::Hidden,
+                        ))
+                        .observe(on_evac_button)
+                        .with_child((Text::new(label), banner_font(), TextColor(Color::WHITE)));
+                }
+            });
+        return;
+    };
+    let window = evac_open(campaign.game_min, campaign.evac_taken);
+    let show = (campaign.notice_t > 0.0 && !campaign.notice.is_empty()) || window;
+    **card = if show {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    if let Some(mut body) = body {
+        if campaign.notice_t > 0.0 && !campaign.notice.is_empty() {
+            body.0 = campaign.notice.clone();
+        } else if window {
+            body.0 = EVAC_STANDIN.to_string();
+        }
+    }
+    let button_vis = if window {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut visibility in &mut buttons {
+        *visibility = button_vis;
     }
 }
