@@ -17,6 +17,9 @@ pub const FH: f32 = 3.2;
 pub const ARC: f32 = 3.6;
 pub const BAY: f32 = 4.5;
 pub const COL: f32 = 0.5;
+/// Street-door opening, shared by the collision planner and the visible entrance frame.
+pub const DOOR_W: f32 = 1.6;
+pub const DOOR_H: f32 = 2.4;
 /// Segment grid cell (main.ts CELL).
 pub const CELL: f32 = 8.0;
 /// Hand-built core (the original 1.1 × 1.0 km bbox, 西門町–龍山寺).
@@ -119,6 +122,13 @@ pub struct Door {
     pub p: Vec2,
     /// Outward normal.
     pub n: Vec2,
+}
+
+impl Door {
+    /// Local +X runs across the opening; local +Z points out towards the street.
+    pub fn tangent(self) -> Vec2 {
+        Vec2::new(self.n.y, -self.n.x)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -480,8 +490,8 @@ impl WorldData {
                 if i == di && dl > 2.6 && a_ > 20.0 {
                     let u = (cc - a) / dl;
                     let m = dl / 2.0;
-                    let d1 = a + u * (m - 0.8);
-                    let d2 = a + u * (m + 0.8);
+                    let d1 = a + u * (m - DOOR_W / 2.0);
+                    let d2 = a + u * (m + DOOR_W / 2.0);
                     let mut mid = (d1 + d2) / 2.0;
                     let mut nrm = Vec2::new(-u.y, u.x);
                     if pip(mid + nrm * 0.6, &pts) {
@@ -501,7 +511,7 @@ impl WorldData {
                         let dc = d2 - nrm * ARC;
                         b.push_wall(ia, da, 0.0, GF, false, &pts, fill, false);
                         b.push_wall(dc, ic, 0.0, GF, false, &pts, fill, false);
-                        b.push_wall(da, dc, 2.4, GF, false, &pts, fill, false);
+                        b.push_wall(da, dc, DOOR_H, GF, false, &pts, fill, false);
                         segs.push(wall(ia, da));
                         segs.push(wall(dc, ic));
                         mid = (da + dc) / 2.0;
@@ -524,7 +534,7 @@ impl WorldData {
                     } else {
                         b.push_wall(a, d1, 0.0, h, true, &pts, fill, true);
                         b.push_wall(d2, cc, 0.0, h, true, &pts, fill, true);
-                        b.push_wall(d1, d2, 2.4, h, true, &pts, fill, true);
+                        b.push_wall(d1, d2, DOOR_H, h, true, &pts, fill, true);
                         segs.push(wall(a, d1));
                         segs.push(wall(d2, cc));
                     }

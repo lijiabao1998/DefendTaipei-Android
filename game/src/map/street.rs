@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
 
-use super::build::{Mat, Parts, WHITE};
+use super::build::{Mat, Parts, WHITE, flat_poly};
 use super::data::*;
 use crate::geom::{self, MeshBuf, hex, place, scale_col};
 
@@ -180,6 +180,7 @@ pub fn roads(
     lod_far: bool,
     out: &mut Parts,
 ) {
+    let doors: Vec<Door> = w.blds.iter().filter_map(|b| b.door).collect();
     for r in &w.roads {
         let rw = r.w;
         for i in 0..r.p.len() - 1 {
@@ -200,10 +201,15 @@ pub fn roads(
                 )
                 .map_uv(|_, p| [p[0] / 8.0, p[2] / 8.0]);
             out.get(Mat::Road).append(g);
-            if lod_far || rw < 9.0 {
+            if lod_far {
                 continue;
             }
-            sidewalks(w, a, b, rw, out);
+            let segment_doors = relevant_doors(&doors, a, b, rw);
+            road_wear(w, &segment_doors, junc, a, b, rw, out);
+            if rw < 9.0 {
+                continue;
+            }
+            sidewalks(w, &segment_doors, a, b, rw, out);
             let u = (b - a) / l;
             let n = Vec2::new(-u.y, u.x);
             let y = 0.035 + rw * 0.0005;
@@ -242,6 +248,187 @@ pub fn roads(
                     t += 0.9;
                 }
             }
+        }
+    }
+}
+
+/// Flat markings use the existing batched vertex-colour material. Heights stay below
+/// lane markings on roads and just above paving on walks, avoiding z-fighting.
+fn flat_mark(out: &mut Parts, p: Vec2, width: f32, depth: f32, angle: f32, y: f32, col: u32) {
+    out.add(
+        Mat::VCol,
+        &geom::plane(width, depth),
+        place(p.x, y, p.y, angle) * Mat4::from_rotation_x(-FRAC_PI_2),
+        hex(col),
+    );
+}
+
+/// A chunk owns a road by its midpoint, but some source segments extend more than
+/// 700 m. Filter by the entire segment, not the chunk rectangle, so distant ends keep
+/// their entrance clearance too. The margin covers the widest walk and arcade route.
+fn relevant_doors(doors: &[Door], a: Vec2, b: Vec2, rw: f32) -> Vec<Door> {
+    let margin = Vec2::splat(rw * 0.5 + 13.0);
+    let lo = a.min(b) - margin;
+    let hi = a.max(b) + margin;
+    doors
+        .iter()
+        .copied()
+        .filter(|door| door.p.x >= lo.x && door.p.y >= lo.y && door.p.x <= hi.x && door.p.y <= hi.y)
+        .collect()
+}
+
+/// Keep the full route from the original door plane through its arcade to the street
+/// free of decorative clutter. Door and obstacle records themselves never change.
+fn entrance_clear(p: Vec2, doors: &[Door]) -> bool {
+    doors.iter().all(|door| {
+        let d = p - door.p;
+        let forward = d.dot(door.n);
+        let across = d.perp_dot(door.n).abs();
+        !((-0.8..=ARC + 3.5).contains(&forward) && across < 1.25)
+    })
+}
+
+/// Shallow rubbish, gum, broken masonry and paper at the gutter — alley.ts / decay.ts
+/// dressing without invisible collisions or alterations to saved loot identifiers.
+fn edge_litter(out: &mut Parts, p: Vec2, y: f32, angle: f32, seed: u64) {
+    let mut rng = super::canvas::Rng(seed);
+    let t = place(p.x, y, p.y, angle);
+    for i in 0..4 {
+        let x = (rng.f() - 0.5) * 0.85;
+        let z = (rng.f() - 0.5) * 0.25;
+        let col = [0xa99a78, 0xc2bca7, 0x706a58, 0x8b6c50][i];
+        let w = 0.06 + rng.f() * 0.16;
+        let d = 0.04 + rng.f() * 0.12;
+        let h = 0.008 + rng.f() * 0.035;
+        out.add(
+            Mat::VCol,
+            &geom::cuboid(w, h, d),
+            t * place(x, h * 0.5, z, rng.f() * 6.0),
+            hex(col),
+        );
+    }
+    // Folded paper: two low facets, with one corner turned up.
+    let mut paper = geom::plane(0.2, 0.13)
+        .transformed(geom::at(0.18, 0.008, 0.12) * Mat4::from_rotation_x(-FRAC_PI_2));
+    if let Some(v) = paper.pos.first_mut() {
+        v[1] += 0.025;
+    }
+    out.add(Mat::VCol, &paper, t, hex(0xc8bea4));
+    // A few green shoots emerge from a mortar seam rather than a large grass patch.
+    for i in 0..3 {
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.015, 0.06 + i as f32 * 0.015),
+            t * place(-0.22 + i as f32 * 0.03, 0.035, -0.08, i as f32 * 0.9),
+            hex(0x4b5334),
+        );
+    }
+}
+
+fn drain_grate(out: &mut Parts, p: Vec2, y: f32, angle: f32) {
+    flat_mark(out, p, 0.88, 0.34, angle, y, 0x242724);
+    let t = place(p.x, y + 0.003, p.y, angle);
+    for i in 0..9 {
+        out.add(
+            Mat::Metal,
+            &geom::plane(0.038, 0.3),
+            t * geom::at(-0.39 + i as f32 * 0.0975, 0.0, 0.0) * Mat4::from_rotation_x(-FRAC_PI_2),
+            hex(0x57564b),
+        );
+    }
+    for z in [-0.16, 0.16] {
+        out.add(
+            Mat::Metal,
+            &geom::plane(0.9, 0.024),
+            t * geom::at(0.0, 0.0, z) * Mat4::from_rotation_x(-FRAC_PI_2),
+            hex(0x57564b),
+        );
+    }
+}
+
+/// More visible street wear is tied to road edges and utility access instead of
+/// identical coloured patches repeated every 8 m. All geometry is merged per material.
+fn road_wear(
+    w: &WorldData,
+    doors: &[Door],
+    junctions: &HashMap<(i32, i32), u32>,
+    a: Vec2,
+    b: Vec2,
+    rw: f32,
+    out: &mut Parts,
+) {
+    let len = a.distance(b);
+    if len < 5.0 {
+        return;
+    }
+    let u = (b - a) / len;
+    let n = Vec2::new(-u.y, u.x);
+    let angle = -u.y.atan2(u.x);
+    let y = 0.023 + rw * 0.0005;
+    let margin = |p: Vec2| {
+        let k = ((p.x * 10.0).round() as i32, (p.y * 10.0).round() as i32);
+        if junctions.get(&k).copied().unwrap_or(0) >= 2 {
+            rw * 0.5 + 5.0
+        } else {
+            2.0
+        }
+    };
+    let (start, end) = (margin(a), len - margin(b));
+    if end <= start {
+        return;
+    }
+    for side in [-1.0, 1.0] {
+        let mut d = start;
+        while d < end {
+            let h = hash3(a.x + d, b.y, side * 31.0);
+            let p = a + u * d + n * side * (rw * 0.5 - 0.21);
+            if w.bld_at(p).is_none() {
+                let shape = [
+                    p - u * 1.3 - n * 0.07,
+                    p + u * 0.7 - n * (0.09 + h * 0.1),
+                    p + u * 1.5 + n * 0.08,
+                    p - u * 0.8 + n * 0.13,
+                ];
+                out.add(
+                    Mat::VCol,
+                    &flat_poly(&shape, y, true, 1.0),
+                    Mat4::IDENTITY,
+                    hex(0x383a32),
+                );
+                if rw >= 6.0 && h > 0.4 {
+                    drain_grate(out, p, y + 0.003, angle);
+                } else if rw < 9.0 && h > 0.65 && entrance_clear(p, doors) {
+                    edge_litter(out, p, y + 0.002, angle, (h * 1e6) as u64);
+                }
+            }
+            d += 9.0 + h * 4.0;
+        }
+    }
+    if end - start > 12.0 && rw >= 5.0 {
+        let h = hash3(a.x, b.y, 97.0);
+        let p = a + u * (start + (end - start) * (0.36 + h * 0.25)) + n * rw * 0.22;
+        if w.bld_at(p).is_none() {
+            // Cast-iron access cover set in a worn concrete collar.
+            let t = geom::at(p.x, y + 0.006, p.y);
+            out.add(
+                Mat::VCol,
+                &geom::cylinder(0.5, 0.5, 0.014, 20),
+                t,
+                hex(0x727064),
+            );
+            out.add(
+                Mat::Metal,
+                &geom::cylinder(0.41, 0.41, 0.018, 20),
+                t,
+                hex(0x3a3e39),
+            );
+            for k in -2i32..=2 {
+                let q = p + n * (k as f32 * 0.13);
+                let width = if k.abs() == 2 { 0.48 } else { 0.66 };
+                flat_mark(out, q, width, 0.018, angle, y + 0.017, 0x77766b);
+            }
+            let q = p + u * 0.34;
+            flat_mark(out, q, 0.12, 0.055, angle, y + 0.019, 0x161b18);
         }
     }
 }
@@ -569,7 +756,7 @@ pub fn props(list: &[Prop], min: Vec2, max: Vec2, lod_far: bool, out: &mut Parts
 /// roads.ts `curb`: an 18 cm granite curb (some painted red §169 / yellow §168 no-parking) and a
 /// 15 cm paved walk behind it, 2.6–3.8 m on main roads and 1.6–2.4 m on streets, stopped at the
 /// building line, in 4 m slabs; pieces that would land on a crossing road are left out.
-fn sidewalks(w: &WorldData, a: Vec2, b: Vec2, rw: f32, out: &mut Parts) {
+fn sidewalks(w: &WorldData, doors: &[Door], a: Vec2, b: Vec2, rw: f32, out: &mut Parts) {
     let l = a.distance(b);
     if l < 3.0 {
         return;
@@ -635,6 +822,98 @@ fn sidewalks(w: &WorldData, a: Vec2, b: Vec2, rw: f32, out: &mut Parts) {
                     [v.dot(u) / 2.0, v.dot(n) / 2.0]
                 });
             out.get(Mat::Walk).append(g);
+            // The 30 cm facility course belongs beside the curb, not repeated across
+            // the whole walk as a stripe baked into a repeating texture.
+            let strip = at(tm, o0 + 0.16);
+            let g = geom::plane(pl, 0.28)
+                .transformed(
+                    place(strip.x, 0.153, strip.y, -ang) * Mat4::from_rotation_x(-FRAC_PI_2),
+                )
+                .map_uv(|_, p| [Vec2::new(p[0], p[2]).dot(u) / 0.6, 0.5]);
+            out.get(Mat::Curb).append(g);
+            let mut seam = tm - pl * 0.5;
+            while seam < tm + pl * 0.5 {
+                let q = at(seam, o0 + 0.16);
+                flat_mark(out, q, 0.012, 0.28, -ang, 0.156, 0x514f47);
+                seam += 0.3;
+            }
+            // Paint is scuffed off the curb top; all little chips join the existing
+            // vertex-coloured street mesh, so they add no per-chip draw calls.
+            for k in 0..3 {
+                let h = hash3(cp.x, cp.y, k as f32 + sgn * 7.0);
+                if h < 0.38 {
+                    continue;
+                }
+                let q = cp + u * (h - 0.5) * pl;
+                flat_mark(out, q, 0.08 + h * 0.22, 0.08, -ang, 0.182, 0x858275);
+            }
+            // Low litter / grit stays at the curb. The central walk and every
+            // entrance corridor remain clear, including a recessed arcade door.
+            let h = hash3(cp.x, cp.y, 53.0);
+            if h > 0.57 && ws >= 1.2 {
+                let q = at(tm + pl * 0.16, o0 + 0.48);
+                if entrance_clear(q, doors) && w.free(q, 0.28) {
+                    edge_litter(out, q, 0.156, -ang, (h * 1e6) as u64);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod dressing_tests {
+    use super::*;
+
+    #[test]
+    fn decorative_litter_keeps_the_whole_arcade_entrance_clear() {
+        for normal in [Vec2::X, Vec2::Y, Vec2::new(0.6, 0.8)] {
+            let door = Door {
+                p: Vec2::new(14.0, -7.0),
+                n: normal,
+            };
+            let tangent = Vec2::new(-normal.y, normal.x);
+            for ahead in [0.0, 1.0, ARC, ARC + 3.0] {
+                assert!(!entrance_clear(door.p + normal * ahead, &[door]));
+                assert!(!entrance_clear(
+                    door.p + normal * ahead + tangent * 1.0,
+                    &[door]
+                ));
+            }
+            assert!(entrance_clear(door.p + tangent * 1.5, &[door]));
+        }
+    }
+
+    #[test]
+    fn door_prefilter_keeps_entrances_at_both_ends_of_long_segments() {
+        let doors = [
+            Door {
+                p: Vec2::new(-12.0, 18.0),
+                n: -Vec2::Y,
+            },
+            Door {
+                p: Vec2::new(753.0, -18.0),
+                n: Vec2::Y,
+            },
+            Door {
+                p: Vec2::new(400.0, 60.0),
+                n: -Vec2::Y,
+            },
+        ];
+        let near = relevant_doors(&doors, Vec2::ZERO, Vec2::new(746.7, 0.0), 12.0);
+        assert_eq!(near.len(), 2);
+        assert_eq!(near[0].p, doors[0].p);
+        assert_eq!(near[1].p, doors[1].p);
+    }
+
+    #[test]
+    fn gutter_dressing_has_a_small_bounded_mesh_and_no_tall_obstacles() {
+        let mut parts = Parts::default();
+        edge_litter(&mut parts, Vec2::ZERO, 0.0, 0.0, 124);
+        let vertices: usize = parts.0.values().map(MeshBuf::vcount).sum();
+        assert!(vertices < 160, "a gutter patch must remain cheap on phones");
+        for mesh in parts.0.values() {
+            assert!(mesh.pos.iter().all(|p| p.iter().all(|v| v.is_finite())));
+            assert!(mesh.pos.iter().all(|p| p[1] < 0.1 && p[1] > -0.02));
         }
     }
 }

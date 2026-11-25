@@ -4,29 +4,29 @@ A native **Rust + Bevy 0.20.1** port of [Defend Taipei](https://github.com/lijia
 
 ## Current playable scope
 
-The Wanhua core now connects exploration, combat, carried supplies, a shared shelter, daily survival and persistent saves. This is a playable native survival slice; it does **not** yet contain every district or every system from the Web game. The precise parity boundary and reference tests are documented in [SHELTER-PARITY.md](docs/SHELTER-PARITY.md).
+The Wanhua core now connects exploration, combat, carried supplies, a shared shelter, daily survival and persistent saves. This is a playable native survival slice; it does **not** yet contain every district or every system from the Web game. See [SHELTER-PARITY.md](docs/SHELTER-PARITY.md) for gameplay boundaries and [STREET-TITLE-PARITY.md](docs/STREET-TITLE-PARITY.md) for the street, entrance and title-screen work and its source references.
 
-- **World:** the original Wanhua road/building data, streamed building geometry and detail, interior collision, cover, fading roofs/walls, and an isometric camera that adapts to landscape and portrait.
+- **World:** the original Wanhua road/building data, streamed geometry, interior collision, cover, fading roofs/walls, and an isometric camera that adapts to landscape and portrait. Streets now use neutral worn asphalt, filled brick paving, cracked concrete, curb seams and drains; four arcade floor palettes, stained exterior materials and façade utilities add variation. Visible doorframes and fixed-open gate leaves mark existing entrances without changing their collision openings.
 - **Survivors and combat:** six selectable roles, gender selection, procedural character rigs, 64 patrol routes, night patrols, line of sight, noise, investigation, cover and attacks. Equipped weapons use the real inventory and consume their matching ammunition.
 - **Supplies:** 126 item definitions and 18 loot tables from the pinned Web source. Search nearby cabinets and fallen soldiers; equip, eat, drink, treat wounds, unload ammunition and cook supported food. Loot and deaths persist across Continue.
 - **Shelter:** shared food/water/medicine deposits, five construction upgrades, survivor meals and illness, morale, arrivals, raids, rain collection, planters, once-per-day prayer, moral choices and a shelter-dependent ending paragraph. Daily settlement occurs when crossing 06:00.
 - **World survival:** hunger, thirst, fatigue, sleep, 1×/3×/20× time, rain, power/water cutoffs, food spoilage, a refillable home water fixture and the reachable Longshan barter stall. One game day takes one real hour at 1× speed.
-- **Flow and presentation:** title, prologue, pause, inventory, shelter, barter, journal and endings; Traditional Chinese/English controls and item labels; bundled CJK font and dictionary-based line breaking; environmental audio and alerts. Original story broadcasts remain in Chinese.
+- **Flow and presentation:** Home → survivor selection → departure briefing → prologue, with cached portraits made from the actual native character rigs, starting-kit details, Controls, About and save-aware Continue. Pause, inventory, shelter, barter, journal and ending screens support portrait and landscape. Traditional Chinese/English controls and item labels, a bundled CJK font, dictionary-based line breaking, environmental audio and alerts are included. Original story broadcasts remain in Chinese.
 - **Persistence:** one validated, atomically replaced save; autosave every 20 real seconds during play and on app background/close; manual Save and Save and return to menu. Continue restores the role, position, inventory, shelter, clock, weather and world loot history. Starting a new run or dying clears the previous run, matching the original game's permanent-death rule.
 
 ## Play on Android
 
 Open a successful run of [GitHub Actions CI](https://github.com/lijiabao1998/DefendTaipei-Android/actions/workflows/ci.yml), then download the **DefendTaipei-arm64-debug-apk** artifact. Unzip and install `DefendTaipei-arm64-debug.apk`.
 
-The phone build requires **Android 12 / API 31 or newer**, **arm64-v8a**, and **Vulkan**. It is a debug-signed testing APK. The x86_64 artifact is for the CI emulator. Physical-phone GPU compatibility and performance still need a device playtest.
+The phone build requires **Android 12 / API 31 or newer**, **arm64-v8a**, and **Vulkan**. It is a debug-signed testing APK. The x86_64 artifact is for the CI emulator. Physical-phone screenshots are available and inform the visual work, but hardware frame rate, thermal behavior and compatibility across devices have not been measured.
 
 ### First run
 
-1. Choose a role and start a new game. The prologue can be skipped.
+1. From Home, choose **新遊戲 / New game**, select one of the six survivors and a gender, then choose **下一步 / Next**. Review the survivor, starting supplies and departure information, then press **走進萬華 / Depart** to create the run. Returning from selection or the briefing keeps the existing save; departing replaces it. The following prologue can be skipped. **操作說明 / Controls** and **製作名單 / About** are available from Home.
 2. You begin at your shelter. Open **避難所 / Shelter** to deposit provisions or inspect construction costs. Grey buttons indicate an unmet cost, range or daily-use requirement.
 3. Use **背包 / Bag** to equip a weapon or consume supplies. Guns require matching ammunition. Brown crates mark searchable containers; the blue home fixture supplies one bottle of water, then waits more than 90 game minutes before another refill. It stops working after the water cutoff.
 4. Explore and return supplies to the shelter before the next morning. The **日誌 / Journal** records daily events. Sleep is available indoors when tired and safe; nearby danger cancels accelerated time.
-5. Use **儲存 / Save**, or **暫停 → 儲存並返回主選單 / Pause → Save and return to menu**. The title's Continue button becomes available after a valid save exists.
+5. Use **儲存 / Save**, or **暫停 → 儲存並返回主選單 / Pause → Save and return to menu**. Home's **繼續遊戲 / Continue** button becomes available after a valid save exists.
 
 ### Controls
 
@@ -69,7 +69,7 @@ cargo install cargo-ndk
 cargo ndk -t arm64-v8a -P 31 -o android/app/src/main/jniLibs \
   build --release -p defend_taipei_android
 cd android
-./gradlew assembleDebug
+bash ../scripts/gradle-assemble.sh assembleDebug
 # android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
@@ -79,16 +79,17 @@ The shared Rust library is packaged with Android GameActivity. The activity foll
 
 ```sh
 cargo fmt --all -- --check
+bash scripts/test-gradle-assemble.sh
 CARGO_PROFILE_DEV_DEBUG=0 cargo clippy --workspace --all-targets -- -D warnings
 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p defend_taipei --lib
 ```
 
 CI also builds both APK ABIs and runs two end-to-end checks:
 
-- **Native GPU QA:** `cargo run -p defend_taipei -- --qa` renders eleven actual Bevy screenshots covering the title, prologue, gameplay, panels, small landscape, portrait and Save → Menu → Continue. It uses an offscreen GPU texture, does not require a display server, and fails if the restored run differs. Outputs are in the **native-qa** artifact. On Linux, install `mesa-vulkan-drivers` for software Vulkan when no GPU is available. `DEFEND_TAIPEI_QA_OUT` selects the output directory. This uses a fixed simulation timestep and is **not a performance benchmark**.
+- **Native GPU QA:** `cargo run -p defend_taipei -- --qa` renders **18 actual Bevy screenshots**, including Home at three sizes, survivor selection and departure briefing in both orientations, street and entrance views, prologue, gameplay, panels and Save → Menu → Continue. It uses an offscreen GPU texture, does not require a display server, and fails if the restored run differs. CI requires a successful `qa-report.json` with all 18 captures. Outputs are in the **native-qa** artifact; the [capture list](docs/STREET-TITLE-PARITY.md#native-capture-coverage) documents the exact views. On Linux, install `mesa-vulkan-drivers` for software Vulkan when no GPU is available. `DEFEND_TAIPEI_QA_OUT` selects the output directory. This uses a fixed simulation timestep and is **not a performance benchmark**.
 - **Android gameplay smoke:** the **emulator-smoke** artifact contains logcat, screenshots and actual private save JSON from touch-driven deposit, prayer, disabled construction, save, menu, continue and rotation checks. `scripts/emulator-gameplay-smoke.sh` clears the disposable emulator's app data and refuses to run on a physical phone.
 
-To launch a directly built desktop binary, set `BEVY_ASSET_ROOT` to the repository's `game` directory. The usual `cargo run` path supplies the crate's asset root automatically.
+These are verification gates; use the Actions result for the revision you are installing to check their outcome. The Gradle helper retries only recognized HTTP 429/502/503/504 dependency-download failures, up to three attempts, and preserves build failures. To launch a directly built desktop binary, set `BEVY_ASSET_ROOT` to the repository's `game` directory. The usual `cargo run` path supplies the crate's asset root automatically.
 
 ## Code map
 
@@ -100,6 +101,7 @@ To launch a directly built desktop binary, set `BEVY_ASSET_ROOT` to the reposito
 | `game/src/survival.rs` | Shelter rules and daily settlement |
 | `game/src/worldplay.rs` | World interactions, loot, vitals, weather and utility integration |
 | `game/src/game_flow.rs`, `game/src/story.rs`, `game/src/ui/` | Campaign flow, story data and responsive screens |
+| `game/src/ui/title.rs`, `game/src/ui/portrait.rs`, `game/src/ui/layout.rs` | Home, survivor selection, briefing, cached rig portraits and screen geometry |
 | `game/src/save.rs`, `game/src/qa.rs` | Save lifecycle and native visual QA |
 | `game/tests/fixtures/`, `tools/generate_*.cjs` | Original TypeScript reference fixtures and generators |
 | `mobile/`, `android/`, `.github/workflows/ci.yml` | Android entry point, APK packaging and CI |
@@ -108,6 +110,6 @@ To launch a directly built desktop binary, set `BEVY_ASSET_ROOT` to the reposito
 
 The current playable bounds cover the Wanhua core. Other Taipei districts, the outside-core Dongyuan trade location, vehicles and armor combat, full teammate/rescue systems, metro/inter-floor traversal, and the boat-informant path are not implemented. District-reclamation events have a handler but no complete native capture loop. The active extraction route is the timed helicopter site; instant keyboard evacuation shortcuts have been removed.
 
-Container/furniture and patrol placement use a native deterministic stream, not the Web renderer's interleaved random calls. Nearby containers are collected as a group rather than through the Web's per-item pickup panel. Some weapon silhouettes and environmental visuals are simplified. These boundaries are intentional disclosures, not a claim of full visual or gameplay parity.
+Container/furniture and patrol placement use a native deterministic stream, not the Web renderer's interleaved random calls. Nearby containers are collected as a group rather than through the Web's per-item pickup panel. The visible entrance doors remain fixed open: they have no open/close/lock state or door interaction. The native title does not yet include the Web game's complete Settings, day-length preferences or teammate selection. Some weapon silhouettes and environmental visuals remain simplified. The street and title changes do not establish full Web visual parity or measured phone FPS.
 
 Map data attribution: © OpenStreetMap contributors, ODbL. The bundled Noto font license is included under `assets/fonts/`.

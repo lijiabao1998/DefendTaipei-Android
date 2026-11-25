@@ -788,19 +788,214 @@ pub fn rooftop(b: &Bld, out: &mut Parts) {
     }
 }
 
-/// walkup.ts street dressing: vertical sign blades, split AC units with drip stains, and
-/// peeled render showing red brick, on the door edge of low walk-ups.
+/// Outward normal of an actual wall slab. Recessed arcade walls are inside the footprint,
+/// so polygon containment alone cannot tell which side is their public-facing side.
+fn wall_normal(b: &Bld, w: &WallBox) -> Vec2 {
+    let u = (w.c - w.a).normalize_or_zero();
+    let mut n = Vec2::new(-u.y, u.x);
+    let mid = (w.a + w.c) / 2.0;
+    if let Some(d) = b.door
+        && u.dot(d.n).abs() < 0.01
+        && (mid - d.p).dot(d.n).abs() < 0.05
+    {
+        if n.dot(d.n) < 0.0 {
+            n = -n;
+        }
+    } else if pip(mid + n * 0.4, &b.pts) {
+        n = -n;
+    }
+    n
+}
+
+/// A small ragged render / paper patch, in the wall's XY plane with +Z facing out.
+/// The edge has eight unequal corners rather than repeated rectangular stickers.
+fn ragged_patch(w: f32, h: f32, r: &mut Park) -> MeshBuf {
+    let mut g = MeshBuf::default();
+    g.pos.push([0.0, 0.0, 0.0]);
+    g.nrm.push([0.0, 0.0, 1.0]);
+    g.uv.push([w / 2.0, h / 2.0]);
+    g.col.push(WHITE);
+    for k in 0..8 {
+        let ang = k as f32 * PI / 4.0;
+        let s = 0.7 + r.f() * 0.3;
+        let (x, y) = (ang.cos() * w * 0.5 * s, ang.sin() * h * 0.5 * s);
+        g.pos.push([x, y, 0.0]);
+        g.nrm.push([0.0, 0.0, 1.0]);
+        g.uv.push([x + w / 2.0, h / 2.0 - y]);
+        g.col.push(WHITE);
+    }
+    for k in 0..8u32 {
+        g.idx.extend([0, k + 1, (k + 1) % 8 + 1]);
+    }
+    g
+}
+
+/// Ground-level details from walkup.ts / decay.ts: mixed tiled dado, exposed render,
+/// water pipes, electrical meters and weathered notices. They follow individual wall
+/// slabs, whose door holes are already cut, so none can seal an entrance accidentally.
+fn frontage_wear(b: &Bld, out: &mut Parts) {
+    let mut r = Park(b.seed7 ^ 0x6d70_8f31);
+    let Some(door) = b.door else { return };
+    let mut walls: Vec<&WallBox> = b
+        .walls
+        .iter()
+        .filter(|w| w.y0 < 0.01 && w.y1 >= DOOR_H && w.a.distance(w.c) > 1.0)
+        .collect();
+    // Prefer the front wall portions on both sides of the entrance. A highly irregular
+    // OSM footprint must not turn into an unlimited number of utility/detail batches.
+    walls.sort_by(|a, c| {
+        let rank = |w: &WallBox| {
+            let facing = wall_normal(b, w).dot(door.n);
+            let dist = ((w.a + w.c) / 2.0).distance(door.p);
+            dist + if facing > 0.95 { 0.0 } else { 1000.0 }
+        };
+        rank(a).total_cmp(&rank(c))
+    });
+    for (index, w) in walls.into_iter().take(6).enumerate() {
+        let l = w.a.distance(w.c);
+        let mid = (w.a + w.c) / 2.0;
+        let n = wall_normal(b, w);
+        let t = place(mid.x, 0.0, mid.y, n.x.atan2(n.y));
+        let front = n.dot(door.n) > 0.95;
+        // Old owners re-tile only the bottom of their own frontage. Different bays retain
+        // their own age/palette, while wall textures remain visible above the splash zone.
+        if front || r.f() < 0.65 {
+            let h = 0.74 + r.f() * 0.24;
+            let g = geom::plane(l, h).map_uv(|uv, _| [uv[0] * l, uv[1] * h]);
+            out.add(
+                Mat::ArcadeFloor(((b.id as usize + index) % super::textures::ARCADE_TILE_N) as u8),
+                &g,
+                t * geom::at(0.0, h / 2.0 + 0.04, 0.145),
+                hex(0xb8b7a8),
+            );
+            // Irregular broken tile edge / mortar exposure, attached to the same plane.
+            let patch = ragged_patch((l * 0.25).clamp(0.35, 1.4), 0.34, &mut r);
+            out.add(
+                Mat::VCol,
+                &patch,
+                t * geom::at(0.0, 0.64, 0.151),
+                hex(0x8f8878),
+            );
+        }
+        let max_w = (l - 0.35).min(1.65);
+        let pw = max_w * (0.55 + r.f() * 0.4);
+        let ph = 0.5 + r.f() * 0.65;
+        let x = (r.f() - 0.5) * (l - pw - 0.2).max(0.0);
+        let y = 1.0 + r.f() * 0.6;
+        let patch = ragged_patch(pw, ph, &mut r);
+        out.add(
+            Mat::VCol,
+            &patch,
+            t * trs([x, y, 0.148], [0.0; 3], [1.13, 1.13, 1.0]),
+            hex(0xbdb4a0),
+        );
+        out.add(Mat::Brick, &patch, t * geom::at(x, y, 0.153), WHITE);
+        // Moisture gathers at the wall base in interrupted patches, not a continuous
+        // perfectly straight dark border around every building.
+        for k in 0..2 {
+            let pw = (l * 0.3).clamp(0.3, 1.7);
+            let g = ragged_patch(pw, 0.22 + r.f() * 0.16, &mut r);
+            let x = (k as f32 - 0.5) * (l - pw) * 0.55;
+            out.add(Mat::VCol, &g, t * geom::at(x, 0.18, 0.159), hex(0x626859));
+        }
+        if index >= 2 || l < 1.5 {
+            continue;
+        }
+        // One utility group on each side of the entry, below the first-floor windows.
+        let px = if index == 0 { -1.0 } else { 1.0 } * (l / 2.0 - 0.25);
+        let pipe_h = 3.2f32.min(w.y1 - 0.2);
+        out.add(
+            Mat::VCol,
+            &geom::cylinder(0.045, 0.045, pipe_h, 6),
+            t * geom::at(px, pipe_h / 2.0 + 0.08, 0.22),
+            hex(if index == 0 { 0x737b69 } else { 0x786657 }),
+        );
+        for y in [0.45, 1.7, 2.85] {
+            out.add(
+                Mat::VCol,
+                &bx(0.14, 0.05, 0.16, px, y, 0.19),
+                t,
+                hex(0x56584f),
+            );
+        }
+        let mx = (px + if px < 0.0 { 0.45 } else { -0.45 }).clamp(-l / 2.0 + 0.3, l / 2.0 - 0.3);
+        out.add(
+            Mat::VCol,
+            &bx(0.42, 0.6, 0.13, mx, 1.62, 0.22),
+            t,
+            hex(0x9c9e8e),
+        );
+        out.add(
+            Mat::VCol,
+            &bx(0.36, 0.45, 0.015, mx, 1.66, 0.293),
+            t,
+            hex(0x6b7269),
+        );
+        out.add(
+            Mat::VCol,
+            &geom::cylinder(0.105, 0.105, 0.02, 10),
+            t * geom::at(mx, 1.73, 0.312) * Mat4::from_rotation_x(FRAC_PI_2),
+            hex(0xc0c5b7),
+        );
+        out.add(
+            Mat::VCol,
+            &bx(0.17, 0.045, 0.018, mx, 1.71, 0.328),
+            t,
+            hex(0x303b35),
+        );
+        out.add(
+            Mat::VCol,
+            &bx(0.025, 0.7, 0.025, mx, 2.27, 0.17),
+            t,
+            hex(0x474f47),
+        );
+        out.add(
+            Mat::VCol,
+            &bx(l.min(3.5), 0.025, 0.025, 0.0, 2.62, 0.17),
+            t,
+            hex(0x474f47),
+        );
+        if front && l > 2.2 {
+            let nx = if mx < 0.0 { 0.5 } else { -0.5 };
+            let notice = t * geom::at(nx, 1.62, 0.18) * Mat4::from_rotation_z(-0.04 + r.f() * 0.08);
+            let paper = ragged_patch(0.5, 0.68, &mut r);
+            out.add(Mat::VCol, &paper, notice, hex(0xc9c1a9));
+            out.add(
+                Mat::VCol,
+                &geom::plane(0.27, 0.075),
+                notice * geom::at(0.0, 0.16, 0.004),
+                hex(0x8e4236),
+            );
+            for k in 0..4 {
+                let line = 0.2 - (k % 2) as f32 * 0.055;
+                out.add(
+                    Mat::VCol,
+                    &geom::plane(line, 0.018),
+                    notice * geom::at(-0.02, 0.04 - k as f32 * 0.06, 0.005),
+                    hex(0x676250),
+                );
+            }
+        }
+    }
+}
+
+/// walkup.ts street dressing on the actual street-facing wall, rather than an unrelated
+/// longest wall (which could put the original native AC/sign/brick details in mid-air).
 pub fn walkup(b: &Bld, out: &mut Parts) {
     let Some(door) = b.door else { return };
     if b.lv > 5 {
         return;
     }
     let mut r = Park(b.seed8 ^ 0x5bd1);
-    // the door edge is the wall whose midpoint is nearest the door, facing the same way
+    let front_plane = if b.arcade.is_some() { ARC } else { 0.0 };
     let Some(w) = b
         .walls
         .iter()
-        .filter(|w| w.y0 == 0.0 || w.y0 == GF)
+        .filter(|w| {
+            w.y1 > GF + 1.0
+                && wall_normal(b, w).dot(door.n) > 0.95
+                && ((((w.a + w.c) / 2.0 - door.p).dot(door.n)) - front_plane).abs() < 0.05
+        })
         .max_by(|a, c| a.a.distance(a.c).total_cmp(&c.a.distance(c.c)))
     else {
         return;
@@ -810,10 +1005,7 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
         return;
     }
     let u = (w.c - w.a) / l;
-    let mut n = Vec2::new(-u.y, u.x);
-    if n.dot(door.n) < 0.0 {
-        n = -n;
-    }
+    let n = wall_normal(b, w);
     let ry = n.x.atan2(n.y);
     let lt = |s: f32, y: f32, z: f32| {
         let p = w.a + u * s + n * (0.125 + z);
@@ -859,18 +1051,12 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
             );
         }
     }
-    if r.f() < 0.5 {
-        let (s, y) = (0.6 + r.f() * (l - 1.2), 1.0 + r.f() * (b.h - 2.0).max(0.5));
-        for k in 0..2 + (r.f() * 2.0) as i32 {
-            let (pw, ph) = (0.5 + r.f() * 1.2, 0.4 + r.f() * 0.9);
-            let g = geom::plane(pw, ph).map_uv(|uv, _| [uv[0] * pw, uv[1] * ph]);
-            let t = lt(
-                s + (r.f() - 0.5) * 0.8,
-                y + (r.f() - 0.5) * 0.6,
-                0.015 + k as f32 * 0.002,
-            );
-            out.add(Mat::Brick, &g, t, WHITE);
-        }
+    if r.f() < 0.5 && w.y1 - w.y0 > 2.0 {
+        let (pw, ph) = (0.8 + r.f() * 0.8, 0.7 + r.f() * 0.7);
+        let s = pw / 2.0 + 0.15 + r.f() * (l - pw - 0.3).max(0.0);
+        let y = w.y0 + ph / 2.0 + 0.2 + r.f() * (w.y1 - w.y0 - ph - 0.4).max(0.0);
+        let g = ragged_patch(pw, ph, &mut r);
+        out.add(Mat::Brick, &g, lt(s, y, 0.025), WHITE);
     }
 }
 
@@ -879,6 +1065,7 @@ pub fn near_detail(b: &Bld, kit: &WindowKit) -> Parts {
     let mut p = Parts::default();
     windows(b, kit, &mut p);
     walkup(b, &mut p);
+    frontage_wear(b, &mut p);
     p
 }
 
@@ -889,4 +1076,67 @@ pub fn near_roof(b: &Bld) -> Parts {
         rooftop(b, &mut p);
     }
     p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frontage_utilities_are_bounded_and_do_not_cover_open_doorways() {
+        let world = super::super::world();
+        let mut checked = 0;
+        for b in world
+            .blds
+            .iter()
+            .filter(|b| b.c.distance(world.spawn) < 95.0)
+        {
+            let Some(d) = b.door else { continue };
+            let mut detail = Parts::default();
+            frontage_wear(b, &mut detail);
+            assert!(
+                detail.vcount() <= 1500,
+                "facade budget exceeded at {}",
+                b.id
+            );
+            // Only assert passage at doors which the existing map marks as reachable.
+            // This does not change infill/OSM geometry or pretend every original lot opens
+            // directly onto the street; it proves decoration adds no new visual barrier.
+            if ![-0.6, 0.0, 0.6]
+                .into_iter()
+                .all(|z| world.free(d.p + d.n * z, 0.45))
+            {
+                continue;
+            }
+            let inv = place(d.p.x, 0.0, d.p.y, d.n.x.atan2(d.n.y)).inverse();
+            for g in detail.0.values() {
+                let points: Vec<Vec3> = g
+                    .pos
+                    .iter()
+                    .map(|p| inv.transform_point3(Vec3::from(*p)))
+                    .collect();
+                for tri in g.idx.as_chunks::<3>().0 {
+                    let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+                    for &i in tri {
+                        assert!(points[i as usize].is_finite());
+                        lo = lo.min(points[i as usize]);
+                        hi = hi.max(points[i as usize]);
+                    }
+                    let overlaps = lo.x < 0.55
+                        && hi.x > -0.55
+                        && lo.y < 2.1
+                        && hi.y > 0.2
+                        && lo.z < 0.35
+                        && hi.z > -0.25;
+                    assert!(
+                        !overlaps,
+                        "facade detail crosses door {}: {lo:?}..{hi:?}",
+                        b.id
+                    );
+                }
+            }
+            checked += 1;
+        }
+        assert!(checked > 10);
+    }
 }

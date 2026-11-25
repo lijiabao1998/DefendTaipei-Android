@@ -43,6 +43,9 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
+      - name: Gradle retry behavior
+        run: bash scripts/test-gradle-assemble.sh
+
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -62,7 +65,7 @@ jobs:
           export VK_ICD_FILENAMES="$(python3 -c 'from pathlib import Path; paths=sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")); print(paths[0] if paths else "")')"
           test -n "$VK_ICD_FILENAMES"
           timeout 900s target/debug/defend-taipei --qa > native-qa.log 2>&1
-          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 11, report'
+          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 18, report'
 
       - name: Upload native QA evidence
         if: always()
@@ -100,6 +103,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle.properties
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/gradle/libs.versions.toml
 
       - name: Build Rust library (.so) with cargo-ndk
         run: |
@@ -112,7 +121,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug
+          bash ../scripts/gradle-assemble.sh assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DefendTaipei-arm64-debug.apk"
 
       - name: Upload APK
@@ -153,6 +162,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle*
+            android/gradle.properties
+            android/gradle/wrapper/gradle-wrapper.properties
+            android/gradle/libs.versions.toml
 
       - name: Enable KVM
         run: |
@@ -172,7 +187,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon assembleDebug -PABI_FILTERS=x86_64
+          bash ../scripts/gradle-assemble.sh assembleDebug -PABI_FILTERS=x86_64
           cp app/build/outputs/apk/debug/app-debug.apk \
             "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
 

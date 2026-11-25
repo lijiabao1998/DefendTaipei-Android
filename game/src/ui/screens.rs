@@ -1,149 +1,32 @@
-//! Survivor select and the death screen.
-//!
-//! These systems only read [`GameFlow`]. The start button writes [`StartGame`];
-//! the death button writes [`RestartGame`]. Neither one sets the next state.
+//! Prologue and the four ending screens. Title navigation lives in `title`.
 
 use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::audio::SfxEvent;
 use crate::combat::GameState;
-use crate::game_flow::{Campaign, Ending, GameFlow, RestartGame, SkipPrologue, StartGame};
+use crate::game_flow::{Campaign, Ending, GameFlow, RestartGame, SkipPrologue};
 use crate::i18n::{Language, UiFont, tr};
 use crate::input::ScreenRect;
-use crate::roles::{Gender, ROLES, Role, SelectedRole};
-use crate::save::{ContinueGame, SaveStatus};
 use crate::survival::Shelter;
 
-use super::layout::{death_layout, prologue_layout, title_layout};
+use super::layout::{death_layout, prologue_layout};
 use super::pause::{MenuButton, PauseHeading, ResumeButton};
 use super::{ConsumedPresses, StateScoped};
 
 #[derive(Component)]
-pub(super) struct TitleRoot;
-
-#[derive(Component)]
 pub(super) struct HeadingText;
-
 #[derive(Component)]
 pub(super) struct IntroText;
-
 #[derive(Component)]
 pub(super) struct DetailText;
-
-#[derive(Component)]
-pub(super) struct StartButton;
-
-#[derive(Component)]
-pub(super) struct ContinueButton;
-
-#[derive(Component)]
-pub(super) struct SaveStatusText;
-
 #[derive(Component)]
 pub(super) struct RestartButton;
-
 #[derive(Component)]
 pub(super) struct SkipButton;
-
 #[derive(Component)]
 pub(super) struct PrologueRoot;
-
 #[derive(Component)]
 pub(super) struct EndingRoot;
-
-#[derive(Component, Clone, Copy)]
-pub(super) struct GenderButton(pub(super) Gender);
-
-#[derive(Component, Clone, Copy)]
-pub(super) struct LangButton(pub(super) Language);
-
-#[derive(Component, Clone, Copy)]
-pub(super) struct RoleButton(pub(super) usize);
-
-pub(super) fn enter_title(
-    mut commands: Commands,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    font: Res<UiFont>,
-) {
-    let viewport = viewport_of(&windows);
-    let layout = title_layout(viewport);
-    commands
-        .spawn((
-            TitleRoot,
-            StateScoped(GameFlow::Title),
-            dimmer(),
-            GlobalZIndex(40),
-        ))
-        .with_children(|parent| {
-            parent.spawn(labeled(
-                HeadingText,
-                layout.heading,
-                layout.heading_font,
-                &font,
-                Color::srgb(0.96, 0.82, 0.38),
-            ));
-            parent.spawn(labeled(
-                IntroText,
-                layout.intro,
-                layout.body_font,
-                &font,
-                Color::srgb(0.93, 0.9, 0.82),
-            ));
-            parent.spawn(choice(
-                GenderButton(Gender::Male),
-                layout.male,
-                layout.button_font,
-                &font,
-            ));
-            parent.spawn(choice(
-                GenderButton(Gender::Female),
-                layout.female,
-                layout.button_font,
-                &font,
-            ));
-            parent.spawn(choice(
-                LangButton(Language::ZhTw),
-                layout.lang_zh,
-                layout.body_font,
-                &font,
-            ));
-            parent.spawn(choice(
-                LangButton(Language::En),
-                layout.lang_en,
-                layout.body_font,
-                &font,
-            ));
-            for (index, rect) in layout.roles.iter().enumerate() {
-                parent.spawn(choice(RoleButton(index), *rect, layout.body_font, &font));
-            }
-            parent.spawn(labeled(
-                DetailText,
-                layout.detail,
-                layout.body_font,
-                &font,
-                Color::srgb(0.95, 0.93, 0.86),
-            ));
-            parent.spawn(choice(
-                ContinueButton,
-                layout.continue_game,
-                layout.button_font,
-                &font,
-            ));
-            parent.spawn(labeled(
-                SaveStatusText,
-                layout.save_status,
-                layout.body_font - 1.0,
-                &font,
-                Color::srgb(0.94, 0.76, 0.52),
-            ));
-            parent.spawn(choice(
-                StartButton,
-                layout.start,
-                layout.button_font + 2.0,
-                &font,
-            ));
-        });
-}
 
 pub(super) fn restyle(
     flow: Res<State<GameFlow>>,
@@ -155,12 +38,6 @@ pub(super) fn restyle(
             Option<&HeadingText>,
             Option<&IntroText>,
             Option<&DetailText>,
-            Option<&GenderButton>,
-            Option<&LangButton>,
-            Option<&RoleButton>,
-            Option<&StartButton>,
-            Option<&ContinueButton>,
-            Option<&SaveStatusText>,
             Option<&RestartButton>,
             Option<&SkipButton>,
         ),
@@ -172,95 +49,20 @@ pub(super) fn restyle(
     >,
 ) {
     let viewport = viewport_of(&windows);
-    let title = matches!(flow.get(), GameFlow::Title).then(|| title_layout(viewport));
-    let overlay = match flow.get() {
-        GameFlow::Prologue => Some(prologue_layout(viewport)),
-        GameFlow::GameOver(_) => Some(death_layout(viewport)),
-        _ => None,
+    let layout = match flow.get() {
+        GameFlow::Prologue => prologue_layout(viewport),
+        GameFlow::GameOver(_) => death_layout(viewport),
+        _ => return,
     };
-    for (
-        mut node,
-        mut font,
-        heading,
-        intro,
-        detail,
-        gender,
-        lang,
-        role,
-        start,
-        resume,
-        save_status,
-        restart,
-        skip,
-    ) in &mut nodes
-    {
+    for (mut node, mut font, heading, intro, detail, restart, skip) in &mut nodes {
         let placed = if heading.is_some() {
-            title
-                .as_ref()
-                .map(|layout| (layout.heading, layout.heading_font))
-                .or_else(|| {
-                    overlay
-                        .as_ref()
-                        .map(|layout| (layout.heading, layout.heading_font))
-                })
+            Some((layout.heading, layout.heading_font))
         } else if intro.is_some() {
-            title
-                .as_ref()
-                .map(|layout| (layout.intro, layout.body_font))
-                .or_else(|| {
-                    overlay
-                        .as_ref()
-                        .map(|layout| (layout.sub, layout.body_font))
-                })
+            Some((layout.sub, layout.body_font))
         } else if detail.is_some() {
-            title
-                .as_ref()
-                .map(|layout| (layout.detail, layout.body_font))
-                .or_else(|| {
-                    overlay
-                        .as_ref()
-                        .map(|layout| (layout.body, layout.body_font))
-                })
-        } else if let Some(gender) = gender {
-            title.as_ref().map(|layout| {
-                (
-                    match gender.0 {
-                        Gender::Male => layout.male,
-                        Gender::Female => layout.female,
-                    },
-                    layout.button_font,
-                )
-            })
-        } else if let Some(lang) = lang {
-            title.as_ref().map(|layout| {
-                (
-                    match lang.0 {
-                        Language::ZhTw => layout.lang_zh,
-                        Language::En => layout.lang_en,
-                    },
-                    layout.body_font,
-                )
-            })
-        } else if let Some(role) = role {
-            title
-                .as_ref()
-                .map(|layout| (layout.roles[role.0], layout.body_font))
-        } else if start.is_some() {
-            title
-                .as_ref()
-                .map(|layout| (layout.start, layout.button_font + 2.0))
-        } else if resume.is_some() {
-            title
-                .as_ref()
-                .map(|layout| (layout.continue_game, layout.button_font))
-        } else if save_status.is_some() {
-            title
-                .as_ref()
-                .map(|layout| (layout.save_status, layout.body_font - 1.0))
+            Some((layout.body, layout.body_font))
         } else if restart.is_some() || skip.is_some() {
-            overlay
-                .as_ref()
-                .map(|layout| (layout.restart, layout.body_font + 2.0))
+            Some((layout.restart, layout.body_font + 2.0))
         } else {
             None
         };
@@ -282,23 +84,15 @@ pub(super) fn restyle(
 pub(super) fn refresh_copy(
     flow: Res<State<GameFlow>>,
     lang: Res<Language>,
-    selected: Res<SelectedRole>,
     game: Res<GameState>,
     campaign: Res<Campaign>,
     shelter: Res<Shelter>,
-    save: Res<SaveStatus>,
     mut texts: Query<
         (
             &mut Text,
             Option<&HeadingText>,
             Option<&IntroText>,
             Option<&DetailText>,
-            Option<&GenderButton>,
-            Option<&LangButton>,
-            Option<&RoleButton>,
-            Option<&StartButton>,
-            Option<&ContinueButton>,
-            Option<&SaveStatusText>,
             Option<&RestartButton>,
             Option<&SkipButton>,
         ),
@@ -309,78 +103,48 @@ pub(super) fn refresh_copy(
         ),
     >,
 ) {
-    let state = flow.get().clone();
-    let day = shelter.day as i32;
-    for (
-        mut text,
-        heading,
-        intro,
-        detail,
-        gender,
-        language,
-        role,
-        start,
-        resume,
-        save_status,
-        restart,
-        skip,
-    ) in &mut texts
-    {
-        let next = match &state {
-            GameFlow::Title if heading.is_some() => Some(tr(*lang, "保衛台北", "Defend Taipei").to_string()),
-            GameFlow::Title if intro.is_some() => Some(
+    for (mut text, heading, intro, detail, restart, skip) in &mut texts {
+        let next = match flow.get() {
+            GameFlow::Prologue if heading.is_some() => {
+                Some(tr(*lang, "07:20　鬧鐘響了", "07:20  The alarm goes off").to_owned())
+            }
+            GameFlow::Prologue if intro.is_some() => Some(
                 tr(
                     *lang,
-                    "解放軍登陸三天後，台北淪陷。萬華的燈還亮著、水還有。\n你是躲在巷弄裡的倖存者。死亡即永久結束。",
-                    "Three days after the landings, Taipei has fallen. Wanhua still has lights and water.\nYou are a survivor in its alleys. Death is permanent.",
+                    "今天也要去西門町",
+                    "Another morning heading to Ximending",
                 )
-                .to_string(),
+                .to_owned(),
             ),
-            GameFlow::Title if detail.is_some() => {
-                Some(detail_line(selected.role(), selected.gender, *lang))
-            }
-            GameFlow::Title if let Some(gender) = gender => Some(gender.0.label(*lang).to_string()),
-            GameFlow::Title if let Some(language) = language => Some(
-                match language.0 {
-                    Language::ZhTw => "繁體中文",
-                    Language::En => "English",
-                }
-                .to_string(),
-            ),
-            GameFlow::Title if let Some(role) = role => {
-                Some(ROLES[role.0].card_line(selected.gender, *lang))
-            }
-            GameFlow::Title if start.is_some() => {
-                Some(tr(*lang, "新遊戲", "New game").to_string())
-            }
-            GameFlow::Title if resume.is_some() => {
-                Some(if save.available { tr(*lang, "繼續遊戲", "Continue") } else { tr(*lang, "沒有存檔", "No save") }.to_owned())
-            }
-            GameFlow::Title if save_status.is_some() => {
-                Some(save.error.clone().unwrap_or_else(|| save.notice.clone()))
-            }
-            GameFlow::Prologue if heading.is_some() => {
-                Some(tr(*lang, "07:20　鬧鐘響了", "07:20  The alarm goes off").to_string())
-            }
-            GameFlow::Prologue if intro.is_some() => {
-                Some(tr(*lang, "今天也要去西門町", "Another morning heading to Ximending").to_string())
-            }
             GameFlow::Prologue if detail.is_some() => Some(
                 tr(
                     *lang,
                     "跟著路上的人流。",
                     "Follow the people on the street.",
                 )
-                .to_string(),
+                .to_owned(),
             ),
             GameFlow::Prologue if skip.is_some() => {
-                Some(tr(*lang, "跳過開場 ▶", "Skip intro ▶").to_string())
+                Some(tr(*lang, "跳過開場 ▶", "Skip intro ▶").to_owned())
             }
-            GameFlow::GameOver(ending) => {
-                ending_line(*ending, *lang, day, game.kills, campaign.reclaimed.len(), heading.is_some(), intro.is_some(), detail.is_some(), restart.is_some()).map(|line| {
-                    if detail.is_some() { format!("{line}\n\n{}", shelter.ending_text(*lang)) } else { line }
-                })
-            }
+            GameFlow::GameOver(ending) => ending_line(
+                *ending,
+                *lang,
+                shelter.day as i32,
+                game.kills,
+                campaign.reclaimed.len(),
+                heading.is_some(),
+                intro.is_some(),
+                detail.is_some(),
+                restart.is_some(),
+            )
+            .map(|line| {
+                if detail.is_some() {
+                    format!("{line}\n\n{}", shelter.ending_text(*lang))
+                } else {
+                    line
+                }
+            }),
             _ => None,
         };
         if let Some(next) = next
@@ -388,93 +152,6 @@ pub(super) fn refresh_copy(
         {
             text.0 = next;
         }
-    }
-}
-
-pub(super) fn title_clicks(
-    flow: Res<State<GameFlow>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    consumed: Res<ConsumedPresses>,
-    mut lang: ResMut<Language>,
-    mut selected: ResMut<SelectedRole>,
-    mut start_event: MessageWriter<StartGame>,
-    mut continue_event: MessageWriter<ContinueGame>,
-    save: Res<SaveStatus>,
-    mut sfx: MessageWriter<SfxEvent>,
-    mut roles: Query<(&RoleButton, &mut BackgroundColor)>,
-    mut genders: Query<(&GenderButton, &mut BackgroundColor), Without<RoleButton>>,
-    mut continue_colors: Query<
-        &mut BackgroundColor,
-        (
-            With<ContinueButton>,
-            Without<RoleButton>,
-            Without<GenderButton>,
-        ),
-    >,
-) {
-    if !matches!(flow.get(), GameFlow::Title) {
-        return;
-    }
-    let Some(window) = windows.iter().next() else {
-        return;
-    };
-    let layout = title_layout(Vec2::new(window.width(), window.height()));
-    let mut pressed = false;
-    for point in &consumed.points {
-        if layout.male.contains(*point) {
-            selected.gender = Gender::Male;
-            pressed = true;
-        } else if layout.female.contains(*point) {
-            selected.gender = Gender::Female;
-            pressed = true;
-        } else if layout.lang_zh.contains(*point) {
-            *lang = Language::ZhTw;
-            pressed = true;
-        } else if layout.lang_en.contains(*point) {
-            *lang = Language::En;
-            pressed = true;
-        } else if let Some(index) = layout.roles.iter().position(|rect| rect.contains(*point)) {
-            selected.id = ROLES[index].id;
-            pressed = true;
-        } else if layout.continue_game.contains(*point) && save.available {
-            println!("DTUI action=Continue");
-            continue_event.write(ContinueGame);
-            pressed = true;
-        } else if layout.start.contains(*point) {
-            println!("DTUI action=NewGame");
-            start_event.write(StartGame);
-            pressed = true;
-        }
-    }
-    if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space]) {
-        println!("DTUI action=NewGame");
-        start_event.write(StartGame);
-        pressed = true;
-    }
-    if pressed {
-        sfx.write(SfxEvent::Clink { dist: 0.0 });
-    }
-    for (button, mut color) in &mut roles {
-        color.0 = if ROLES[button.0].id == selected.id {
-            Color::srgb(0.45, 0.32, 0.12)
-        } else {
-            Color::srgba(0.16, 0.13, 0.1, 0.92)
-        };
-    }
-    for (button, mut color) in &mut genders {
-        color.0 = if button.0 == selected.gender {
-            Color::srgb(0.55, 0.4, 0.16)
-        } else {
-            Color::srgba(0.2, 0.17, 0.13, 0.92)
-        };
-    }
-    for mut color in &mut continue_colors {
-        color.0 = if save.available {
-            Color::srgb(0.24, 0.38, 0.29)
-        } else {
-            Color::srgb(0.12, 0.13, 0.13)
-        };
     }
 }
 
@@ -822,62 +499,4 @@ fn place(node: &mut Node, rect: ScreenRect) {
     node.top = px(rect.min.y);
     node.width = px(rect.width());
     node.height = px(rect.height());
-}
-
-fn detail_line(role: &Role, gender: Gender, lang: Language) -> String {
-    let age = match lang {
-        Language::ZhTw => format!("{} 歲", role.age_of(gender)),
-        Language::En => format!("{} years old", role.age_of(gender)),
-    };
-    format!(
-        "{}・{}　{}　{}\n{}\n{}",
-        role.given(gender, lang),
-        role.name(lang),
-        gender.label(lang),
-        age,
-        role.blurb(lang),
-        role.perks(lang).join("・")
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bevy::state::app::StatesPlugin;
-
-    #[test]
-    fn continue_click_only_loads_an_available_save() {
-        for available in [true, false] {
-            let mut app = App::new();
-            app.add_plugins((MinimalPlugins, StatesPlugin))
-                .insert_state(GameFlow::Title)
-                .init_resource::<ButtonInput<KeyCode>>()
-                .init_resource::<Language>()
-                .init_resource::<SelectedRole>()
-                .insert_resource(SaveStatus {
-                    available,
-                    ..default()
-                })
-                .insert_resource(ConsumedPresses {
-                    points: vec![title_layout(Vec2::new(390.0, 844.0)).continue_game.center()],
-                })
-                .add_message::<StartGame>()
-                .add_message::<ContinueGame>()
-                .add_message::<SfxEvent>()
-                .add_systems(Update, title_clicks);
-            app.world_mut().spawn((
-                Window {
-                    resolution: (390, 844).into(),
-                    ..default()
-                },
-                PrimaryWindow,
-            ));
-            app.update();
-            assert!(app.world().resource::<Messages<StartGame>>().is_empty());
-            assert_eq!(
-                app.world().resource::<Messages<ContinueGame>>().is_empty(),
-                !available
-            );
-        }
-    }
 }

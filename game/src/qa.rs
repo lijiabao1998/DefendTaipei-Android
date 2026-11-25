@@ -24,15 +24,15 @@ use bevy::{
 };
 use serde::Serialize;
 
-use crate::camera::GameCamera;
-use crate::game_flow::{Campaign, GameFlow, SkipPrologue, StartGame};
+use crate::camera::{CameraZoom, GameCamera};
+use crate::game_flow::{Campaign, GameFlow, SkipPrologue};
 use crate::i18n::UiFont;
 use crate::inventory::Inventory;
-use crate::player::Player;
+use crate::player::{PLAYER_RADIUS, Player};
 use crate::roles::SelectedRole;
-use crate::save::{ContinueGame, SaveAndMenu, SaveStatus};
+use crate::save::{SaveAndMenu, SaveStatus};
 use crate::survival::{Shelter, Stash, TRADE_SPOTS};
-use crate::ui::{OpenPanel, PanelKind};
+use crate::ui::{OpenPanel, PanelKind, TitleAction, TitleMenu, TitlePage};
 
 const SETTLE_FRAMES: u32 = 60;
 const MAX_STAGE_FRAMES: u32 = 1800;
@@ -40,8 +40,12 @@ const MAX_STAGE_FRAMES: u32 = 1800;
 #[derive(Clone, Copy)]
 enum Action {
     None,
-    Start,
+    ChooseSurvivor,
+    ReviewDeparture,
+    Depart,
     Skip,
+    Street,
+    Entrance,
     Shelter,
     Inventory,
     Trade,
@@ -52,6 +56,8 @@ enum Action {
 #[derive(Clone, Copy)]
 enum ExpectedFlow {
     Title,
+    Survivor,
+    Briefing,
     Prologue,
     Playing,
 }
@@ -77,15 +83,57 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Title,
     },
     Stage {
+        name: "02a-title-small-portrait",
+        size: [320, 640],
+        action: Action::None,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
+        name: "02b-survivor-portrait",
+        size: [390, 844],
+        action: Action::ChooseSurvivor,
+        flow: ExpectedFlow::Survivor,
+    },
+    Stage {
+        name: "02c-survivor-small-landscape",
+        size: [800, 360],
+        action: Action::None,
+        flow: ExpectedFlow::Survivor,
+    },
+    Stage {
+        name: "02d-briefing-small-landscape",
+        size: [800, 360],
+        action: Action::ReviewDeparture,
+        flow: ExpectedFlow::Briefing,
+    },
+    Stage {
+        name: "02e-briefing-portrait",
+        size: [390, 844],
+        action: Action::None,
+        flow: ExpectedFlow::Briefing,
+    },
+    Stage {
         name: "03-prologue",
         size: [1280, 720],
-        action: Action::Start,
+        action: Action::Depart,
         flow: ExpectedFlow::Prologue,
     },
     Stage {
         name: "04-playing",
         size: [1280, 720],
         action: Action::Skip,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04a-streetscape-portrait",
+        size: [390, 844],
+        action: Action::Street,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04b-entrance-landscape",
+        size: [1280, 720],
+        action: Action::Entrance,
         flow: ExpectedFlow::Playing,
     },
     Stage {
@@ -166,6 +214,9 @@ struct QaRun {
     stage: usize,
     entered: bool,
     frame: u32,
+    ready_frames: u32,
+    scene_chunk: Option<crate::map::ChunkKey>,
+    entrance_building: Option<u32>,
     waiting_capture: bool,
     captured: bool,
     checkpoint: Option<Checkpoint>,
@@ -197,6 +248,9 @@ impl Plugin for QaPlugin {
             stage: 0,
             entered: false,
             frame: 0,
+            ready_frames: 0,
+            scene_chunk: None,
+            entrance_building: None,
             waiting_capture: false,
             captured: false,
             checkpoint: None,
@@ -248,12 +302,20 @@ fn set_target(world: &mut World, run: &mut QaRun, size: [u32; 2]) -> Result<(), 
 }
 
 fn flow_matches(world: &World, expected: ExpectedFlow) -> bool {
-    matches!(
-        (world.resource::<State<GameFlow>>().get(), expected),
-        (GameFlow::Title, ExpectedFlow::Title)
-            | (GameFlow::Prologue, ExpectedFlow::Prologue)
-            | (GameFlow::Playing, ExpectedFlow::Playing)
-    )
+    match (world.resource::<State<GameFlow>>().get(), expected) {
+        (GameFlow::Title, ExpectedFlow::Title) => {
+            world.resource::<TitleMenu>().page == TitlePage::Home
+        }
+        (GameFlow::Title, ExpectedFlow::Survivor) => {
+            world.resource::<TitleMenu>().page == TitlePage::Survivor
+        }
+        (GameFlow::Title, ExpectedFlow::Briefing) => {
+            world.resource::<TitleMenu>().page == TitlePage::Briefing
+        }
+        (GameFlow::Prologue, ExpectedFlow::Prologue)
+        | (GameFlow::Playing, ExpectedFlow::Playing) => true,
+        _ => false,
+    }
 }
 
 fn player_position(world: &mut World) -> Result<Vec3, String> {
@@ -267,16 +329,76 @@ fn player_position(world: &mut World) -> Result<Vec3, String> {
 
 fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), String> {
     set_target(world, run, stage.size)?;
+    run.ready_frames = 0;
+    run.scene_chunk = None;
+    run.entrance_building = None;
     println!("DTQA entering {}", stage.name);
     match stage.action {
         Action::None => {}
-        Action::Start => {
-            world.write_message(StartGame);
+        Action::ChooseSurvivor => {
+            world.write_message(TitleAction::NewGame);
+        }
+        Action::ReviewDeparture => {
+            world.write_message(TitleAction::Next);
+        }
+        Action::Depart => {
+            world.write_message(TitleAction::Depart);
         }
         Action::Skip => {
             world.write_message(SkipPrologue);
         }
+        Action::Street => {
+            // A real street-side camera, with gameplay and the streamed map active.
+            // Geometry/material regression evidence, not a synthetic scene.
+            let data = crate::map::world();
+            let (position, owner) =
+                street_view(data).ok_or("No clear main-road sidewalk for QA")?;
+            move_view(world, position, 1.35)?;
+            run.scene_chunk = Some(owner);
+            run.report.assertions.push(format!(
+                "Street capture uses a clear sidewalk at ({:.2}, {:.2})",
+                position.x, position.y
+            ));
+        }
+        Action::Entrance => {
+            let data = crate::map::world();
+            let (building, position) = data
+                .blds
+                .iter()
+                .filter(|building| !building.fill && building.h < 20.0)
+                .filter_map(|building| {
+                    let door = building.door?;
+                    // Our isometric camera looks from +X/+Z: choose an entrance
+                    // facing the camera, with a clear place to stand outside it.
+                    if door.n.dot(Vec2::ONE.normalize()) < 0.65 {
+                        return None;
+                    }
+                    let position = door.p + door.n * 5.5;
+                    (position.cmpge(data.min + 1.0).all()
+                        && position.cmple(data.max - 1.0).all()
+                        && building.c.distance(position) < 70.0
+                        && data.bld_at(position).is_none()
+                        && data.free(position, 0.6)
+                        && (-5..=55).all(|step| {
+                            data.free(door.p + door.n * step as f32 * 0.1, PLAYER_RADIUS)
+                        }))
+                    .then_some((building, position))
+                })
+                .min_by(|a, b| {
+                    a.1.distance_squared(data.spawn)
+                        .total_cmp(&b.1.distance_squared(data.spawn))
+                })
+                .ok_or("No camera-facing reachable entrance for QA")?;
+            move_view(world, position, 1.9)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(building.c));
+            run.entrance_building = Some(building.id);
+            run.report.assertions.push(format!(
+                "Entrance capture uses reachable building {} at ({:.2}, {:.2})",
+                building.id, position.x, position.y
+            ));
+        }
         Action::Shelter => {
+            move_view(world, crate::player::spawn_point().xz(), 1.0)?;
             world.write_message(OpenPanel(PanelKind::Shelter));
         }
         Action::Inventory => {
@@ -313,12 +435,82 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             run.report
                 .assertions
                 .push("SaveAndMenu wrote a valid save before resetting the run".into());
-            world.write_message(ContinueGame);
+            world.write_message(TitleAction::Continue);
         }
     }
     run.entered = true;
     run.frame = 0;
     Ok(())
+}
+
+fn move_view(world: &mut World, position: Vec2, zoom: f32) -> Result<(), String> {
+    let mut query = world.query_filtered::<&mut Transform, With<Player>>();
+    let mut player = query.iter_mut(world).next().ok_or("Player did not spawn")?;
+    player.translation.x = position.x;
+    player.translation.z = position.y;
+    world.resource_mut::<CameraZoom>().0 = zoom;
+    Ok(())
+}
+
+/// Put the actual player on the far sidewalk, looking across the carriageway.
+/// A merely walkable point can still put a roof or tree crown in front of the
+/// camera; that would produce a valid image without useful pavement evidence.
+fn street_view(data: &crate::map::WorldData) -> Option<(Vec2, crate::map::ChunkKey)> {
+    let camera = Vec2::ONE.normalize();
+    let mut candidates = Vec::new();
+    for road in data
+        .roads
+        .iter()
+        .filter(|road| road.w >= 12.0 && road.w <= 22.0)
+    {
+        for pair in road.p.windows(2) {
+            let length = pair[0].distance(pair[1]);
+            if length < 30.0 {
+                continue;
+            }
+            let direction = (pair[1] - pair[0]) / length;
+            let normal = Vec2::new(-direction.y, direction.x);
+            for side in [-1.0, 1.0] {
+                let outward = normal * side;
+                if outward.dot(camera) >= -0.35 {
+                    continue;
+                }
+                for along in [0.3, 0.45, 0.6, 0.75] {
+                    if (along * length).min((1.0 - along) * length) < road.w / 2.0 + 5.0 {
+                        continue;
+                    }
+                    let middle = pair[0].lerp(pair[1], along);
+                    let p = middle + outward * (road.w / 2.0 + 1.1);
+                    if !p.cmpge(data.min + 1.0).all()
+                        || !p.cmple(data.max - 1.0).all()
+                        || !data.free(p, 0.6)
+                        || data.bld_at(middle).is_some()
+                        || ![-8.0, -4.0, 0.0, 4.0, 8.0].into_iter().all(|distance| {
+                            let q = p + direction * distance;
+                            data.bld_at(q).is_none() && data.road_dist(q) > -0.05
+                        })
+                        || data.props.iter().any(|prop| {
+                            matches!(prop.kind, crate::map::street::PropKind::Tree(_))
+                                && prop.p.distance(p) < 5.0
+                        })
+                        || (2..=18).any(|distance| {
+                            data.bld_at(p + camera * distance as f32)
+                                .is_some_and(|building| {
+                                    building.h + 3.0 > distance as f32 * 56.0 / 40.0_f32.hypot(40.0)
+                                })
+                        })
+                    {
+                        continue;
+                    }
+                    candidates.push((p, crate::map::ChunkKey::of((pair[0] + pair[1]) / 2.0)));
+                }
+            }
+        }
+    }
+    candidates.into_iter().min_by(|a, b| {
+        a.0.distance_squared(data.spawn)
+            .total_cmp(&b.0.distance_squared(data.spawn))
+    })
 }
 
 fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> {
@@ -455,6 +647,40 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         .is_none()
     {
         return Ok(());
+    }
+    if matches!(stage.action, Action::Street | Action::Entrance) {
+        let key = crate::map::ChunkKey::of(player_position(world)?.xz());
+        let keys = [Some(key), run.scene_chunk];
+        let chunks_ready = keys.into_iter().flatten().all(|key| {
+            world
+                .query::<&crate::map::Chunk>()
+                .iter(world)
+                .any(|chunk| chunk.key == key && chunk.lod == crate::map::Lod::Near)
+        });
+        let detail_ready = run.entrance_building.is_none_or(|id| {
+            world
+                .query::<&crate::map::BldWalls>()
+                .iter(world)
+                .any(|walls| walls.id == id && !walls.faded)
+                && world
+                    .query::<&crate::map::DetailRoot>()
+                    .iter(world)
+                    .any(|root| root.0 == id)
+                && world
+                    .query::<(&crate::map::BldDetail, &Visibility)>()
+                    .iter(world)
+                    .any(|(detail, visibility)| detail.0 == id && *visibility != Visibility::Hidden)
+        });
+        if !chunks_ready || !detail_ready {
+            run.ready_frames = 0;
+            return Ok(());
+        }
+        // Chunk entities appear before their GPU upload. Leave several complete
+        // render intervals after all target geometry and details become ready.
+        run.ready_frames += 1;
+        if run.ready_frames < 4 {
+            return Ok(());
+        }
     }
     if matches!(stage.action, Action::Continue) && !run.continuation_checked {
         check_continuation(world, run)?;

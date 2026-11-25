@@ -41,10 +41,10 @@ Autosave runs every 20 real seconds while Playing and on background/close. Manua
 - Item catalog generation captures every original field used by the native inventory. Soldier-drop fixtures cover all 64 native soldier IDs and the final RNG state. Loot fixtures cover all 18 table types before and at the spoilage threshold.
 - Runtime tests exercise inventory transactions, empty-ammo behavior, paused attacks, collision, shelter costs, corrupt-save rejection, new-run/death clearing, autosave and Save → Menu → Continue across dawn.
 - UI tests cover portrait/landscape panel bounds, disabled actions, press-and-hold capture, Continue routing and a real same-frame pause input through the flow and input plugins.
-- `--qa` captures eleven actual Bevy GPU-rendered screens and asserts preserved role, position, inventory, shared stock, day and clock after Save → Menu → Continue. Its fixed timestep makes screenshots reproducible; its displayed FPS must not be used as hardware performance evidence.
+- `--qa` captures eighteen actual Bevy GPU-rendered screens, including the title, survivor selection, departure review, street and entrance views, and asserts preserved role, position, inventory, shared stock, day and clock after Save → Menu → Continue. Its fixed timestep makes screenshots reproducible; its displayed FPS must not be used as hardware performance evidence.
 - CI builds an ARM64 phone APK and an x86_64 emulator APK. The emulator script uses real touch input, checks resulting private save JSON and captures both orientations. Failure remains a failed job; it is not hidden with `continue-on-error`.
 
-See the exact commit's [Actions run](https://github.com/lijiabao1998/DefendTaipei-Android/actions/workflows/ci.yml) for completed results and artifacts. A physical Android device playtest is still outstanding.
+See the exact commit's [Actions run](https://github.com/lijiabao1998/DefendTaipei-Android/actions/workflows/ci.yml) for completed results and artifacts. User-provided phone screenshots show the earlier native build running; a measured device performance and compatibility pass is still outstanding. The current street, entrance and title work is described separately in [STREET-TITLE-PARITY.md](STREET-TITLE-PARITY.md).
 
 ## Explicit differences and remaining work
 

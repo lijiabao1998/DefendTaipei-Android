@@ -7,150 +7,233 @@ use bevy::prelude::*;
 use crate::game_flow::GameFlow;
 use crate::input::{Orientation, ScreenRect, orientation, safe_insets};
 
+/// Home and survivor pages share the safe-area bounds but use different
+/// compositions. The short landscape layout puts the profile beside the cards.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TitleLayout {
     pub orientation: Orientation,
+    pub frame: ScreenRect,
     pub heading: ScreenRect,
-    pub intro: ScreenRect,
+    pub steps: ScreenRect,
     pub male: ScreenRect,
     pub female: ScreenRect,
     pub lang_zh: ScreenRect,
     pub lang_en: ScreenRect,
     pub roles: [ScreenRect; 6],
     pub detail: ScreenRect,
+    pub back: ScreenRect,
     pub start: ScreenRect,
-    pub continue_game: ScreenRect,
     pub save_status: ScreenRect,
     pub heading_font: f32,
     pub body_font: f32,
-    pub button_font: f32,
+    pub compact: bool,
 }
 
 pub fn title_layout(viewport: Vec2) -> TitleLayout {
-    let orient = orientation(viewport);
-    let insets = safe_insets(viewport);
-    let portrait = orient == Orientation::Portrait;
-    let short = !portrait && viewport.y < 500.0;
-    let gap = if short {
-        4.0
-    } else if portrait {
-        8.0
-    } else {
-        10.0
-    };
-    let x = insets.left;
-    let inner_w = (viewport.x - insets.left - insets.right).max(1.0);
-    let bottom_limit = viewport.y - insets.bottom - 8.0;
-    let start_h = if short { 64.0 } else { 72.0 };
+    let orientation = orientation(viewport);
+    let safe = safe_insets(viewport);
+    let portrait = orientation == Orientation::Portrait;
+    let compact = viewport.y < 700.0;
+    let width = (viewport.x - safe.left - safe.right).clamp(1.0, 1120.0);
+    let x = (viewport.x - width) * 0.5;
+    let top = safe.top;
+    let bottom = viewport.y - safe.bottom;
+    let gap = if compact { 8.0 } else { 12.0 };
+    let action_h = if portrait || !compact { 56.0 } else { 48.0 };
+    let back_w = if portrait { width * 0.34 } else { 150.0 };
     let start_w = if portrait {
-        inner_w
+        width - back_w - gap
     } else {
-        inner_w.min(420.0)
+        260.0
     };
-    let actions = ScreenRect::new(
-        x + (inner_w - start_w) * 0.5,
-        bottom_limit - start_h,
-        start_w,
-        start_h,
-    );
-    let half = (actions.width() - gap) * 0.5;
-    let continue_game = ScreenRect::new(actions.min.x, actions.min.y, half, start_h);
-    let start = ScreenRect::new(actions.min.x + half + gap, actions.min.y, half, start_h);
-    let save_status = ScreenRect::new(x, start.min.y - 32.0, inner_w, 24.0);
-
-    let mut y = insets.top + 6.0;
-    let heading = ScreenRect::new(
-        x,
-        y,
-        inner_w,
-        if short {
-            32.0
-        } else if portrait {
-            36.0
-        } else {
-            44.0
-        },
-    );
-    y = heading.max.y + gap;
-
-    let lang_w = 96.0_f32.min(inner_w * 0.22).max(64.0);
-    let row_h = if short { 40.0 } else { 48.0 };
-    let gender_w = ((inner_w - gap * 3.0 - lang_w * 2.0) * 0.5).max(64.0);
-    let male = ScreenRect::new(x, y, gender_w, row_h);
-    let female = ScreenRect::new(x + gender_w + gap, y, gender_w, row_h);
-    let lang_en = ScreenRect::new(x + inner_w - lang_w, y, lang_w, row_h);
-    let lang_zh = ScreenRect::new((lang_en.min.x - gap - lang_w).max(x), y, lang_w, row_h);
-    y = male.max.y + gap;
-
-    let intro = ScreenRect::new(
-        x,
-        y,
-        inner_w,
-        if short {
-            32.0
-        } else if portrait {
-            64.0
-        } else {
-            44.0
-        },
-    );
-    y = intro.max.y + gap;
-
-    let detail_h = if portrait { 104.0 } else { 54.0 };
-    let detail_top = (save_status.min.y - gap - detail_h).max(y);
-    let detail = ScreenRect::new(x, detail_top, inner_w, detail_h);
-    let roles_top = y;
-    let roles_h = (detail.min.y - gap - roles_top).max(40.0);
-    let columns: usize = if !portrait && (inner_w >= 960.0 || short) {
-        6
-    } else if portrait || inner_w < 700.0 {
-        2
+    let back = ScreenRect::new(x, bottom - action_h, back_w, action_h);
+    let start = ScreenRect::new(x + width - start_w, back.min.y, start_w, action_h);
+    let save_status = ScreenRect::new(x, back.min.y - 28.0, width, 20.0);
+    let lang_w = if portrait { 58.0 } else { 74.0 };
+    let lang_en = ScreenRect::new(x + width - lang_w, top, lang_w, 32.0);
+    let lang_zh = ScreenRect::new(lang_en.min.x - lang_w - 6.0, top, lang_w, 32.0);
+    let heading = ScreenRect::new(x, top + 40.0, width, if compact { 28.0 } else { 36.0 });
+    let steps = ScreenRect::new(x, heading.max.y + 6.0, width, 22.0);
+    let male = ScreenRect::new(x, steps.max.y + 10.0, 64.0, 34.0);
+    let female = ScreenRect::new(x + 70.0, male.min.y, 64.0, 34.0);
+    let roles_top = male.max.y + 10.0;
+    let detail_h = if compact { 100.0 } else { 140.0 };
+    let (grid_w, grid_bottom, detail) = if portrait {
+        let detail = ScreenRect::new(x, save_status.min.y - gap - detail_h, width, detail_h);
+        (width, detail.min.y - gap, detail)
     } else {
-        3
+        let detail_w = (width * 0.28).clamp(208.0, 300.0);
+        let detail = ScreenRect::new(
+            x + width - detail_w,
+            male.min.y,
+            detail_w,
+            save_status.min.y - male.min.y - gap,
+        );
+        (width - detail_w - gap, save_status.min.y - gap, detail)
     };
+    let columns = if portrait && !compact { 2 } else { 3 };
     let rows = 6 / columns;
-    let card_w = (inner_w - gap * (columns as f32 - 1.0)) / columns as f32;
-    let card_h = ((roles_h - gap * (rows as f32 - 1.0)) / rows as f32).max(36.0);
-    let mut roles = [ScreenRect::new(0.0, 0.0, 1.0, 1.0); 6];
-    for (index, slot) in roles.iter_mut().enumerate() {
-        let col = index % columns;
-        let row = index / columns;
-        *slot = ScreenRect::new(
-            x + col as f32 * (card_w + gap),
-            roles_top + row as f32 * (card_h + gap),
+    let card_w = (grid_w - gap * (columns - 1) as f32) / columns as f32;
+    let card_h = (grid_bottom - roles_top - gap * (rows - 1) as f32) / rows as f32;
+    let roles = std::array::from_fn(|index| {
+        ScreenRect::new(
+            x + (index % columns) as f32 * (card_w + gap),
+            roles_top + (index / columns) as f32 * (card_h + gap),
             card_w,
             card_h,
-        );
-    }
-
+        )
+    });
     TitleLayout {
-        orientation: orient,
+        orientation,
+        frame: ScreenRect::new(x, top, width, bottom - top),
         heading,
-        intro,
+        steps,
         male,
         female,
         lang_zh,
         lang_en,
         roles,
         detail,
+        back,
         start,
-        continue_game,
         save_status,
-        heading_font: if short {
-            25.0
-        } else if portrait {
-            28.0
-        } else {
-            36.0
-        },
-        body_font: if short {
-            13.0
-        } else if portrait {
-            14.0
-        } else {
-            16.0
-        },
-        button_font: if portrait { 18.0 } else { 20.0 },
+        heading_font: if compact { 23.0 } else { 28.0 },
+        body_font: if compact { 12.0 } else { 14.0 },
+        compact,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HomeLayout {
+    pub frame: ScreenRect,
+    pub eyebrow: ScreenRect,
+    pub heading: ScreenRect,
+    pub subtitle: ScreenRect,
+    pub intro: ScreenRect,
+    pub facts: ScreenRect,
+    pub continue_game: ScreenRect,
+    pub new_game: ScreenRect,
+    pub help: ScreenRect,
+    pub about: ScreenRect,
+    pub notice: ScreenRect,
+    pub footer: ScreenRect,
+    pub lang_zh: ScreenRect,
+    pub lang_en: ScreenRect,
+    pub title_font: f32,
+    pub body_font: f32,
+}
+
+pub fn home_layout(viewport: Vec2) -> HomeLayout {
+    let safe = safe_insets(viewport);
+    let portrait = orientation(viewport) == Orientation::Portrait;
+    let compact = viewport.y < 700.0;
+    let width = (viewport.x - safe.left - safe.right).clamp(1.0, 1120.0);
+    let x = (viewport.x - width) * 0.5;
+    let top = safe.top;
+    let bottom = viewport.y - safe.bottom;
+    let menu_w = if portrait {
+        width
+    } else {
+        (width * 0.38).min(370.0)
+    };
+    let menu_x = x + width - menu_w;
+    let menu_top = if portrait {
+        bottom - 242.0
+    } else {
+        (top + (bottom - top - 242.0) * 0.5).max(top + 42.0)
+    };
+    let continue_game = ScreenRect::new(menu_x, menu_top, menu_w, 58.0);
+    let new_game = ScreenRect::new(menu_x, menu_top + 68.0, menu_w, 58.0);
+    let help = ScreenRect::new(menu_x, menu_top + 138.0, (menu_w - 10.0) * 0.5, 44.0);
+    let about = ScreenRect::new(help.max.x + 10.0, help.min.y, help.width(), help.height());
+    let notice = ScreenRect::new(menu_x, menu_top + 190.0, menu_w, 28.0);
+    let footer = ScreenRect::new(x, bottom - 16.0, width, 16.0);
+    let lang_w = if portrait { 58.0 } else { 74.0 };
+    let lang_en = ScreenRect::new(x + width - lang_w, top, lang_w, 32.0);
+    let lang_zh = ScreenRect::new(lang_en.min.x - lang_w - 6.0, top, lang_w, 32.0);
+    let hero_w = if portrait {
+        width
+    } else {
+        width - menu_w - 40.0
+    };
+    let hero_top = if portrait {
+        top + if compact { 46.0 } else { 78.0 }
+    } else {
+        top + 56.0
+    };
+    let title_font = if portrait {
+        if compact { 46.0 } else { 62.0 }
+    } else if compact {
+        51.0
+    } else {
+        72.0
+    };
+    let heading = ScreenRect::new(x, hero_top, hero_w, title_font * 1.35);
+    let subtitle = ScreenRect::new(x, heading.max.y + 4.0, hero_w, 22.0);
+    let intro = ScreenRect::new(
+        x,
+        subtitle.max.y + if compact { 14.0 } else { 32.0 },
+        hero_w,
+        if compact { 52.0 } else { 82.0 },
+    );
+    let facts = ScreenRect::new(
+        x,
+        intro.max.y + 16.0,
+        hero_w,
+        if compact { 22.0 } else { 48.0 },
+    );
+    HomeLayout {
+        frame: ScreenRect::new(x, top, width, bottom - top),
+        eyebrow: ScreenRect::new(x, top + 6.0, (width - lang_w * 2.0 - 18.0).max(1.0), 20.0),
+        heading,
+        subtitle,
+        intro,
+        facts,
+        continue_game,
+        new_game,
+        help,
+        about,
+        notice,
+        footer,
+        lang_zh,
+        lang_en,
+        title_font,
+        body_font: if compact { 12.0 } else { 15.0 },
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BriefLayout {
+    pub identity: ScreenRect,
+    pub supplies: ScreenRect,
+    pub notice: ScreenRect,
+}
+
+pub fn brief_layout(viewport: Vec2) -> BriefLayout {
+    let title = title_layout(viewport);
+    let x = title.frame.min.x;
+    let width = title.frame.width();
+    let top = title.steps.max.y + 16.0;
+    let bottom = title.save_status.min.y - 12.0;
+    let height = bottom - top;
+    let gap = 12.0;
+    let (identity, supplies) = if title.orientation == Orientation::Portrait {
+        let identity_h = (height * 0.43).min(250.0);
+        (
+            ScreenRect::new(x, top, width, identity_h),
+            ScreenRect::new(x, top + identity_h + gap, width, height - identity_h - gap),
+        )
+    } else {
+        let left_w = width * 0.43;
+        (
+            ScreenRect::new(x, top, left_w, height),
+            ScreenRect::new(x + left_w + gap, top, width - left_w - gap, height),
+        )
+    };
+    BriefLayout {
+        identity,
+        supplies,
+        notice: title.save_status,
     }
 }
 
@@ -277,35 +360,97 @@ mod tests {
         assert!(rect.width() > 8.0 && rect.height() > 8.0, "{rect:?}");
     }
 
+    const VIEWPORTS: [Vec2; 7] = [
+        Vec2::new(320.0, 568.0),
+        Vec2::new(320.0, 640.0),
+        Vec2::new(390.0, 844.0),
+        Vec2::new(720.0, 1280.0),
+        Vec2::new(800.0, 360.0),
+        Vec2::new(844.0, 390.0),
+        Vec2::new(1280.0, 720.0),
+    ];
+
     #[test]
-    fn title_buttons_fit_both_orientations() {
-        for viewport in [
-            Vec2::new(1280.0, 720.0),
-            Vec2::new(390.0, 844.0),
-            Vec2::new(844.0, 390.0),
-        ] {
+    fn title_cards_and_navigation_fit_small_and_rotated_screens() {
+        for viewport in VIEWPORTS {
             let layout = title_layout(viewport);
-            assert!(layout.start.height() >= 64.0, "{viewport:?}");
-            inside(layout.start, viewport);
-            inside(layout.continue_game, viewport);
-            assert!(!layout.start.intersects(layout.continue_game));
-            assert!(layout.start.max.y <= viewport.y - safe_insets(viewport).bottom + 1.0);
-            inside(layout.male, viewport);
-            for card in layout.roles {
-                inside(card, viewport);
-                assert!(!card.intersects(layout.detail), "{viewport:?}: {card:?}");
-                assert!(!card.intersects(layout.save_status));
-                assert!(!card.intersects(layout.start));
+            assert!(layout.start.height() >= 48.0, "{viewport:?}");
+            for rect in [
+                layout.heading,
+                layout.steps,
+                layout.start,
+                layout.back,
+                layout.male,
+                layout.female,
+                layout.lang_zh,
+                layout.lang_en,
+                layout.detail,
+                layout.save_status,
+            ] {
+                inside(rect, viewport);
             }
+            assert!(!layout.start.intersects(layout.back));
+            assert!(layout.start.max.y <= viewport.y - safe_insets(viewport).bottom + 1.0);
+            for (index, card) in layout.roles.iter().enumerate() {
+                inside(*card, viewport);
+                assert!(card.height() >= 40.0, "{viewport:?}: {card:?}");
+                for other in layout.roles.iter().skip(index + 1) {
+                    assert!(!card.intersects(*other));
+                }
+                for other in [
+                    layout.detail,
+                    layout.save_status,
+                    layout.start,
+                    layout.back,
+                    layout.male,
+                    layout.female,
+                ] {
+                    assert!(
+                        !card.intersects(other),
+                        "{viewport:?}: {card:?} overlaps {other:?}"
+                    );
+                }
+            }
+            let brief = brief_layout(viewport);
+            for rect in [brief.identity, brief.supplies, brief.notice] {
+                inside(rect, viewport);
+            }
+            assert!(!brief.identity.intersects(brief.supplies));
+            assert!(!brief.supplies.intersects(layout.start));
         }
         let tall = title_layout(Vec2::new(390.0, 844.0));
         assert_eq!(tall.orientation, Orientation::Portrait);
-        assert!(tall.roles[1].min.x + 1.0 >= tall.roles[0].max.x);
-        assert!(tall.roles[2].min.y + 1.0 >= tall.roles[0].max.y);
+        assert!(tall.roles[1].min.x > tall.roles[0].max.x);
+        assert!(tall.roles[2].min.y > tall.roles[0].max.y);
         let wide = title_layout(Vec2::new(1280.0, 720.0));
         assert_eq!(wide.orientation, Orientation::Landscape);
-        assert!((wide.roles[1].min.y - wide.roles[0].min.y).abs() < 1.0);
-        assert!(wide.roles[1].min.x + 1.0 >= wide.roles[0].max.x);
+        assert_eq!(wide.roles[1].min.y, wide.roles[0].min.y);
+    }
+
+    #[test]
+    fn home_has_separate_finger_targets_without_covering_the_story() {
+        for viewport in VIEWPORTS {
+            let layout = home_layout(viewport);
+            let buttons = [
+                layout.continue_game,
+                layout.new_game,
+                layout.help,
+                layout.about,
+            ];
+            for (index, rect) in buttons.iter().enumerate() {
+                inside(*rect, viewport);
+                assert!(rect.height() >= 44.0);
+                for other in buttons.iter().skip(index + 1) {
+                    assert!(!rect.intersects(*other));
+                }
+                for other in [layout.heading, layout.subtitle, layout.intro, layout.facts] {
+                    assert!(
+                        !rect.intersects(other),
+                        "{viewport:?}: {rect:?} overlaps {other:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
