@@ -6,6 +6,11 @@
 //!   overlay on (any build). `DEFEND_TAIPEI_PERF=0` forces it off.
 //! - **Android:** three-finger tap anywhere toggles the overlay.
 //!
+//! # Placement
+//! Top-right, inset by [`crate::input::safe_insets`] so it stays clear of the
+//! notch / home indicator, the top-left HUD, the left joystick, and portrait
+//! attack / crouch pads. Text wraps on narrow widths (#7-style safe width).
+//!
 //! # Logging
 //! Every ~5 s a one-line summary is printed to stdout / logcat, tagged with the
 //! literal prefix `DTPERF` so CI can grep it regardless of the Android log tag:
@@ -17,11 +22,16 @@
 use bevy::{
     diagnostic::{DiagnosticsStore, EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     prelude::*,
+    window::PrimaryWindow,
 };
+
+use crate::input::safe_insets;
 
 const LOG_INTERVAL_SECS: f32 = 5.0;
 /// Keep ~3 s of frame times at 60 fps for p99 / max.
 const FRAME_HISTORY: usize = 180;
+/// Extra gap beyond the safe-area inset so we clear HUD chrome.
+const EDGE_PAD: f32 = 10.0;
 
 #[derive(Resource)]
 struct PerfOverlayEnabled(bool);
@@ -62,6 +72,7 @@ impl Plugin for PerfPlugin {
             (
                 record_frame_time,
                 toggle_overlay,
+                place_overlay,
                 update_overlay,
                 log_perf_summary,
             )
@@ -88,17 +99,20 @@ fn spawn_overlay(mut commands: Commands, enabled: Res<PerfOverlayEnabled>) {
         font_size: FontSize::Px(14.0),
         ..default()
     };
-    // Top-right corner: clear of the left-half joystick and the top-left HUD.
+    // Top-right: clear of left joystick, top-left HUD, and portrait action pads.
+    // Margins / max-width are refreshed every frame from safe_insets + viewport.
     commands
         .spawn((
             PerfRoot,
             Node {
                 position_type: PositionType::Absolute,
-                right: px(10),
-                top: px(10),
+                right: px(EDGE_PAD),
+                top: px(EDGE_PAD),
+                left: Val::Auto,
                 padding: UiRect::axes(px(8), px(6)),
                 border_radius: BorderRadius::all(px(6)),
-                max_width: percent(46),
+                // Cap width so narrow portrait screens wrap instead of covering the HUD.
+                max_width: percent(42),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
@@ -108,6 +122,7 @@ fn spawn_overlay(mut commands: Commands, enabled: Res<PerfOverlayEnabled>) {
         .with_child((
             PerfText,
             Text::new("PERF …"),
+            TextLayout::new(Justify::Left, LineBreak::WordOrCharacter),
             font,
             TextColor(Color::srgb(0.85, 1.0, 0.75)),
         ));
@@ -158,6 +173,28 @@ fn toggle_overlay(
         "DTPERF overlay_toggled={}",
         if enabled.0 { "on" } else { "off" }
     );
+}
+
+/// Keep the panel inside the safe area and away from #6 touch chrome.
+fn place_overlay(
+    window: Single<&Window, With<PrimaryWindow>>,
+    mut root: Query<&mut Node, With<PerfRoot>>,
+) {
+    let Ok(mut node) = root.single_mut() else {
+        return;
+    };
+    let size = window.size();
+    if size.x <= 1.0 || size.y <= 1.0 {
+        return;
+    }
+    let insets = safe_insets(size);
+    node.top = px(insets.top + EDGE_PAD);
+    node.right = px(insets.right + EDGE_PAD);
+    // Leave the left half (joystick + HUD) alone; wrap on narrow widths like #7.
+    let max_w = (size.x * 0.42)
+        .min(size.x - insets.left - insets.right - 24.0)
+        .max(96.0);
+    node.max_width = px(max_w);
 }
 
 fn update_overlay(
