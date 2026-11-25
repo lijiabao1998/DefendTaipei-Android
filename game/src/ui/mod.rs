@@ -198,5 +198,31 @@ mod tests {
         assert_eq!(app.world().resource::<Campaign>().game_min, before);
         assert!(!app.world().resource::<PlayerInput>().fire);
         assert_eq!(app.world().resource::<PlayerInput>().r#move, Vec2::ZERO);
+
+        // Android screenshots exposed the pads above an otherwise working
+        // modal. Check the actual control entities, including after release.
+        let controls_hidden = |app: &mut App| {
+            let world = app.world_mut();
+            let mut query = world.query::<(&GlobalZIndex, &Visibility)>();
+            let controls: Vec<_> = query
+                .iter(world)
+                .filter(|(layer, _)| matches!(layer.0, 12 | 16))
+                .map(|(_, visibility)| *visibility)
+                .collect();
+            assert_eq!(controls.len(), 3);
+            controls.iter().all(|v| *v == Visibility::Hidden)
+        };
+        assert!(controls_hidden(&mut app));
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        app.update();
+        assert!(!app.world().resource::<UiModal>().pointer_captured);
+        assert!(controls_hidden(&mut app));
+        app.world_mut().resource_mut::<PauseOpen>().0 = false;
+        app.world_mut().write_message(OpenPanel(PanelKind::Shelter));
+        app.update();
+        assert!(app.world().resource::<UiModal>().open);
+        assert!(controls_hidden(&mut app));
     }
 }

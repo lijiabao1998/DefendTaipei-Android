@@ -29,6 +29,15 @@ collect() {
 trap collect EXIT
 
 capture() {
+  # State/action logs precede rendering. On SwiftShader, an immediate screencap
+  # can still contain the previous screen or a stretched pre-rotation buffer.
+  # Two later real-time summaries leave an intervening update/render interval;
+  # the first summary may belong to the update that emitted the state log.
+  local rendered_count
+  alive || return 1
+  refresh_log || return 1
+  rendered_count=$(( $(log_count 'DTPERF fps=') + 2 ))
+  wait_log 'DTPERF fps=' "$rendered_count" 180 || return 1
   adb exec-out screencap -p >"$OUT_DIR/$1.png"
   python3 - "$OUT_DIR/$1.png" "$2" "$3" <<'PY'
 import struct

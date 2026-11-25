@@ -72,10 +72,10 @@ impl Plugin for InputPlugin {
             .init_resource::<TouchControl>()
             .configure_sets(Update, InputSet.before(crate::player::move_system_set()))
             .add_systems(Startup, spawn_controls)
-            .add_systems(
-                Update,
-                (gather_player_input, sync_widgets).chain().in_set(InputSet),
-            );
+            .add_systems(Update, gather_player_input.in_set(InputSet))
+            // Pause is driven after input intent and before the flow stage.
+            // Widget visibility must see that same-frame result too.
+            .add_systems(Update, sync_widgets.after(crate::game_flow::FlowSet));
     }
 }
 
@@ -266,6 +266,8 @@ fn gather_player_input(
 
 fn sync_widgets(
     flow: Res<State<GameFlow>>,
+    modal: Option<Res<crate::ui::UiModal>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
     hands: Res<TouchControl>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut joy: Query<(&mut Node, &mut Visibility), With<JoyBase>>,
@@ -287,7 +289,9 @@ fn sync_widgets(
         .map(|window| Vec2::new(window.width(), window.height()))
         .unwrap_or(Vec2::new(1280.0, 720.0));
     let layout = HudLayout::from_viewport(viewport);
-    let playing = flow.get() == &GameFlow::Playing;
+    let playing = flow.get() == &GameFlow::Playing
+        && !modal.is_some_and(|m| m.blocks_input())
+        && !pause.is_some_and(|p| p.0);
     let shown = if playing {
         Visibility::Inherited
     } else {

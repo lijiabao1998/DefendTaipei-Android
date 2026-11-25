@@ -142,7 +142,7 @@ impl VisibilityExt for Visibility {
     }
 }
 
-fn record_frame_time(time: Res<Time>, mut hist: ResMut<FrameHistory>) {
+fn record_frame_time(time: Res<Time<Real>>, mut hist: ResMut<FrameHistory>) {
     let ms = time.delta_secs() * 1000.0;
     if !ms.is_finite() || ms <= 0.0 {
         return;
@@ -233,7 +233,7 @@ fn update_overlay(
 }
 
 fn log_perf_summary(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     mut timer: ResMut<PerfLogTimer>,
     diagnostics: Res<DiagnosticsStore>,
     hist: Res<FrameHistory>,
