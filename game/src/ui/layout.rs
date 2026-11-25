@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 
+use crate::game_flow::GameFlow;
 use crate::input::{Orientation, ScreenRect, orientation, safe_insets};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -18,6 +19,8 @@ pub struct TitleLayout {
     pub roles: [ScreenRect; 6],
     pub detail: ScreenRect,
     pub start: ScreenRect,
+    pub continue_game: ScreenRect,
+    pub save_status: ScreenRect,
     pub heading_font: f32,
     pub body_font: f32,
     pub button_font: f32,
@@ -27,29 +30,51 @@ pub fn title_layout(viewport: Vec2) -> TitleLayout {
     let orient = orientation(viewport);
     let insets = safe_insets(viewport);
     let portrait = orient == Orientation::Portrait;
-    let gap = if portrait { 8.0 } else { 10.0 };
+    let short = !portrait && viewport.y < 500.0;
+    let gap = if short {
+        4.0
+    } else if portrait {
+        8.0
+    } else {
+        10.0
+    };
     let x = insets.left;
     let inner_w = (viewport.x - insets.left - insets.right).max(1.0);
     let bottom_limit = viewport.y - insets.bottom - 8.0;
-    let start_h = 72.0;
+    let start_h = if short { 64.0 } else { 72.0 };
     let start_w = if portrait {
         inner_w
     } else {
         inner_w.min(420.0)
     };
-    let start = ScreenRect::new(
+    let actions = ScreenRect::new(
         x + (inner_w - start_w) * 0.5,
         bottom_limit - start_h,
         start_w,
         start_h,
     );
+    let half = (actions.width() - gap) * 0.5;
+    let continue_game = ScreenRect::new(actions.min.x, actions.min.y, half, start_h);
+    let start = ScreenRect::new(actions.min.x + half + gap, actions.min.y, half, start_h);
+    let save_status = ScreenRect::new(x, start.min.y - 32.0, inner_w, 24.0);
 
     let mut y = insets.top + 6.0;
-    let heading = ScreenRect::new(x, y, inner_w, if portrait { 36.0 } else { 44.0 });
+    let heading = ScreenRect::new(
+        x,
+        y,
+        inner_w,
+        if short {
+            32.0
+        } else if portrait {
+            36.0
+        } else {
+            44.0
+        },
+    );
     y = heading.max.y + gap;
 
     let lang_w = 96.0_f32.min(inner_w * 0.22).max(64.0);
-    let row_h = 48.0;
+    let row_h = if short { 40.0 } else { 48.0 };
     let gender_w = ((inner_w - gap * 3.0 - lang_w * 2.0) * 0.5).max(64.0);
     let male = ScreenRect::new(x, y, gender_w, row_h);
     let female = ScreenRect::new(x + gender_w + gap, y, gender_w, row_h);
@@ -57,15 +82,26 @@ pub fn title_layout(viewport: Vec2) -> TitleLayout {
     let lang_zh = ScreenRect::new((lang_en.min.x - gap - lang_w).max(x), y, lang_w, row_h);
     y = male.max.y + gap;
 
-    let intro = ScreenRect::new(x, y, inner_w, if portrait { 64.0 } else { 44.0 });
+    let intro = ScreenRect::new(
+        x,
+        y,
+        inner_w,
+        if short {
+            32.0
+        } else if portrait {
+            64.0
+        } else {
+            44.0
+        },
+    );
     y = intro.max.y + gap;
 
-    let detail_h = if portrait { 64.0 } else { 48.0 };
-    let detail_top = (start.min.y - gap - detail_h).max(y);
+    let detail_h = if portrait { 104.0 } else { 54.0 };
+    let detail_top = (save_status.min.y - gap - detail_h).max(y);
     let detail = ScreenRect::new(x, detail_top, inner_w, detail_h);
     let roles_top = y;
     let roles_h = (detail.min.y - gap - roles_top).max(40.0);
-    let columns: usize = if !portrait && inner_w >= 960.0 {
+    let columns: usize = if !portrait && (inner_w >= 960.0 || short) {
         6
     } else if portrait || inner_w < 700.0 {
         2
@@ -98,8 +134,22 @@ pub fn title_layout(viewport: Vec2) -> TitleLayout {
         roles,
         detail,
         start,
-        heading_font: if portrait { 28.0 } else { 36.0 },
-        body_font: if portrait { 14.0 } else { 16.0 },
+        continue_game,
+        save_status,
+        heading_font: if short {
+            25.0
+        } else if portrait {
+            28.0
+        } else {
+            36.0
+        },
+        body_font: if short {
+            13.0
+        } else if portrait {
+            14.0
+        } else {
+            16.0
+        },
         button_font: if portrait { 18.0 } else { 20.0 },
     }
 }
@@ -117,9 +167,50 @@ pub struct DeathLayout {
 pub fn death_layout(viewport: Vec2) -> DeathLayout {
     let insets = safe_insets(viewport);
     let portrait = orientation(viewport) == Orientation::Portrait;
+    let width = (viewport.x - insets.left - insets.right).max(1.0);
+    let top = insets.top + 18.0;
+    let heading = ScreenRect::new(insets.left, top, width, if portrait { 100.0 } else { 62.0 });
+    let sub = ScreenRect::new(
+        insets.left,
+        heading.max.y + 8.0,
+        width,
+        if portrait { 64.0 } else { 48.0 },
+    );
+    let button_w = width.min(460.0);
+    let restart = ScreenRect::new(
+        insets.left + (width - button_w) * 0.5,
+        viewport.y - insets.bottom - 80.0,
+        button_w,
+        72.0,
+    );
+    let body = ScreenRect::new(
+        insets.left,
+        sub.max.y + 8.0,
+        width,
+        (restart.min.y - sub.max.y - 24.0).max(1.0),
+    );
+    DeathLayout {
+        heading,
+        sub,
+        body,
+        restart,
+        heading_font: if portrait { 26.0 } else { 30.0 },
+        body_font: if viewport.y < 500.0 { 14.0 } else { 16.0 },
+    }
+}
+
+/// Same column as the ending screen, shifted down so the prologue phone card
+/// (drawn above this UI) does not cover the heading.
+pub fn prologue_layout(viewport: Vec2) -> DeathLayout {
+    overlay_layout(viewport, 88.0)
+}
+
+fn overlay_layout(viewport: Vec2, top_gap: f32) -> DeathLayout {
+    let insets = safe_insets(viewport);
+    let portrait = orientation(viewport) == Orientation::Portrait;
     let inner_w = (viewport.x - insets.left - insets.right).max(1.0);
     let x = insets.left;
-    let top = insets.top + 24.0;
+    let top = insets.top + top_gap;
     let heading = ScreenRect::new(x, top, inner_w, 48.0);
     let sub = ScreenRect::new(x, heading.max.y + 8.0, inner_w, 32.0);
     let body = ScreenRect::new(x, sub.max.y + 8.0, inner_w, 48.0);
@@ -137,6 +228,39 @@ pub fn death_layout(viewport: Vec2) -> DeathLayout {
         restart,
         heading_font: if portrait { 32.0 } else { 40.0 },
         body_font: if portrait { 16.0 } else { 18.0 },
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PauseLayout {
+    pub heading: ScreenRect,
+    pub resume: ScreenRect,
+    pub menu: ScreenRect,
+    pub status: ScreenRect,
+}
+
+pub fn pause_layout(viewport: Vec2) -> PauseLayout {
+    let insets = safe_insets(viewport);
+    let inner_w = (viewport.x - insets.left - insets.right).max(1.0);
+    let button_w = inner_w.min(420.0);
+    let x = insets.left + (inner_w - button_w) * 0.5;
+    let height = 72.0;
+    let gap = 12.0;
+    let top = ((viewport.y - height * 2.0 - gap) * 0.5).max(insets.top + 48.0);
+    PauseLayout {
+        heading: ScreenRect::new(x, (top - 48.0).max(insets.top), button_w, 40.0),
+        resume: ScreenRect::new(x, top, button_w, height),
+        menu: ScreenRect::new(x, top + height + gap, button_w, height),
+        status: ScreenRect::new(x, top + height * 2.0 + gap + 8.0, button_w, 56.0),
+    }
+}
+
+/// True when a pointer press lands on a screen this UI owns.
+/// Those presses are consumed so they do not fall through to the flow overlay.
+pub fn control_hit(flow: &GameFlow, _viewport: Vec2, _point: Vec2, paused: bool) -> bool {
+    match flow {
+        GameFlow::Title | GameFlow::Prologue | GameFlow::GameOver(_) => true,
+        GameFlow::Playing => paused,
     }
 }
 
@@ -163,10 +287,15 @@ mod tests {
             let layout = title_layout(viewport);
             assert!(layout.start.height() >= 64.0, "{viewport:?}");
             inside(layout.start, viewport);
+            inside(layout.continue_game, viewport);
+            assert!(!layout.start.intersects(layout.continue_game));
             assert!(layout.start.max.y <= viewport.y - safe_insets(viewport).bottom + 1.0);
             inside(layout.male, viewport);
             for card in layout.roles {
                 inside(card, viewport);
+                assert!(!card.intersects(layout.detail), "{viewport:?}: {card:?}");
+                assert!(!card.intersects(layout.save_status));
+                assert!(!card.intersects(layout.start));
             }
         }
         let tall = title_layout(Vec2::new(390.0, 844.0));
@@ -186,5 +315,22 @@ mod tests {
             assert!(layout.restart.height() >= 64.0);
             inside(layout.restart, viewport);
         }
+    }
+
+    #[test]
+    fn menu_screens_consume_the_pointer() {
+        let viewport = Vec2::new(1280.0, 720.0);
+        let female = title_layout(viewport).female.center();
+        assert!(control_hit(&GameFlow::Title, viewport, female, false));
+        assert!(control_hit(&GameFlow::Prologue, viewport, female, false));
+        assert!(control_hit(
+            &GameFlow::GameOver(crate::game_flow::Ending::Death),
+            viewport,
+            female,
+            false
+        ));
+        assert!(!control_hit(&GameFlow::Playing, viewport, female, false));
+        assert!(control_hit(&GameFlow::Playing, viewport, female, true));
+        assert!(pause_layout(viewport).resume.height() >= 64.0);
     }
 }

@@ -5,12 +5,10 @@
 use bevy::{
     camera::ScalingMode,
     input::mouse::{AccumulatedMouseScroll, MouseScrollUnit},
-    light::NotShadowCaster,
     prelude::*,
     window::PrimaryWindow,
 };
 
-use crate::city::{Building, Obstacles};
 use crate::player::Player;
 
 pub const CAM_OFFSET: Vec3 = Vec3::new(40.0, 56.0, 40.0);
@@ -36,7 +34,7 @@ impl Plugin for CameraPlugin {
             .add_systems(Startup, spawn_camera)
             .add_systems(
                 PostUpdate,
-                (wheel_zoom, fit_projection, follow_player, fade_occluders)
+                (wheel_zoom, fit_projection, follow_player)
                     .chain()
                     .before(TransformSystems::Propagate),
             );
@@ -110,43 +108,4 @@ fn follow_player(
     let target = player.translation;
     cam.translation = target + CAM_OFFSET;
     cam.look_at(target, Vec3::Y);
-}
-
-/// Buildings standing between the camera and the player turn see-through.
-fn fade_occluders(
-    mut commands: Commands,
-    player: Single<&Transform, With<Player>>,
-    obstacles: Res<Obstacles>,
-    mut buildings: Query<(Entity, &Building, &mut MeshMaterial3d<StandardMaterial>)>,
-) {
-    let origin = player.translation + Vec3::Y * 1.0;
-    let dir = CAM_OFFSET.normalize();
-    for (entity, b, mut mat) in &mut buildings {
-        let o = obstacles.0[b.index];
-        let hit = ray_hits_box(
-            origin,
-            dir,
-            Vec3::new(o.min.x - 0.6, 0.0, o.min.y - 0.6),
-            Vec3::new(o.max.x + 0.6, o.height, o.max.y + 0.6),
-        );
-        let want = if hit { &b.faded } else { &b.opaque };
-        if mat.0 != *want {
-            mat.0 = want.clone();
-            // A see-through building should not throw a dark shadow over the player either.
-            if hit {
-                commands.entity(entity).insert(NotShadowCaster);
-            } else {
-                commands.entity(entity).remove::<NotShadowCaster>();
-            }
-        }
-    }
-}
-
-fn ray_hits_box(o: Vec3, d: Vec3, min: Vec3, max: Vec3) -> bool {
-    let inv = d.recip();
-    let t1 = (min - o) * inv;
-    let t2 = (max - o) * inv;
-    let tmin = t1.min(t2).max_element();
-    let tmax = t1.max(t2).min_element();
-    tmax >= tmin.max(0.0)
 }

@@ -20,7 +20,7 @@ env:
 
 jobs:
   desktop:
-    name: Desktop (fmt, clippy, build)
+    name: Desktop (fmt, clippy, tests, native QA)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config
+            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config mesa-vulkan-drivers
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -51,6 +51,29 @@ jobs:
 
       - name: cargo build (desktop)
         run: cargo build -p defend_taipei --bin defend-taipei
+
+      - name: Native GPU screenshots and save/continue flow
+        env:
+          DEFEND_TAIPEI_QA_OUT: ${{ github.workspace }}/native-qa
+          DEFEND_TAIPEI_SAVE_DIR: ${{ runner.temp }}/defendtaipei-qa-save
+          DEFEND_TAIPEI_PERF: "0"
+          BEVY_ASSET_ROOT: ${{ github.workspace }}/game
+        run: |
+          export VK_ICD_FILENAMES="$(rg --files /usr/share/vulkan/icd.d | rg '/lvp_icd[^/]*\.json$' | head -n 1)"
+          test -n "$VK_ICD_FILENAMES"
+          timeout 900s target/debug/defend-taipei --qa > native-qa.log 2>&1
+          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 11, report'
+
+      - name: Upload native QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-qa
+          path: |
+            native-qa/
+            native-qa.log
+          if-no-files-found: warn
+          retention-days: 14
 
   android:
     name: Android APK (arm64-v8a)
@@ -102,11 +125,10 @@ jobs:
 
   # x86_64 APK + emulator smoke. Production APK stays arm64-only (job above);
   # hosted runners speak x86_64, so we build a second ABI for CI only.
-  # Vulkan via SwiftShader (`-gpu swiftshader_indirect`). Bevy has historically
-  # hit SwiftShader bind-group limits on some versions; if this job flakes for
-  # that reason, flip continue-on-error and document in the PR — try hard first.
+  # Vulkan via SwiftShader (`-gpu swiftshader_indirect`). Both runtime startup
+  # and real touch/save/orientation checks must pass; this is a required job.
   emulator:
-    name: Emulator smoke (x86_64)
+    name: Emulator gameplay (x86_64)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     # Independent of the arm64 APK job; builds its own x86_64 package for the emulator.
@@ -183,7 +205,7 @@ jobs:
           disable-animations: true
           script: echo "AVD ready"
 
-      - name: Emulator smoke (install, 45s, DTPERF)
+      - name: Emulator launch and touch gameplay
         id: smoke
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -195,7 +217,7 @@ jobs:
           disable-animations: true
           # android-emulator-runner runs each line as its own `sh -c`, so keep
           # this as a single line (no backslash continuations).
-          script: chmod +x scripts/emulator-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
+          script: chmod +x scripts/emulator-smoke.sh scripts/emulator-gameplay-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && GAMEPLAY_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-gameplay-smoke" ./scripts/emulator-gameplay-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
 
       - name: Upload smoke artifacts
         if: always()
@@ -204,5 +226,6 @@ jobs:
           name: emulator-smoke
           path: |
             emulator-smoke/
+            emulator-gameplay-smoke/
           if-no-files-found: warn
           retention-days: 14

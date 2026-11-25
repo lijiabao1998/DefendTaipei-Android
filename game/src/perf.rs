@@ -25,6 +25,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 
+use crate::chunk::{ChunkConfig, ChunkFrameStats};
 use crate::input::safe_insets;
 
 const LOG_INTERVAL_SECS: f32 = 5.0;
@@ -201,6 +202,8 @@ fn update_overlay(
     enabled: Res<PerfOverlayEnabled>,
     diagnostics: Res<DiagnosticsStore>,
     hist: Res<FrameHistory>,
+    chunk: Option<Res<ChunkConfig>>,
+    tiles: Option<Res<ChunkFrameStats>>,
     mut text: Query<&mut Text, With<PerfText>>,
     mut root: Query<&mut Visibility, With<PerfRoot>>,
 ) {
@@ -214,11 +217,18 @@ fn update_overlay(
         return;
     }
     let snap = snapshot(&diagnostics, &hist, enabled.0);
+    let lod = lod_line(chunk.as_deref(), tiles.as_deref());
     if let Ok(mut t) = text.single_mut() {
-        t.0 = format!(
-            "FPS {:>5.1}\navg {:>5.1} ms  p99 {:>5.1}  max {:>5.1}\nentities {}",
-            snap.fps, snap.avg_ms, snap.p99_ms, snap.max_ms, snap.entities
-        );
+        t.0 = match lod {
+            Some((tiles, near, mid, far)) => format!(
+                "FPS {:>5.1}\navg {:>5.1} ms  p99 {:>5.1}  max {:>5.1}\nentities {}\ntiles {tiles}  n/m/f {near}/{mid}/{far}",
+                snap.fps, snap.avg_ms, snap.p99_ms, snap.max_ms, snap.entities
+            ),
+            None => format!(
+                "FPS {:>5.1}\navg {:>5.1} ms  p99 {:>5.1}  max {:>5.1}\nentities {}",
+                snap.fps, snap.avg_ms, snap.p99_ms, snap.max_ms, snap.entities
+            ),
+        };
     }
 }
 
@@ -228,6 +238,8 @@ fn log_perf_summary(
     diagnostics: Res<DiagnosticsStore>,
     hist: Res<FrameHistory>,
     enabled: Res<PerfOverlayEnabled>,
+    chunk: Option<Res<ChunkConfig>>,
+    tiles: Option<Res<ChunkFrameStats>>,
 ) {
     timer.0 += time.delta_secs();
     if timer.0 < LOG_INTERVAL_SECS {
@@ -236,10 +248,31 @@ fn log_perf_summary(
     timer.0 = 0.0;
     let snap = snapshot(&diagnostics, &hist, enabled.0);
     // One line, grep-friendly. Goes to stdout (desktop) / logcat (Android).
-    println!(
-        "DTPERF fps={:.1} avg_ms={:.2} p99_ms={:.2} max_ms={:.2} entities={} overlay={}",
-        snap.fps, snap.avg_ms, snap.p99_ms, snap.max_ms, snap.entities, enabled.0 as u8
-    );
+    // Tile counts are appended only while streaming is on, so the default
+    // DTPERF line (and the emulator smoke grep) stays unchanged.
+    match lod_line(chunk.as_deref(), tiles.as_deref()) {
+        Some((tiles, near, mid, far)) => println!(
+            "DTPERF fps={:.1} avg_ms={:.2} p99_ms={:.2} max_ms={:.2} entities={} overlay={} tiles={tiles} near={near} mid={mid} far={far}",
+            snap.fps, snap.avg_ms, snap.p99_ms, snap.max_ms, snap.entities, enabled.0 as u8
+        ),
+        None => println!(
+            "DTPERF fps={:.1} avg_ms={:.2} p99_ms={:.2} max_ms={:.2} entities={} overlay={}",
+            snap.fps, snap.avg_ms, snap.p99_ms, snap.max_ms, snap.entities, enabled.0 as u8
+        ),
+    }
+}
+
+/// Resident tiles by LOD. `None` when streaming is off, so the overlay and the
+/// DTPERF line stay exactly as they are for a normal launch.
+fn lod_line(
+    config: Option<&ChunkConfig>,
+    stats: Option<&ChunkFrameStats>,
+) -> Option<(usize, usize, usize, usize)> {
+    let (config, stats) = (config?, stats?);
+    if !config.enabled {
+        return None;
+    }
+    Some((stats.tiles, stats.near, stats.mid, stats.far))
 }
 
 struct PerfSnapshot {

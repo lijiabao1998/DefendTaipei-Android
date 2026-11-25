@@ -6,8 +6,11 @@
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source Han Sans'.
 Copyright 2014, 2015, 2018, 2019, 2020, 2021 Google LLC, with Reserved Font Name 'Noto Sans CJK'.
 
-The subset keeps only the characters this game draws. The font name in the file
-is "Defend Taipei UI" so the reserved names are not reused for the modified subset.
+The subset keeps the characters drawn by the game, including story copy.
+`tools/subset_ui_font.py` rebuilds it from the Rust string literals plus
+°←↑→↓▶. `fonts/NotoSansTC-Subset.otf` is that same subset for the asset
+server. The embedded file is named "Defend Taipei UI" so the reserved names
+are not reused.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 The license is reproduced below. This is not a sale of the font.

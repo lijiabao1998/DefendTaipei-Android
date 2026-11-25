@@ -7,13 +7,13 @@
 //! banner, despawned on leaving [`GameFlow::Prologue`].
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::combat::{GameState, PlayerDied, ResetCombat};
 use crate::story::{
-    ALL_CLEAR_ID, AM765_STATION, AlertKind, CATALOG_AT, DistrictReclaimed, EVAC_STANDIN,
-    EvacComplete, EvacRoute, GAME_MINUTES_PER_REAL_SECOND, PRO_NEWS, PROLOGUE_START_MIN,
-    RunStoryEvent, StoryAlert, StoryBroadcast, StoryEmit, TIMELINE, WANHUA_DISTRICTS, evac_open,
-    event_by_id, script_by_id,
+    ALL_CLEAR_ID, AM765_STATION, AlertKind, DistrictReclaimed, EvacComplete, EvacRoute,
+    GAME_MINUTES_PER_REAL_SECOND, PRO_NEWS, PROLOGUE_START_MIN, RunStoryEvent, StoryAlert,
+    StoryBroadcast, StoryEmit, TIMELINE, WANHUA_DISTRICTS, event_by_id, script_by_id,
 };
 
 /// Single source of truth for where the session is.
@@ -49,22 +49,31 @@ pub struct RestartGame;
 #[derive(Message, Clone, Copy, Debug)]
 pub struct SkipPrologue;
 
-#[derive(Resource)]
+#[derive(Resource, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Campaign {
     pub reclaimed: Vec<String>,
-    prologue_t: f32,
-    news_i: usize,
-    raid: bool,
+    pub(crate) prologue_t: f32,
+    pub(crate) news_i: usize,
+    pub(crate) raid: bool,
     /// Family-group message during the air raid (`updatePrologue` stage 2).
-    family: bool,
+    pub(crate) family: bool,
     /// In-game minutes from 00:00 on day 1. The prologue pins this to 07:20.
     pub game_min: f32,
+    /// Fraction lost when the public f32 clock is rounded. Persisting this carry
+    /// lets a frame advance time even after one frame is smaller than a clock ULP.
+    pub clock_remainder: f64,
+    /// One in-game day lasts 1, 2, or 4 real hours.
+    pub day_hours: u8,
+    /// Original speed controls: 1, 3, or 20.
+    pub speed: u8,
+    pub sleeping: bool,
     /// Helicopter or boat already taken. Closes the window the way `UT.ev.ex` does.
-    evac_taken: bool,
+    pub(crate) evac_taken: bool,
     /// Phone / radio line. The prologue card and the in-play card read it.
-    notice: String,
-    notice_t: f32,
-    fired: Vec<String>,
+    pub(crate) notice: String,
+    pub(crate) notice_t: f32,
+    pub(crate) fired: Vec<String>,
 }
 
 impl Default for Campaign {
@@ -76,6 +85,10 @@ impl Default for Campaign {
             raid: false,
             family: false,
             game_min: 0.0,
+            clock_remainder: 0.0,
+            day_hours: 1,
+            speed: 1,
+            sleeping: false,
             evac_taken: false,
             notice: String::new(),
             notice_t: 0.0,
@@ -98,9 +111,9 @@ struct PlayingBanner;
 #[derive(Component)]
 struct PlayingBannerText;
 
-/// Stand-in for walking into the riverside pad or meeting the boat. Only spawned with the in-play card.
-#[derive(Component, Clone, Copy)]
-struct EvacChoice(EvacRoute);
+/// Ordered clock/story stage. Shelter dawn and world vitals follow it.
+#[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FlowSet;
 
 pub struct GameFlowPlugin;
 
@@ -116,10 +129,15 @@ impl Plugin for GameFlowPlugin {
             .add_message::<StoryBroadcast>()
             .add_message::<DistrictReclaimed>()
             .add_message::<EvacComplete>()
+            .configure_sets(
+                Update,
+                FlowSet
+                    .after(crate::input::InputSet)
+                    .before(crate::combat::CombatSet),
+            )
             .add_systems(
                 Update,
                 (
-                    evac_input,
                     apply_flow,
                     prologue,
                     advance_story,
@@ -129,7 +147,8 @@ impl Plugin for GameFlowPlugin {
                     sync_prologue_banner,
                     sync_playing_banner,
                 )
-                    .chain(),
+                    .chain()
+                    .in_set(FlowSet),
             );
     }
 }
@@ -170,8 +189,12 @@ fn apply_flow(
     }
     if matches!(state.get(), GameFlow::Playing | GameFlow::Prologue) && !deaths.is_empty() {
         deaths.clear();
+        // Damage and extraction can arrive in the same frame. A fatal hit must
+        // never be overwritten by the later evacuation message.
+        evacs.clear();
         campaign.notice_t = 0.0;
         next.set(GameFlow::GameOver(Ending::Death));
+        return;
     } else {
         deaths.clear();
     }
@@ -215,11 +238,11 @@ fn prologue(
         alerts.write(StoryAlert {
             kind: AlertKind::Alert,
         });
-        campaign.notice = "⚠️ 國家級警報\n飛彈空襲警報！共軍部隊於淡水河沿岸登陸，請立即就近避難，遠離窗戶。\n\n📢 防空廣播：「這不是演習！這不是演習！請民眾立即進入地下室或避難處所……」".into();
+        campaign.notice = "國家級警報\n飛彈空襲警報！共軍部隊於淡水河沿岸登陸，請立即就近避難，遠離窗戶。\n\n防空廣播：「這不是演習！這不是演習！請民眾立即進入地下室或避難處所……」".into();
         campaign.notice_t = 8.0;
     } else if campaign.raid && !campaign.family && campaign.prologue_t > 5.0 {
         campaign.family = true;
-        campaign.notice = "📱 家族群組\n你在哪？？西園路那邊有軍車開進來了！不要出門！\n\n街口傳來履帶聲——穿著陌生迷彩的士兵封鎖了路口。".into();
+        campaign.notice = "家族群組\n你在哪？？西園路那邊有軍車開進來了！不要出門！\n\n街口傳來履帶聲——穿著陌生迷彩的士兵封鎖了路口。".into();
         campaign.notice_t = 8.0;
     } else if campaign.raid && campaign.prologue_t > 16.0 {
         next.set(GameFlow::Playing);
@@ -273,20 +296,30 @@ fn deliver(
 }
 
 /// `updateStory`: each `STORY` row once, when `gameMin` reaches it. 📻 lines also start the radio bed.
-/// Act-1 catalog ids fire at the minutes in [`CATALOG_AT`].
+/// Catalog-only events remain explicit requests, matching the web build.
 fn advance_story(
     time: Res<Time>,
     state: Res<State<GameFlow>>,
     mut game: ResMut<GameState>,
     mut campaign: ResMut<Campaign>,
-    mut alerts: MessageWriter<StoryAlert>,
     mut broadcasts: MessageWriter<StoryBroadcast>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
 ) {
-    if !matches!(state.get(), GameFlow::Playing) {
+    if pause.is_some_and(|p| p.0) || !matches!(state.get(), GameFlow::Playing) {
         return;
     }
     let dt = time.delta_secs();
-    campaign.game_min += dt * GAME_MINUTES_PER_REAL_SECOND;
+    let scale = if campaign.sleeping {
+        20.0
+    } else {
+        f32::from(campaign.speed)
+    };
+    let exact = f64::from(campaign.game_min)
+        + campaign.clock_remainder
+        + f64::from(dt) * f64::from(scale) * f64::from(GAME_MINUTES_PER_REAL_SECOND)
+            / f64::from(campaign.day_hours);
+    campaign.game_min = exact as f32;
+    campaign.clock_remainder = exact - f64::from(campaign.game_min);
     game.survived = campaign.game_min;
     campaign.notice_t = (campaign.notice_t - dt).max(0.0);
     for line in TIMELINE {
@@ -302,14 +335,6 @@ fn advance_story(
                 station: line.who,
                 text: line.text,
             });
-        }
-    }
-    for &(minute, id) in CATALOG_AT {
-        if campaign.game_min < minute as f32 {
-            continue;
-        }
-        if let Some(event) = event_by_id(id) {
-            deliver(&mut campaign, &mut alerts, &mut broadcasts, event);
         }
     }
 }
@@ -358,8 +383,13 @@ fn reclaim(
     }
 }
 
-fn sync_over(state: Res<State<GameFlow>>, mut game: ResMut<GameState>) {
-    let live = matches!(state.get(), GameFlow::Prologue | GameFlow::Playing);
+fn sync_over(
+    state: Res<State<GameFlow>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
+    mut game: ResMut<GameState>,
+) {
+    let live = matches!(state.get(), GameFlow::Prologue | GameFlow::Playing)
+        && !pause.is_some_and(|p| p.0);
     if !live {
         game.over = true;
     } else if game.hp > 0.0 {
@@ -393,7 +423,7 @@ fn sync_prologue_banner(
                     padding: UiRect::all(px(10)),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.03, 0.06, 0.1, 0.92)),
+                BackgroundColor(Color::srgb(0.05, 0.07, 0.11)),
                 GlobalZIndex(70),
                 Visibility::Hidden,
             ))
@@ -426,59 +456,14 @@ fn banner_font() -> TextFont {
     }
 }
 
-/// H / B, or the stand-in buttons, finish an evacuation while the window is open.
-fn evac_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    state: Res<State<GameFlow>>,
-    mut campaign: ResMut<Campaign>,
-    mut evacs: MessageWriter<EvacComplete>,
-) {
-    if !matches!(state.get(), GameFlow::Playing)
-        || !evac_open(campaign.game_min, campaign.evac_taken)
-    {
-        return;
-    }
-    let route = if keys.just_pressed(KeyCode::KeyB) {
-        Some(EvacRoute::Boat)
-    } else if keys.just_pressed(KeyCode::KeyH) {
-        Some(EvacRoute::Helicopter)
-    } else {
-        None
-    };
-    if let Some(route) = route {
-        campaign.evac_taken = true;
-        evacs.write(EvacComplete { route });
-    }
-}
-
-fn on_evac_button(
-    activate: On<bevy::ui_widgets::Activate>,
-    state: Res<State<GameFlow>>,
-    choices: Query<&EvacChoice>,
-    mut campaign: ResMut<Campaign>,
-    mut evacs: MessageWriter<EvacComplete>,
-) {
-    if !matches!(state.get(), GameFlow::Playing)
-        || !evac_open(campaign.game_min, campaign.evac_taken)
-    {
-        return;
-    }
-    let Ok(choice) = choices.get(activate.entity) else {
-        return;
-    };
-    campaign.evac_taken = true;
-    evacs.write(EvacComplete { route: choice.0 });
-}
-
-/// Radio and phone lines during play, plus the stand-in evac controls.
-/// [`DespawnOnExit`] drops the card when an ending (or the title) begins.
+/// The radio/phone banner. Evacuation is handled at the actual map sites.
 fn sync_playing_banner(
     mut commands: Commands,
     state: Res<State<GameFlow>>,
     campaign: Res<Campaign>,
+    modal: Option<Res<crate::ui::UiModal>>,
     card: Option<Single<&mut Visibility, With<PlayingBanner>>>,
     body: Option<Single<&mut Text, With<PlayingBannerText>>>,
-    mut buttons: Query<&mut Visibility, (With<EvacChoice>, Without<PlayingBanner>)>,
 ) {
     if !matches!(state.get(), GameFlow::Playing) {
         return;
@@ -493,73 +478,109 @@ fn sync_playing_banner(
                     top: px(12),
                     left: px(16),
                     right: px(16),
+                    max_height: px(120),
                     padding: UiRect::all(px(10)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(8),
+                    overflow: Overflow::clip(),
                     ..default()
                 },
-                BackgroundColor(Color::srgba(0.03, 0.06, 0.1, 0.92)),
-                GlobalZIndex(70),
+                BackgroundColor(Color::srgb(0.05, 0.07, 0.11)),
+                GlobalZIndex(25),
                 Visibility::Hidden,
             ))
-            .with_children(|parent| {
-                parent.spawn((
-                    PlayingBannerText,
-                    Text::new(""),
-                    banner_font(),
-                    TextColor(Color::srgb(0.86, 0.93, 1.0)),
-                    TextLayout::justify(Justify::Left),
-                ));
-                for (route, label, color) in [
-                    (
-                        EvacRoute::Helicopter,
-                        "H　直升機・河濱撤離區",
-                        Color::srgb(0.15, 0.38, 0.24),
-                    ),
-                    (
-                        EvacRoute::Boat,
-                        "B　小艇・聯絡人接應",
-                        Color::srgb(0.12, 0.28, 0.42),
-                    ),
-                ] {
-                    parent
-                        .spawn((
-                            bevy::ui_widgets::Button,
-                            bevy::ui_widgets::ActivateOnPress,
-                            EvacChoice(route),
-                            Node {
-                                padding: UiRect::axes(px(12), px(8)),
-                                ..default()
-                            },
-                            BackgroundColor(color),
-                            Visibility::Hidden,
-                        ))
-                        .observe(on_evac_button)
-                        .with_child((Text::new(label), banner_font(), TextColor(Color::WHITE)));
-                }
-            });
+            .with_child((
+                PlayingBannerText,
+                Text::new(""),
+                banner_font(),
+                TextColor(Color::srgb(0.86, 0.93, 1.0)),
+                TextLayout::justify(Justify::Left),
+            ));
         return;
     };
-    let window = evac_open(campaign.game_min, campaign.evac_taken);
-    let show = (campaign.notice_t > 0.0 && !campaign.notice.is_empty()) || window;
+    let show =
+        campaign.notice_t > 0.0 && !campaign.notice.is_empty() && !modal.is_some_and(|m| m.open);
     **card = if show {
         Visibility::Inherited
     } else {
         Visibility::Hidden
     };
-    if let Some(mut body) = body {
-        if campaign.notice_t > 0.0 && !campaign.notice.is_empty() {
-            body.0 = campaign.notice.clone();
-        } else if window {
-            body.0 = EVAC_STANDIN.to_string();
+    if show && let Some(mut body) = body {
+        body.0 = campaign.notice.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn long_run_clock_carries_sub_ulp_frames_and_survives_serialization() {
+        // These are the exact f32 magnitudes at which the former clock stopped
+        // advancing at 60 FPS with a four-hour or one-hour day respectively.
+        for (minute, day_hours) in [(32_768.0, 4), (131_072.0, 1)] {
+            let mut app = App::new();
+            app.init_resource::<Time>()
+                .insert_resource(State::new(GameFlow::Playing))
+                .insert_resource(Campaign {
+                    game_min: minute,
+                    day_hours,
+                    ..default()
+                })
+                .init_resource::<GameState>()
+                .add_message::<StoryBroadcast>()
+                .add_systems(Update, advance_story);
+            let step = std::time::Duration::from_nanos(16_666_667);
+            let mut expected = f64::from(minute);
+            for frame in 0..120 {
+                app.world_mut().resource_mut::<Time>().advance_by(step);
+                let dt = app.world().resource::<Time>().delta_secs();
+                expected +=
+                    f64::from(dt) * f64::from(GAME_MINUTES_PER_REAL_SECOND) / f64::from(day_hours);
+                app.update();
+                if frame == 60 {
+                    let encoded = serde_json::to_vec(app.world().resource::<Campaign>()).unwrap();
+                    app.insert_resource(serde_json::from_slice::<Campaign>(&encoded).unwrap());
+                }
+            }
+            let clock = app.world().resource::<Campaign>();
+            assert!(clock.game_min > minute, "day_hours={day_hours}");
+            assert!(
+                (f64::from(clock.game_min) + clock.clock_remainder - expected).abs() < 1e-8,
+                "day_hours={day_hours}: {} + {} vs {expected}",
+                clock.game_min,
+                clock.clock_remainder
+            );
         }
     }
-    let button_vis = if window {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for mut visibility in &mut buttons {
-        *visibility = button_vis;
+
+    #[test]
+    fn fatal_hit_wins_over_an_evacuation_in_the_same_frame() {
+        let mut app = App::new();
+        app.insert_resource(State::new(GameFlow::Playing))
+            .init_resource::<NextState<GameFlow>>()
+            .init_resource::<Campaign>()
+            .add_message::<ResetCombat>()
+            .add_message::<StoryAlert>()
+            .add_message::<StartGame>()
+            .add_message::<RestartGame>()
+            .add_message::<SkipPrologue>()
+            .add_message::<PlayerDied>()
+            .add_message::<EvacComplete>()
+            .add_systems(Update, apply_flow);
+        app.world_mut().write_message(PlayerDied);
+        app.world_mut().write_message(EvacComplete {
+            route: EvacRoute::Helicopter,
+        });
+        app.update();
+        assert!(matches!(
+            app.world().resource::<NextState<GameFlow>>(),
+            NextState::Pending(GameFlow::GameOver(Ending::Death))
+        ));
+        // The queued extraction was consumed rather than delayed to the next
+        // update, where it could replace the pending death transition.
+        app.update();
+        assert!(matches!(
+            app.world().resource::<NextState<GameFlow>>(),
+            NextState::Pending(GameFlow::GameOver(Ending::Death))
+        ));
     }
 }

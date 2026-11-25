@@ -214,6 +214,8 @@ fn gather_player_input(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     windows: Query<&Window, With<PrimaryWindow>>,
+    modal: Option<Res<crate::ui::UiModal>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
     mut hands: ResMut<TouchControl>,
     mut move_input: ResMut<MoveInput>,
     mut player: ResMut<PlayerInput>,
@@ -222,7 +224,10 @@ fn gather_player_input(
         clear_input(&mut player, &mut hands, &mut move_input);
         return;
     };
-    if flow.get() != &GameFlow::Playing {
+    if flow.get() != &GameFlow::Playing
+        || modal.is_some_and(|m| m.blocks_input())
+        || pause.is_some_and(|p| p.0)
+    {
         clear_input(&mut player, &mut hands, &mut move_input);
         return;
     }

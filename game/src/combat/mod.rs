@@ -6,14 +6,16 @@
 //! - Messages read: [`SpawnEnemy`], [`ResetCombat`].
 //! - Messages written: [`EnemyDied`], [`PlayerDied`], [`PlayerHit`], [`Gunshot`], [`Callout`].
 //! - [`spawn_enemy`] / [`spawn_enemy_with_route`] for direct spawning.
-//! - [`WeaponInput`] (aim / fire / crouch; becomes `PlayerInput` after PR #6), [`AutoFire`], [`CombatEnv`] (night, rain), [`PlayerStance`].
+//! - Input: reads `crate::input::PlayerInput` (fire / crouch / aim) through the thin adapter [`WeaponInput`], [`AutoFire`], [`CombatEnv`] (night, rain), [`PlayerStance`].
 //! - [`CombatWorldRes`] / [`world::CombatWorld`]: line of sight, cover, buildings (map owner plugs in).
 //! - [`GameState`]: HP, bleeding, kills, … for the HUD.
 //! - Character visuals: [`standin`] (swap for the real rig).
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::city::{Lcg, Obstacles};
+use crate::inventory::{Inventory, ItemKind, item};
 use crate::player::{Player, resolve_collisions, spawn_point};
 
 pub mod input;
@@ -24,9 +26,9 @@ pub mod standin;
 pub mod tuning;
 pub mod world;
 
-pub use input::{AutoFire, CombatInput, CombatInputSet, WeaponInput};
+pub use input::{AutoFire, CombatInput, CombatInputSet, WeaponInput, weapon_from_player};
 pub use soldier::{SolState, Soldier};
-pub use world::{CombatWorld, CombatWorldRes};
+pub use world::{CombatWorld, CombatWorldRes, ObstacleWorld};
 
 use soldier::{Ctx, PlayerMark};
 use tuning::*;
@@ -135,6 +137,7 @@ pub struct SpawnEnemy {
 /// Same shape as lijiabao5's game-flow PR (#5): `EnemyDied { kind, pos }`.
 #[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct EnemyDied {
+    pub id: u32,
     pub kind: EnemyKind,
     pub pos: Vec3,
 }
@@ -183,8 +186,57 @@ pub struct ResetCombat;
 
 #[derive(Resource)]
 pub struct PlayerGun {
+    /// Standalone combat test fixture; a real run always reads Inventory instead.
     pub gun: &'static Gun,
     cd: f32,
+    pending_melee: Option<PendingMelee>,
+    swing_remaining: f32,
+    swing_duration: f32,
+}
+
+#[derive(Clone, Copy)]
+struct PendingMelee {
+    delay: f32,
+    dir: Vec2,
+    damage: f32,
+    range: f32,
+}
+
+impl PlayerGun {
+    pub fn clear_transients(&mut self) {
+        self.cd = 0.0;
+        self.pending_melee = None;
+        self.swing_remaining = 0.0;
+        self.swing_duration = 0.0;
+    }
+
+    pub fn melee_progress(&self) -> Option<f32> {
+        (self.swing_remaining > 0.0 && self.swing_duration > 0.0)
+            .then(|| 1.0 - self.swing_remaining / self.swing_duration)
+    }
+}
+
+/// Loading a save clears unsaved attacks and grenade timers from the prior run.
+pub(crate) fn clear_transient_combat(world: &mut World) {
+    if let Some(mut gun) = world.get_resource_mut::<PlayerGun>() {
+        gun.clear_transients();
+    }
+    if let Some(mut input) = world.get_resource_mut::<WeaponInput>() {
+        *input = WeaponInput::default();
+    }
+    if let Some(mut timers) = world.get_resource_mut::<AiTimers>() {
+        *timers = AiTimers::default();
+    }
+    let entities: Vec<Entity> = world
+        .query_filtered::<Entity, With<Grenade>>()
+        .iter(world)
+        .collect();
+    for entity in entities {
+        if let Some(warning) = world.get::<GrenadeWarn>(entity).map(|warn| warn.0) {
+            world.despawn(warning);
+        }
+        world.despawn(entity);
+    }
 }
 
 impl Default for PlayerGun {
@@ -192,6 +244,127 @@ impl Default for PlayerGun {
         Self {
             gun: gun(PLAYER_START_GUN).expect("start gun"),
             cd: 0.0,
+            pending_melee: None,
+            swing_remaining: 0.0,
+            swing_duration: 0.0,
+        }
+    }
+}
+
+#[derive(SystemParam)]
+pub(super) struct PlayerContext<'w> {
+    inventory: Option<ResMut<'w, Inventory>>,
+    modal: Option<Res<'w, crate::ui::UiModal>>,
+    pause: Option<Res<'w, crate::ui::PauseOpen>>,
+    campaign: Option<Res<'w, crate::game_flow::Campaign>>,
+    language: Option<Res<'w, crate::i18n::Language>>,
+}
+
+impl PlayerContext<'_> {
+    fn blocks_input(&self) -> bool {
+        self.modal
+            .as_ref()
+            .is_some_and(|modal| modal.blocks_input())
+            || self.pause.as_ref().is_some_and(|pause| pause.0)
+            || self
+                .campaign
+                .as_ref()
+                .is_some_and(|campaign| campaign.sleeping)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AttackDef {
+    id: &'static str,
+    name: &'static str,
+    damage: f32,
+    range: f32,
+    noise: f32,
+    cooldown: f32,
+    ammo: Option<&'static str>,
+    family: Option<GunFam>,
+    cap: u32,
+}
+
+fn attack_def(
+    inventory: Option<&Inventory>,
+    fallback: &Gun,
+    lang: crate::i18n::Language,
+) -> AttackDef {
+    if let Some(bag) = inventory {
+        if let Some(d) = item(&bag.equipped)
+            .filter(|d| bag.count(d.id) > 0 && d.kind.is_weapon() && d.anti_armor == 0.0)
+        {
+            return AttackDef {
+                id: d.id,
+                name: d.name(lang),
+                damage: d.damage,
+                range: d.range,
+                noise: d.noise,
+                cooldown: d.cooldown,
+                ammo: d.ammo,
+                family: (d.kind == ItemKind::Gun).then(|| gun_fam(d.id)),
+                cap: d.cap,
+            };
+        }
+        return AttackDef {
+            id: "",
+            name: crate::i18n::tr(lang, "徒手", "Unarmed"),
+            damage: 8.0,
+            range: 1.1,
+            noise: 2.0,
+            cooldown: 0.5,
+            ammo: None,
+            family: None,
+            cap: 0,
+        };
+    }
+    AttackDef {
+        id: fallback.id,
+        name: fallback.name,
+        damage: fallback.dmg,
+        range: fallback.range,
+        noise: fallback.noise,
+        cooldown: fallback.cd,
+        ammo: None,
+        family: Some(fallback.fam),
+        cap: fallback.cap,
+    }
+}
+
+fn combat_running(
+    flow: Option<Res<State<crate::game_flow::GameFlow>>>,
+    pause: Option<Res<crate::ui::PauseOpen>>,
+) -> bool {
+    flow.is_none_or(|flow| *flow.get() == crate::game_flow::GameFlow::Playing)
+        && pause.is_none_or(|pause| !pause.0)
+}
+
+/// What the player is holding, for the HUD (`crate::combat::PlayerWeaponState`).
+///
+/// The original has no magazines and no reload for the player: `playerAttack` takes each round
+/// straight from the pack (`player.inv[d.ammo]`) and says 沒有子彈了 when there are none, so
+/// `rounds` is all the ammunition there is; `cap` is the gun's magazine size from the table, for
+/// display only. Written by combat; read-only for everyone else.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct PlayerWeaponState {
+    /// item id (`"rifle"`)
+    pub weapon: &'static str,
+    /// display name (Traditional Chinese, from the gun table)
+    pub name: &'static str,
+    /// rounds carried for it
+    pub rounds: u32,
+    pub cap: u32,
+}
+
+impl Default for PlayerWeaponState {
+    fn default() -> Self {
+        let g = gun(PLAYER_START_GUN).expect("start gun");
+        Self {
+            weapon: g.id,
+            name: g.name,
+            rounds: PLAYER_START_ROUNDS,
+            cap: g.cap,
         }
     }
 }
@@ -249,6 +422,7 @@ impl Plugin for CombatPlugin {
             .init_resource::<PlayerStance>()
             .init_resource::<CombatWorldRes>()
             .init_resource::<PlayerGun>()
+            .init_resource::<PlayerWeaponState>()
             .init_resource::<AiTimers>()
             .init_resource::<CombatRng>()
             .add_message::<SpawnEnemy>()
@@ -262,30 +436,39 @@ impl Plugin for CombatPlugin {
             .configure_sets(
                 Update,
                 (
-                    CombatInputSet.after(crate::player::MoveSet),
+                    CombatInputSet
+                        .after(crate::player::MoveSet)
+                        .after(crate::input::InputSet),
                     CombatSet.after(CombatInputSet),
                 ),
             )
             .add_systems(
                 Update,
                 (
+                    world::walls_from_city,
                     apply_reset,
                     input::sync_stance,
                     handle_spawn_requests,
-                    assign_squads,
-                    soldiers_think,
-                    grenades,
+                    assign_squads.run_if(combat_running),
+                    soldiers_think.run_if(combat_running),
+                    grenades.run_if(combat_running),
                     player_fire,
-                    player_vitals,
-                    tick_bodies,
+                    player_vitals.run_if(combat_running),
+                    tick_bodies.run_if(combat_running),
                     sfx::combat_sfx,
                 )
                     .chain()
                     .in_set(CombatSet),
             )
             .add_plugins(standin::StandinPlugin);
+        app.add_systems(Update, input::player_input_to_weapon.in_set(CombatInputSet));
         #[cfg(not(target_os = "android"))]
-        app.add_systems(Update, input::desktop_mouse_input.in_set(CombatInputSet));
+        app.add_systems(
+            Update,
+            input::desktop_mouse_aim
+                .after(input::player_input_to_weapon)
+                .in_set(CombatInputSet),
+        );
     }
 }
 
@@ -345,6 +528,7 @@ fn apply_reset(
     mut requests: MessageReader<ResetCombat>,
     mut state: ResMut<GameState>,
     mut gun: ResMut<PlayerGun>,
+    mut weapon: ResMut<PlayerWeaponState>,
     mut timers: ResMut<AiTimers>,
     mut player: Query<(&mut Transform, &mut Visibility), With<Player>>,
     field: Query<Entity, Or<(With<Enemy>, With<Body>, With<Fx>, With<Grenade>)>>,
@@ -357,6 +541,9 @@ fn apply_reset(
     }
     *state = GameState::default();
     gun.cd = 0.0;
+    gun.pending_melee = None;
+    gun.swing_remaining = 0.0;
+    *weapon = PlayerWeaponState::default();
     let next_id = timers.next_id;
     *timers = AiTimers {
         next_id,
@@ -562,8 +749,20 @@ fn soldiers_think(
     }
 }
 
-fn gun_fam(id: &str) -> GunFam {
-    gun(id).map_or(GunFam::Rifle, |g| g.fam)
+pub(crate) fn gun_fam(id: &str) -> GunFam {
+    if let Some(gun) = gun(id) {
+        return gun.fam;
+    }
+    match id {
+        "t75p" | "qsz92" | "pistol" => GunFam::Pistol,
+        "qbu191" | "qbu88" => GunFam::Dmr,
+        "t93" | "js762" => GunFam::Sniper,
+        "t75mg" | "t75saw" | "qjy88" | "qjb95" => GunFam::Lmg,
+        "qcw05" => GunFam::Smg,
+        "qbs09" | "huntsg" => GunFam::Shotgun,
+        "qbz95" => GunFam::Bullpup,
+        _ => GunFam::Rifle,
+    }
 }
 
 /// Grenades (squadai.ts / main.ts `updateGrenades`): a squad that knows roughly where a
@@ -697,6 +896,7 @@ fn grenades(
                     t: BODY_SECS,
                 });
                 died.write(EnemyDied {
+                    id: s.id,
                     kind: s.kind,
                     pos: tf.translation,
                 });
@@ -762,20 +962,80 @@ fn player_fire(
     env: Res<CombatEnv>,
     world: Res<CombatWorldRes>,
     mut gun: ResMut<PlayerGun>,
+    mut weapon: ResMut<PlayerWeaponState>,
     mut state: ResMut<GameState>,
     mut rng: ResMut<CombatRng>,
     player: Query<&Transform, (With<Player>, Without<Enemy>)>,
-    mut enemies: Query<(Entity, &mut Enemy, &Transform)>,
+    mut enemies: Query<(Entity, &mut Enemy, &mut Transform)>,
     mut died: MessageWriter<EnemyDied>,
     mut shots: MessageWriter<Gunshot>,
+    mut callouts: MessageWriter<Callout>,
+    mut context: PlayerContext,
 ) {
-    gun.cd = (gun.cd - time.delta_secs()).max(0.0);
-    let Ok(ptf) = player.single() else { return };
-    if state.over || gun.cd > 0.0 {
+    let lang = context.language.as_deref().copied().unwrap_or_default();
+    let attack = attack_def(context.inventory.as_deref(), gun.gun, lang);
+    if let Some(bag) = context.inventory.as_deref() {
+        *weapon = PlayerWeaponState {
+            weapon: attack.id,
+            name: attack.name,
+            rounds: attack.ammo.map_or(0, |ammo| bag.count(ammo)),
+            cap: attack.cap,
+        };
+    }
+    if state.over || context.pause.as_ref().is_some_and(|pause| pause.0) {
         return;
     }
+    let dt = time.delta_secs();
+    gun.cd = (gun.cd - dt).max(0.0);
+    gun.swing_remaining = (gun.swing_remaining - dt).max(0.0);
+    let Ok(ptf) = player.single() else { return };
     let p0 = ptf.translation.xz();
     let w = world.0.as_ref();
+
+    // A melee blow lands at the contact frame (44% of the original swing duration).
+    if let Some(mut swing) = gun.pending_melee.take() {
+        swing.delay -= dt;
+        if swing.delay > 0.0 {
+            gun.pending_melee = Some(swing);
+        } else {
+            for (ent, mut enemy, mut tf) in &mut enemies {
+                let s = &mut enemy.0;
+                let to = s.pos - p0;
+                if !s.alive()
+                    || !s.active(env.night)
+                    || to.length() > swing.range + 0.3
+                    || to.normalize_or_zero().dot(swing.dir) < 0.5
+                    || w.shot_ray(p0, s.pos, 1.0, 1.0, 0.0) < 1.0
+                {
+                    continue;
+                }
+                let stealth = s.state != SolState::Combat && s.alert < 0.5;
+                let killed = soldier::damage(s, swing.damage * if stealth { 3.2 } else { 1.0 }, p0);
+                let next = s.pos + swing.dir * if killed { 0.25 } else { 0.45 };
+                if w.shot_ray(s.pos, next, 1.0, 1.0, 0.0) >= 1.0 {
+                    s.pos = next;
+                    tf.translation.x = next.x;
+                    tf.translation.z = next.y;
+                }
+                if killed {
+                    state.kills += 1;
+                    commands.entity(ent).insert(Body {
+                        kind: s.kind,
+                        t: BODY_SECS,
+                    });
+                    died.write(EnemyDied {
+                        id: s.id,
+                        kind: s.kind,
+                        pos: tf.translation,
+                    });
+                }
+                break;
+            }
+        }
+    }
+    if gun.cd > 0.0 || context.blocks_input() {
+        return;
+    }
     let foe = |only_fighting: bool| {
         nearest_foe(
             p0,
@@ -792,14 +1052,11 @@ fn player_fire(
         match input.aim.try_normalize() {
             Some(a) => Some(p0 + a * 5.0),
             None => Some(foe(false).unwrap_or_else(|| {
-                // no one in sight: straight ahead (local −Z is forward on the player)
                 let f = ptf.forward();
                 p0 + Vec2::new(f.x, f.z) * 5.0
             })),
         }
     } else if auto.0 {
-        // TEMPORARY stand-in for holding 打: only answers soldiers already fighting the
-        // player, so the auto-fire does not snipe unaware patrols (stealth still matters).
         foe(true)
     } else {
         None
@@ -809,64 +1066,94 @@ fn player_fire(
     if dir == Vec2::ZERO {
         return;
     }
-    let g = gun.gun;
-    gun.cd = g.cd;
-    shots.write(Gunshot {
-        pos: ptf.translation + Vec3::Y * SHOT_FROM_H,
-        by_player: true,
-        fam: g.fam,
-    });
-    // v21.4 the round stops at the first wall / cover it meets (aimed at chest height)
-    let mut hd = g.range * w.shot_ray(p0, p0 + dir * g.range, SHOT_FROM_H, SHOT_TO_H, 1.0);
-    let mut hit: Option<Entity> = None;
-    for (ent, e, _) in &enemies {
-        let s = &e.0;
-        if !s.alive() {
-            continue;
-        }
-        let to = s.pos - p0;
-        let t = to.dot(dir);
-        if t < 0.0 || t > hd {
-            continue;
-        }
-        let perp = (to - dir * t).length();
-        let th = if s.crouch {
-            SHOT_TO_H_CROUCH
+    gun.cd = attack.cooldown;
+    if let Some(family) = attack.family {
+        let has_round = if let Some(bag) = context.inventory.as_deref_mut() {
+            let available = attack.ammo.is_some_and(|ammo| bag.take(ammo, 1));
+            weapon.rounds = attack.ammo.map_or(0, |ammo| bag.count(ammo));
+            available
+        } else if weapon.rounds > 0 {
+            weapon.rounds -= 1;
+            true
         } else {
-            SHOT_TO_H
+            false
         };
-        if perp < SHOT_HIT_RADIUS && w.shot_ray(p0, s.pos, SHOT_FROM_H, th, 1.0) >= 1.0 {
-            hit = Some(ent);
-            hd = t;
-        }
-    }
-    let end = p0 + dir * hd;
-    tracer(
-        &mut commands,
-        Vec3::new(p0.x, TRACER_H, p0.y),
-        Vec3::new(end.x, TRACER_H, end.y),
-    );
-    if let Some(ent) = hit
-        && let Ok((_, mut e, tf)) = enemies.get_mut(ent)
-    {
-        let dmg = g.dmg * (0.8 + rng.0.next_f32() * 0.4);
-        if soldier::damage(&mut e.0, dmg, p0) {
-            state.kills += 1;
-            commands.entity(ent).insert(Body {
-                kind: e.0.kind,
-                t: BODY_SECS,
+        if !has_round {
+            gun.cd = 0.5;
+            callouts.write(Callout {
+                pos: ptf.translation + Vec3::Y * 1.8,
+                text: crate::i18n::tr(lang, "沒有子彈了", "Out of ammunition"),
             });
-            died.write(EnemyDied {
-                kind: e.0.kind,
-                pos: tf.translation,
-            });
+            return;
         }
+        shots.write(Gunshot {
+            pos: ptf.translation + Vec3::Y * SHOT_FROM_H,
+            by_player: true,
+            fam: family,
+        });
+        let mut hd =
+            attack.range * w.shot_ray(p0, p0 + dir * attack.range, SHOT_FROM_H, SHOT_TO_H, 1.0);
+        let mut hit: Option<Entity> = None;
+        for (ent, e, _) in &enemies {
+            let s = &e.0;
+            if !s.alive() || !s.active(env.night) {
+                continue;
+            }
+            let to = s.pos - p0;
+            let t = to.dot(dir);
+            if t < 0.0 || t > hd {
+                continue;
+            }
+            let perp = (to - dir * t).length();
+            let th = if s.crouch {
+                SHOT_TO_H_CROUCH
+            } else {
+                SHOT_TO_H
+            };
+            if perp < SHOT_HIT_RADIUS && w.shot_ray(p0, s.pos, SHOT_FROM_H, th, 1.0) >= 1.0 {
+                hit = Some(ent);
+                hd = t;
+            }
+        }
+        let end = p0 + dir * hd;
+        tracer(
+            &mut commands,
+            Vec3::new(p0.x, TRACER_H, p0.y),
+            Vec3::new(end.x, TRACER_H, end.y),
+        );
+        if let Some(ent) = hit
+            && let Ok((_, mut enemy, tf)) = enemies.get_mut(ent)
+        {
+            let s = &mut enemy.0;
+            let damage = attack.damage * (0.8 + rng.0.next_f32() * 0.4);
+            if soldier::damage(s, damage, p0) {
+                state.kills += 1;
+                commands.entity(ent).insert(Body {
+                    kind: s.kind,
+                    t: BODY_SECS,
+                });
+                died.write(EnemyDied {
+                    id: s.id,
+                    kind: s.kind,
+                    pos: tf.translation,
+                });
+            }
+        }
+    } else {
+        let duration = (attack.cooldown * 0.85).max(0.42);
+        gun.swing_duration = duration;
+        gun.swing_remaining = duration;
+        gun.pending_melee = Some(PendingMelee {
+            delay: duration * 0.44,
+            dir,
+            damage: attack.damage,
+            range: attack.range,
+        });
     }
-    // the shot is heard (gun noise radius)
     soldier::noise(
         enemies.iter_mut().map(|(_, e, _)| &mut e.into_inner().0),
         p0,
-        g.noise,
+        attack.noise,
         env.rain,
         env.night,
         &mut rng.0,
