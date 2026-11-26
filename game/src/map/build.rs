@@ -17,6 +17,8 @@ pub enum Mat {
     Roof(u8),
     Tin,
     Floor,
+    /// Windowless ceramic cladding for balcony fronts and facade bands; vertex-tinted.
+    FacadeTile,
     ArcadeFloor(u8),
     Column,
     Shutter,
@@ -66,6 +68,8 @@ pub struct BuildingMeshes {
     pub roof: Parts,
     /// Floor, arcade floor / columns / shutters, signs: always drawn.
     pub base: Parts,
+    /// Balcony/stair/facade masses: hidden with detail during cutaway, never wall-faded.
+    pub structure: Parts,
 }
 
 pub const WHITE: [f32; 4] = [1.0; 4];
@@ -331,7 +335,7 @@ pub fn tank(b: &Bld, out: &mut BuildingMeshes) {
 }
 
 /// LOD of a building / chunk: near = everything (window units, rooftop shacks via the detail
-/// layer), mid = masses + arcades + signs, far = masses only.
+/// layer), mid = masses + architectural silhouette + arcades + signs, far = masses only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Lod {
     Near,
@@ -360,6 +364,7 @@ pub fn building(b: &Bld, lod: Lod) -> BuildingMeshes {
     out.base.merge(entrance(b, lod));
     sign(b, &mut out);
     tank(b, &mut out);
+    out.roof.merge(super::roofs::structure(b, lod));
     out
 }
 

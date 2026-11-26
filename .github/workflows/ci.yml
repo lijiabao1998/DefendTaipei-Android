@@ -85,7 +85,7 @@ jobs:
           test -n "$VK_ICD_FILENAMES"
           # Leave a minute after the internal 25-minute deadline to write evidence.
           timeout 1560s target/debug/defend-taipei --qa > native-qa.log 2>&1
-          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 47, report'
+          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 53, report; exterior=[c["exterior"] for c in report["captures"] if "exterior" in c]; assert len(exterior) == 6, report; assert {c["scene"] for c in exterior} == {"Townhouse", "Walkup", "Shophouse", "ServiceStair", "Rooftop", "Cutaway"}, report; assert sum(c["cutaway_hidden"] for c in exterior) == 1, report'
 
       - name: Upload native QA evidence
         if: always()

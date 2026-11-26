@@ -16,7 +16,9 @@ pub mod collide;
 pub mod data;
 pub mod detail;
 pub mod evac;
+pub mod exterior;
 pub mod interiors;
+pub mod roofs;
 pub mod street;
 pub mod textures;
 
@@ -105,13 +107,15 @@ pub fn build_chunk(w: &WorldData, key: ChunkKey, lod: Lod) -> ChunkMeshes {
         if b.c.x < min.x || b.c.y < min.y || b.c.x >= max.x || b.c.y >= max.y {
             continue;
         }
-        let m = build::building(b, lod);
+        let mut m = build::building(b, lod);
+        m.structure = exterior::structure(b, w, lod);
         if lod == Lod::Near {
             buildings.push((b.id, m));
         } else {
             merged.merge(m.walls);
             merged.merge(m.roof);
             merged.merge(m.base);
+            merged.merge(m.structure);
         }
     }
     ChunkMeshes {
@@ -149,12 +153,22 @@ pub struct BldDetail(pub u32);
 #[derive(Component)]
 pub struct DetailRoot(pub u32);
 
+/// Exact CPU mesh metadata retained at upload. Mesh vertex arrays are released
+/// after GPU extraction; QA must not call `Mesh::count_vertices()` on them later.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct MapMeshGeometry {
+    pub vertices: usize,
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
 fn material(m: &MapMaterials, k: Mat) -> Handle<StandardMaterial> {
     match k {
         Mat::Wall(i) => m.walls[i as usize % m.walls.len()].clone(),
         Mat::Roof(i) => m.roofs[i as usize % m.roofs.len()].clone(),
         Mat::Tin => m.tin.clone(),
         Mat::Floor => m.floor.clone(),
+        Mat::FacadeTile => m.facade_tile.clone(),
         Mat::ArcadeFloor(i) => m.arcade_floor[i as usize % m.arcade_floor.len()].clone(),
         Mat::Column => m.column.clone(),
         Mat::Shutter => m.shutter.clone(),
@@ -186,9 +200,16 @@ fn spawn_parts<B: Bundle + Clone>(
     let mut v: Vec<_> = parts.0.into_iter().filter(|(_, m)| !m.is_empty()).collect();
     v.sort_by_key(|(k, _)| *k);
     for (k, m) in v {
+        let (min, max) = m.aabb();
+        let geometry = MapMeshGeometry {
+            vertices: m.vcount(),
+            min,
+            max,
+        };
         c.spawn((
             Mesh3d(meshes.add(m.into_mesh())),
             MeshMaterial3d(material(mats, k)),
+            geometry,
             extra.clone(),
         ));
     }
@@ -241,6 +262,13 @@ pub fn spawn_chunk(
                             (BldRoof(id), Visibility::default()),
                         );
                         spawn_parts(bp, meshes, mats, b.base, ());
+                        spawn_parts(
+                            bp,
+                            meshes,
+                            mats,
+                            b.structure,
+                            (BldDetail(id), Visibility::default()),
+                        );
                     });
             }
         })
@@ -561,6 +589,104 @@ fn near_detail(
 #[cfg(test)]
 mod streaming_work_tests {
     use super::*;
+
+    #[test]
+    fn architectural_materials_and_roofs_follow_cutaway_without_wall_material_swaps() {
+        let data = world();
+        let b = data
+            .blds
+            .iter()
+            .find(|b| {
+                exterior::classify(b) == exterior::Typology::Walkup
+                    && !exterior::plan(b, data).balconies.is_empty()
+                    && data.bld_at(b.c).is_some_and(|inside| inside.id == b.id)
+            })
+            .expect("real walkup with a clear centre and balconies");
+        let mut building = build::building(b, Lod::Near);
+        building.structure = exterior::structure(b, data, Lod::Near);
+        assert!(building.structure.0.contains_key(&Mat::FacadeTile));
+        assert!(building.structure.0.contains_key(&Mat::Metal));
+        let expected_vertices = building.structure.vcount();
+
+        let mut images = Assets::<Image>::default();
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mats = textures::build_materials(&mut images, &mut materials);
+        let mut meshes = Assets::<Mesh>::default();
+        let mut app = App::new();
+        app.insert_resource(mats.clone())
+            .add_systems(Update, cutaway);
+        spawn_chunk(
+            &mut app.world_mut().commands(),
+            &mut meshes,
+            &mats,
+            ChunkMeshes {
+                key: ChunkKey::of(b.c),
+                lod: Lod::Near,
+                merged: Parts::default(),
+                buildings: vec![(b.id, building)],
+            },
+        );
+        app.world_mut().flush();
+        let outside = data.max + Vec2::splat(100.0);
+        let player = app
+            .world_mut()
+            .spawn((Player, Transform::from_xyz(outside.x, 0.0, outside.y)))
+            .id();
+        let architecture: HashMap<_, _> = app
+            .world_mut()
+            .query_filtered::<(Entity, &MeshMaterial3d<StandardMaterial>), With<BldDetail>>()
+            .iter(app.world())
+            .map(|(entity, material)| (entity, material.0.clone()))
+            .collect();
+        assert_eq!(architecture.len(), 3);
+        let uploaded_vertices: usize = app
+            .world_mut()
+            .query_filtered::<&MapMeshGeometry, With<BldDetail>>()
+            .iter(app.world())
+            .map(|geometry| geometry.vertices)
+            .sum();
+        assert_eq!(uploaded_vertices, expected_vertices);
+
+        for (position, hidden) in [(outside, false), (b.c, true), (outside, false)] {
+            app.world_mut()
+                .get_mut::<Transform>(player)
+                .unwrap()
+                .translation = Vec3::new(position.x, 0.0, position.y);
+            app.update();
+            for (&entity, material) in &architecture {
+                let world = app.world();
+                assert_eq!(
+                    &world
+                        .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                        .unwrap()
+                        .0,
+                    material,
+                    "ceramic and metal must not become the faded wall texture"
+                );
+                assert_eq!(
+                    *world.get::<Visibility>(entity).unwrap() == Visibility::Hidden,
+                    hidden,
+                    "balconies and stairs must disappear and return with the cutaway"
+                );
+            }
+            for (roof, visibility) in app
+                .world_mut()
+                .query::<(&BldRoof, &Visibility)>()
+                .iter(app.world())
+            {
+                assert_eq!(roof.0, b.id);
+                assert_eq!(*visibility == Visibility::Hidden, hidden);
+            }
+            for (wall, transform) in app
+                .world_mut()
+                .query::<(&BldWalls, &Transform)>()
+                .iter(app.world())
+            {
+                assert_eq!(wall.faded, hidden);
+                assert_eq!(transform.scale.y, if hidden { 0.12 } else { 1.0 });
+            }
+        }
+    }
 
     #[test]
     fn priority_cache_does_not_delay_a_lod_boundary_crossing() {
