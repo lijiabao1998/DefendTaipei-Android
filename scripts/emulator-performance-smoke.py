@@ -29,6 +29,21 @@ SHARE_URI = re.compile(r'content://tw\.lijiabao\.defendtaipei\.performance_repor
                        r'performance_reports/perf-report-[0-9]+\.json')
 
 
+def thermal_service_help() -> str:
+    command = ['adb', 'shell', 'cmd', 'thermalservice', 'help']
+    result = subprocess.run(command, capture_output=True, text=True, timeout=60, check=False)
+    help_text = result.stdout.strip()
+    # Android 14's BasicShellCommandHandler prints help and returns -1 (255
+    # through adb). Accept that status only for the recognized help response;
+    # actual override-status/reset commands still require exit status zero.
+    # https://android.googlesource.com/platform/frameworks/libs/modules-utils/+/refs/heads/android14-release/java/com/android/modules/utils/BasicShellCommandHandler.java
+    valid_help = help_text.startswith('Thermal service (thermalservice) commands:\n')
+    if result.returncode not in (0, 255) or not valid_help or result.stderr.strip():
+        result.check_returncode()
+        raise AssertionError(f'Unexpected thermalservice help response: {help_text!r}; stderr={result.stderr!r}')
+    return help_text
+
+
 def finite(value, *, positive=False) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise AssertionError(f'Expected a finite measured number, got {value!r}')
@@ -272,7 +287,8 @@ def main() -> None:
         audio.tap(layout['render_scales'][3], r'DTSETTINGS action=render_scale value=100')
         wait_resolution(viewport, 100)
         record['before_thermal'] = wait_json_log('DTPERFORMANCE effective=', lambda value: value['render_scale'] == 100)
-        help_text = audio.adb('shell', 'cmd', 'thermalservice', 'help')
+        help_text = thermal_service_help()
+        (out / 'thermal-service-help.txt').write_text(help_text + '\n')
         if 'override-status' not in help_text:
             record['thermal_injection'] = {'tested': False, 'reason': 'Emulator shell does not expose override-status'}
         else:

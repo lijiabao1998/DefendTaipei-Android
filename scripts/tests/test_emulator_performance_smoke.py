@@ -3,8 +3,10 @@
 import copy
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 import unittest
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -88,6 +90,85 @@ class EmulatorPerformanceSmokeTests(unittest.TestCase):
                     good.replace('content:', 'file:'),
                     good.replace('.performance_reports/', '.other/')):
             self.assertIsNone(smoke.SHARE_URI.fullmatch(bad))
+
+
+class ThermalServiceHelpTests(unittest.TestCase):
+    command = ['adb', 'shell', 'cmd', 'thermalservice', 'help']
+    help_text = ('Thermal service (thermalservice) commands:\n'
+                 '  help\n'
+                 '  override-status STATUS\n'
+                 '  reset\n')
+
+    def test_recognized_help_accepts_success_and_aosp_help_exit_status(self):
+        for returncode in (0, 255):
+            # AOSP's help path can return -1, observed by the host as 255.
+            result = subprocess.CompletedProcess(self.command, returncode,
+                                                 '\n' + self.help_text + '\n', ' \n\t')
+            with self.subTest(returncode=returncode), \
+                    mock.patch.object(smoke.subprocess, 'run', return_value=result) as run:
+                self.assertEqual(smoke.thermal_service_help(), self.help_text.strip())
+            run.assert_called_once_with(self.command, capture_output=True, text=True,
+                                        timeout=60, check=False)
+
+    def test_exit_255_without_recognized_help_remains_command_failure(self):
+        for output in ('', 'Permission denial: cannot access thermalservice\n',
+                       'Unknown command: help\n', 'error\n' + self.help_text,
+                       'Thermal service (thermalservice) commands: unexpected suffix\n'):
+            result = subprocess.CompletedProcess(self.command, 255, output, '')
+            with self.subTest(output=output), \
+                    mock.patch.object(smoke.subprocess, 'run', return_value=result), \
+                    self.assertRaises(subprocess.CalledProcessError) as raised:
+                smoke.thermal_service_help()
+            self.assertEqual(raised.exception.returncode, 255)
+            self.assertEqual(raised.exception.output, output)
+            self.assertEqual(raised.exception.stderr, '')
+
+    def test_other_nonzero_status_is_failure_even_with_recognized_help(self):
+        for returncode in (1, 2, 126, 127):
+            result = subprocess.CompletedProcess(self.command, returncode, self.help_text, '')
+            with self.subTest(returncode=returncode), \
+                    mock.patch.object(smoke.subprocess, 'run', return_value=result), \
+                    self.assertRaises(subprocess.CalledProcessError) as raised:
+                smoke.thermal_service_help()
+            self.assertEqual(raised.exception.returncode, returncode)
+            self.assertEqual(raised.exception.output, self.help_text)
+
+    def test_stderr_is_failure_even_when_stdout_contains_valid_help(self):
+        for returncode, error_type in ((0, AssertionError), (255, subprocess.CalledProcessError)):
+            result = subprocess.CompletedProcess(self.command, returncode, self.help_text,
+                                                 'error: device offline\n')
+            with self.subTest(returncode=returncode), \
+                    mock.patch.object(smoke.subprocess, 'run', return_value=result), \
+                    self.assertRaises(error_type) as raised:
+                smoke.thermal_service_help()
+            if returncode:
+                self.assertEqual(raised.exception.output, self.help_text)
+                self.assertEqual(raised.exception.stderr, result.stderr)
+
+    def test_zero_status_without_recognized_help_is_not_optional_support(self):
+        for output in ('', 'Unknown command: help\n', 'Permission denial\n'):
+            result = subprocess.CompletedProcess(self.command, 0, output, '')
+            with self.subTest(output=output), \
+                    mock.patch.object(smoke.subprocess, 'run', return_value=result), \
+                    self.assertRaises(AssertionError):
+                smoke.thermal_service_help()
+
+    def test_recognized_help_without_override_preserves_unsupported_path(self):
+        output = 'Thermal service (thermalservice) commands:\n  help\n'
+        for returncode in (0, 255):
+            result = subprocess.CompletedProcess(self.command, returncode, output, '')
+            with self.subTest(returncode=returncode), \
+                    mock.patch.object(smoke.subprocess, 'run', return_value=result):
+                help_text = smoke.thermal_service_help()
+            self.assertEqual(help_text, output.strip())
+            self.assertNotIn('override-status', help_text)
+
+    def test_timeout_propagates_without_becoming_unsupported_feature(self):
+        error = subprocess.TimeoutExpired(self.command, 60, output='partial help')
+        with mock.patch.object(smoke.subprocess, 'run', side_effect=error), \
+                self.assertRaises(subprocess.TimeoutExpired) as raised:
+            smoke.thermal_service_help()
+        self.assertIs(raised.exception, error)
 
 
 if __name__ == '__main__':
