@@ -48,6 +48,16 @@ enum Action {
     Entrance,
     DoorOpen,
     DoorClose,
+    Barricade,
+    BarricadeBlocked,
+    Unbarricade,
+    BarricadeInventory,
+    ShopInterior,
+    Scavenge,
+    ScavengeOne,
+    ScavengeAll,
+    ShopDepleted,
+    HomeInterior,
     Map,
     Rain,
     Night,
@@ -155,6 +165,72 @@ const STAGES: &[Stage] = &[
         name: "04d-door-closed-landscape",
         size: [1280, 720],
         action: Action::DoorClose,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d1-barricaded-portrait",
+        size: [390, 844],
+        action: Action::Barricade,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d2-barricade-blocked-portrait",
+        size: [390, 844],
+        action: Action::BarricadeBlocked,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d3-barricade-removed-landscape",
+        size: [1280, 720],
+        action: Action::Unbarricade,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d4-barricade-inventory-portrait",
+        size: [320, 640],
+        action: Action::BarricadeInventory,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d5-shop-interior-landscape",
+        size: [1280, 720],
+        action: Action::ShopInterior,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d6-scavenge-portrait",
+        size: [390, 844],
+        action: Action::Scavenge,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d7-scavenge-partial-portrait",
+        size: [320, 640],
+        action: Action::ScavengeOne,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d8-scavenge-small-landscape",
+        size: [800, 360],
+        action: Action::None,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d9-scavenge-empty-portrait",
+        size: [390, 844],
+        action: Action::ScavengeAll,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d10-shop-depleted-landscape",
+        size: [1280, 720],
+        action: Action::ShopDepleted,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d11-home-interior-portrait",
+        size: [390, 844],
+        action: Action::HomeInterior,
         flow: ExpectedFlow::Playing,
     },
     Stage {
@@ -276,6 +352,9 @@ struct Checkpoint {
     game_min: f32,
     map: crate::worldmap::MapProgress,
     closed_doors: Vec<u32>,
+    barricaded_doors: Vec<u32>,
+    loot: Vec<(String, Stash)>,
+    fixtures_version: u8,
 }
 
 #[derive(Resource)]
@@ -288,7 +367,12 @@ struct QaRun {
     ready_frames: u32,
     scene_chunk: Option<crate::map::ChunkKey>,
     entrance_building: Option<u32>,
+    interior_building: Option<u32>,
     door_test_id: Option<u32>,
+    barricade_planks: Option<u32>,
+    loot_fixture: Option<String>,
+    loot_expected: Option<Stash>,
+    loot_inventory: Option<Inventory>,
     waiting_capture: bool,
     captured: bool,
     checkpoint: Option<Checkpoint>,
@@ -323,7 +407,12 @@ impl Plugin for QaPlugin {
             ready_frames: 0,
             scene_chunk: None,
             entrance_building: None,
+            interior_building: None,
             door_test_id: None,
+            barricade_planks: None,
+            loot_fixture: None,
+            loot_expected: None,
+            loot_inventory: None,
             waiting_capture: false,
             captured: false,
             checkpoint: None,
@@ -405,6 +494,7 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     run.ready_frames = 0;
     run.scene_chunk = None;
     run.entrance_building = None;
+    run.interior_building = None;
     println!("DTQA entering {}", stage.name);
     match stage.action {
         Action::None => {}
@@ -485,6 +575,168 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world.write_message(crate::worldplay::WorldAction::Interact);
             run.scene_chunk = Some(crate::map::ChunkKey::of(building.c));
             run.entrance_building = Some(id);
+        }
+        Action::Barricade | Action::Unbarricade | Action::BarricadeInventory => {
+            let id = run.door_test_id.ok_or("Missing barricade entrance")?;
+            let building = &crate::map::world().blds[id as usize];
+            let door = building.door.ok_or("Missing barricade door")?;
+            move_view(world, door.p + door.n * 1.5, 2.4)?;
+            if matches!(stage.action, Action::Barricade) {
+                let mut bag = world.resource_mut::<Inventory>();
+                if bag.count("hammer") == 0 {
+                    bag.add("hammer", 1);
+                }
+                bag.add("plank", 2);
+                run.barricade_planks = Some(bag.count("plank"));
+                run.report.assertions.push("Barricade QA adds an explicit hammer / two-plank fixture, then exercises actual WorldAction handlers".into());
+            }
+            world.write_message(crate::worldplay::WorldAction::Barricade);
+            if matches!(stage.action, Action::BarricadeInventory) {
+                world.write_message(OpenPanel(PanelKind::Inventory));
+            }
+        }
+        Action::BarricadeBlocked => {
+            world.write_message(crate::worldplay::WorldAction::Interact);
+        }
+        Action::ShopInterior => {
+            world.write_message(OpenPanel(PanelKind::Close));
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            world.resource_mut::<Campaign>().notice_t = 0.0;
+            let data = crate::map::world();
+            let minute = world.resource::<Campaign>().game_min;
+            let progress = world.resource::<crate::worldplay::ScavengeState>();
+            let fixture = data
+                .interiors
+                .iter()
+                .filter(|f| f.kind == crate::map::interiors::FixtureKind::Shelf)
+                .filter(|f| {
+                    data.interiors
+                        .iter()
+                        .filter(|other| other.building == f.building)
+                        .count()
+                        >= 4
+                })
+                .filter(|f| {
+                    data.blds[f.building as usize]
+                        .door
+                        .is_some_and(|d| d.p.distance(f.approach) > 3.2)
+                })
+                .filter(|f| {
+                    let stock = crate::worldplay::preview_container_loot(
+                        &f.id,
+                        f.loot.unwrap(),
+                        minute,
+                        progress,
+                    );
+                    stock.stacks().len() >= 2
+                        && stock.stacks().iter().map(|(_, n)| *n).sum::<u32>() >= 3
+                        && stock
+                            .stacks()
+                            .iter()
+                            .map(|(id, n)| crate::inventory::item(id).unwrap().weight * *n as f32)
+                            .sum::<f32>()
+                            < 6.0
+                })
+                .min_by(|a, b| {
+                    a.approach
+                        .distance_squared(data.spawn)
+                        .total_cmp(&b.approach.distance_squared(data.spawn))
+                })
+                .cloned()
+                .ok_or("No reachable furnished shop with a small multi-item shelf")?;
+            let stock = crate::worldplay::preview_container_loot(
+                &fixture.id,
+                fixture.loot.unwrap(),
+                minute,
+                progress,
+            );
+            run.loot_expected = Some(stock);
+            run.loot_inventory = Some(world.resource::<Inventory>().clone());
+            run.loot_fixture = Some(fixture.id.clone());
+            run.interior_building = Some(fixture.building);
+            move_view(world, fixture.approach, 3.2)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(fixture.approach));
+            run.report.assertions.push(format!("Shop fixture {} at ({:.3}, {:.3}) uses deterministic real stock and shared furniture collision", fixture.id, fixture.approach.x, fixture.approach.y));
+        }
+        Action::Scavenge => {
+            world.write_message(crate::worldplay::WorldAction::Interact);
+        }
+        Action::ScavengeOne | Action::ScavengeAll => {
+            let id = run.loot_fixture.clone().ok_or("Missing shop fixture")?;
+            let stock = run.loot_expected.as_mut().ok_or("Missing expected stock")?;
+            let bag = run
+                .loot_inventory
+                .as_mut()
+                .ok_or("Missing expected inventory")?;
+            let take = if matches!(stage.action, Action::ScavengeOne) {
+                let item = stock
+                    .stacks()
+                    .first()
+                    .ok_or("Shelf already empty")?
+                    .0
+                    .clone();
+                if crate::worldplay::pickable_count(bag, &item, 1) != 1 {
+                    return Err("QA bag has no room for one shelf item".into());
+                }
+                stock.take(&item, 1);
+                stock.remove_empty();
+                bag.add(&item, 1);
+                crate::worldplay::LootTake::One(item)
+            } else {
+                for (item, count) in stock.stacks() {
+                    if crate::worldplay::pickable_count(bag, item, *count) != *count {
+                        return Err(
+                            "QA bag has insufficient capacity for the small shelf fixture".into(),
+                        );
+                    }
+                    bag.add(item, *count);
+                }
+                *stock = Stash::default();
+                crate::worldplay::LootTake::All
+            };
+            world.write_message(crate::worldplay::WorldAction::TakeLoot {
+                container: id,
+                take,
+            });
+        }
+        Action::ShopDepleted => {
+            world.write_message(OpenPanel(PanelKind::Close));
+        }
+        Action::HomeInterior => {
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            world.resource_mut::<Campaign>().notice_t = 0.0;
+            let data = crate::map::world();
+            let fixture = data
+                .interiors
+                .iter()
+                .filter(|f| f.kind == crate::map::interiors::FixtureKind::Altar)
+                .filter(|f| f.front.dot(crate::camera::CAM_OFFSET.xz().normalize()) > 0.3)
+                .filter(|f| {
+                    data.interiors
+                        .iter()
+                        .filter(|other| other.building == f.building)
+                        .count()
+                        >= 5
+                })
+                .min_by(|a, b| {
+                    a.approach
+                        .distance_squared(data.spawn)
+                        .total_cmp(&b.approach.distance_squared(data.spawn))
+                })
+                .ok_or("No furnished home with a family shrine")?;
+            move_view(world, fixture.approach, 2.8)?;
+            run.interior_building = Some(fixture.building);
+            run.scene_chunk = Some(crate::map::ChunkKey::of(fixture.approach));
+            run.report.assertions.push(format!(
+                "Home interior capture uses building {} with collision-clear furniture approaches",
+                fixture.building
+            ));
         }
         Action::Map => {
             let p = player_position(world)?.xz();
@@ -580,6 +832,17 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                     .resource::<crate::worldplay::ScavengeState>()
                     .closed_doors
                     .clone(),
+                barricaded_doors: world
+                    .resource::<crate::worldplay::ScavengeState>()
+                    .barricaded_doors
+                    .clone(),
+                loot: world
+                    .resource::<crate::worldplay::ScavengeState>()
+                    .loot
+                    .clone(),
+                fixtures_version: world
+                    .resource::<crate::worldplay::ScavengeState>()
+                    .fixtures_version,
             });
             world.write_message(OpenPanel(PanelKind::Close));
             world.write_message(SaveAndMenu);
@@ -700,9 +963,18 @@ fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> 
     {
         return Err("Continue changed closed door state".into());
     }
+    let progress = world.resource::<crate::worldplay::ScavengeState>();
+    if progress.barricaded_doors != checkpoint.barricaded_doors
+        || progress.loot != checkpoint.loot
+        || progress.fixtures_version != checkpoint.fixtures_version
+    {
+        return Err(
+            "Continue lost barricades, shelf leftovers or fixture migration version".into(),
+        );
+    }
     run.report
         .assertions
-        .push("Continue preserved day, stockpile, inventory, survivor, position, clock, map notes/exploration and closed doors".into());
+        .push("Continue preserved day, stockpile, inventory, survivor, position, clock, map notes/exploration, closed/barricaded doors and exact shelf leftovers".into());
     run.continuation_checked = true;
     Ok(())
 }
@@ -833,7 +1105,13 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     }
     if matches!(
         stage.action,
-        Action::Street | Action::Entrance | Action::DoorOpen | Action::DoorClose | Action::Rain
+        Action::Street
+            | Action::Entrance
+            | Action::DoorOpen
+            | Action::DoorClose
+            | Action::Rain
+            | Action::ShopInterior
+            | Action::HomeInterior
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -857,7 +1135,13 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                     .iter(world)
                     .any(|(detail, visibility)| detail.0 == id && *visibility != Visibility::Hidden)
         });
-        if !chunks_ready || !detail_ready {
+        let interior_ready = run.interior_building.is_none_or(|id| {
+            world
+                .query::<&crate::map::interiors::InteriorView>()
+                .iter(world)
+                .any(|room| room.building == id)
+        });
+        if !chunks_ready || !detail_ready || !interior_ready {
             run.ready_frames = 0;
             return Ok(());
         }
@@ -888,6 +1172,66 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         }
         run.report.assertions.push(format!(
             "Real Interact set door {id} open={open}; collision and streamed leaf match"
+        ));
+    }
+    if matches!(
+        stage.action,
+        Action::Barricade
+            | Action::BarricadeBlocked
+            | Action::Unbarricade
+            | Action::BarricadeInventory
+    ) {
+        let id = run.door_test_id.ok_or("Missing barricade check")?;
+        let expected = !matches!(stage.action, Action::Unbarricade);
+        let obstacles = world.resource::<crate::map::Obstacles>();
+        let door = crate::map::world().blds[id as usize].door.unwrap();
+        let base = run.barricade_planks.ok_or("Missing plank baseline")?;
+        if obstacles.doors().is_barricaded(id) != expected
+            || obstacles.doors().is_open(id)
+            || !obstacles.blocked(door.p, PLAYER_RADIUS)
+            || world.resource::<Inventory>().count("plank") != base - u32::from(expected)
+            || world.resource::<Inventory>().count("hammer") == 0
+        {
+            return Err(format!(
+                "Barricade action failed collision or material conservation at {id}: expected barricaded={expected}"
+            ));
+        }
+        run.report.assertions.push(format!("{}: door {id} barricaded={expected}, cannot open while boarded, plank count conserved and hammer retained", stage.name));
+    }
+    if matches!(
+        stage.action,
+        Action::Scavenge | Action::ScavengeOne | Action::ScavengeAll | Action::ShopDepleted
+    ) {
+        let id = run.loot_fixture.as_ref().ok_or("Missing shelf check")?;
+        let stock = world
+            .resource::<crate::worldplay::ScavengeState>()
+            .loot
+            .iter()
+            .find(|(key, _)| key == id)
+            .map(|(_, stock)| stock);
+        if stock != run.loot_expected.as_ref()
+            || Some(world.resource::<Inventory>()) != run.loot_inventory.as_ref()
+        {
+            return Err(format!(
+                "Selective loot did not conserve exact shelf and bag contents during {}",
+                stage.name
+            ));
+        }
+        if !matches!(stage.action, Action::ShopDepleted) {
+            let session = world.resource::<crate::worldplay::ScavengeSession>();
+            if !session.reachable
+                || session
+                    .target
+                    .as_ref()
+                    .is_none_or(|target| &target.id != id)
+                || !world.resource::<crate::ui::UiModal>().open
+            {
+                return Err("Selective loot panel is not attached to its reachable fixture".into());
+            }
+        }
+        run.report.assertions.push(format!(
+            "{}: exact shelf/bag conservation verified for {id}",
+            stage.name
         ));
     }
     if matches!(stage.action, Action::Map) {

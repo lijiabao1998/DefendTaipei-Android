@@ -196,6 +196,10 @@ pub struct WorldData {
     pub max: Vec2,
     pub spawn: Vec2,
     pub props: Vec<super::street::Prop>,
+    /// Deterministic ground-floor furniture, shared by rendering and scavenging.
+    pub interiors: Vec<super::interiors::Fixture>,
+    /// Furniture is appended last and never ignored by the own-cover shot rule.
+    pub(crate) interior_seg_start: usize,
 }
 
 const BG: f32 = 16.0;
@@ -263,6 +267,8 @@ impl WorldData {
             max: Vec2::ZERO,
             spawn: Vec2::ZERO,
             props: Vec::new(),
+            interiors: Vec::new(),
+            interior_seg_start: usize::MAX,
         };
         for (ri, r) in w.roads.iter().enumerate() {
             let hw = r.w / 2.0;
@@ -315,6 +321,7 @@ impl WorldData {
         w.plan_buildings(src);
         w.pick_spawn();
         w.props = w.plan_props();
+        super::interiors::install(&mut w);
         w
     }
 

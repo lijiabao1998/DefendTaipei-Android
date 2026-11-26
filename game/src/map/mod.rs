@@ -16,6 +16,7 @@ pub mod collide;
 pub mod data;
 pub mod detail;
 pub mod evac;
+pub mod interiors;
 pub mod street;
 pub mod textures;
 
@@ -278,7 +279,8 @@ pub struct MapPlugin;
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
         let w = world().clone();
-        app.insert_resource(Obstacles::new(w.clone()))
+        app.add_plugins(interiors::InteriorPlugin)
+            .insert_resource(Obstacles::new(w.clone()))
             .init_resource::<MapStreaming>()
             .init_resource::<MapReady>()
             .init_resource::<Streamer>()

@@ -44,7 +44,10 @@ fn pinch_zoom(
     if let Some(previous) = pinch.previous
         && previous > 1.0
     {
-        zoom.0 = (zoom.0 * distance / previous).clamp(0.5, 2.2);
+        zoom.0 = (zoom.0 * distance / previous).clamp(
+            *crate::camera::ZOOM_RANGE.start(),
+            *crate::camera::ZOOM_RANGE.end(),
+        );
     }
     pinch.previous = Some(distance);
 }

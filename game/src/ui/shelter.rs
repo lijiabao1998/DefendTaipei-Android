@@ -14,7 +14,10 @@ use crate::player::Player;
 use crate::save::{SaveGame, SaveStatus};
 use crate::story::TIMELINE;
 use crate::survival::{MoralChoice, Shelter, TRADE_ITEMS, TRADE_SPOTS, Upgrade, trade_at};
-use crate::worldplay::{InteractionHint, MoralPrompt, PlayerNeeds, WorldAction, WorldNotice};
+use crate::worldplay::{
+    InteractionHint, LootTake, MoralPrompt, PlayerNeeds, ScavengeSession, ScavengeState,
+    WorldAction, WorldNotice,
+};
 
 use super::{ConsumedPresses, PauseOpen, StateScoped, TogglePause};
 
@@ -32,6 +35,7 @@ pub enum PanelKind {
     Shelter,
     Trade,
     Journal,
+    Scavenge,
     Close,
 }
 
@@ -45,12 +49,13 @@ impl UiModal {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum View {
+pub(super) enum View {
     Inventory,
     Shelter,
     Trade,
     Journal,
     Moral,
+    Scavenge,
 }
 
 #[derive(Resource, Default)]
@@ -63,7 +68,7 @@ pub(super) struct PanelState {
 pub(super) struct SurvivalUiRoot;
 
 #[derive(Clone, Debug, PartialEq)]
-enum Action {
+pub(super) enum Action {
     Open(View),
     Close,
     Page(usize),
@@ -80,10 +85,12 @@ enum Action {
     Save,
     Pause,
     Moral(MoralChoice),
+    Loot(LootTake),
+    Barricade,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Tone {
+pub(super) enum Tone {
     #[default]
     Normal,
     Heading,
@@ -93,24 +100,24 @@ enum Tone {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct Widget {
-    rect: ScreenRect,
-    text: String,
-    action: Option<Action>,
-    enabled: bool,
+pub(super) struct Widget {
+    pub(super) rect: ScreenRect,
+    pub(super) text: String,
+    pub(super) action: Option<Action>,
+    pub(super) enabled: bool,
     font_size: f32,
     tone: Tone,
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
-struct Frame {
-    panel: Option<ScreenRect>,
-    widgets: Vec<Widget>,
-    cards: Vec<(ScreenRect, bool)>,
+pub(super) struct Frame {
+    pub(super) panel: Option<ScreenRect>,
+    pub(super) widgets: Vec<Widget>,
+    pub(super) cards: Vec<(ScreenRect, bool)>,
 }
 
 impl Frame {
-    fn text(&mut self, rect: ScreenRect, text: String, font_size: f32) {
+    pub(super) fn text(&mut self, rect: ScreenRect, text: String, font_size: f32) {
         self.widgets.push(Widget {
             rect,
             text,
@@ -121,7 +128,7 @@ impl Frame {
         });
     }
 
-    fn button(&mut self, rect: ScreenRect, text: String, action: Action, enabled: bool) {
+    pub(super) fn button(&mut self, rect: ScreenRect, text: String, action: Action, enabled: bool) {
         self.widgets.push(Widget {
             rect,
             text,
@@ -132,7 +139,7 @@ impl Frame {
         });
     }
 
-    fn tone(&mut self, tone: Tone) {
+    pub(super) fn tone(&mut self, tone: Tone) {
         if let Some(widget) = self.widgets.last_mut() {
             widget.tone = tone;
         }
@@ -195,7 +202,7 @@ pub(super) fn toolbar_hit(viewport: Vec2, point: Vec2) -> bool {
         .any(|rect| rect.contains(point))
 }
 
-fn panel_rect(viewport: Vec2) -> ScreenRect {
+pub(super) fn panel_rect(viewport: Vec2) -> ScreenRect {
     let insets = safe_insets(viewport);
     let width = (viewport.x - insets.left - insets.right).clamp(1.0, 900.0);
     ScreenRect::new(
@@ -218,7 +225,7 @@ fn item_name(id: &str, lang: Language) -> &str {
     item(id).map_or(id, |definition| definition.name(lang))
 }
 
-fn item_category(kind: ItemKind, lang: Language) -> &'static str {
+pub(super) fn item_category(kind: ItemKind, lang: Language) -> &'static str {
     match kind {
         ItemKind::Food => tr(lang, "食物", "Food"),
         ItemKind::Drink => tr(lang, "飲水", "Drink"),
@@ -358,7 +365,12 @@ fn widget_colors(widget: &Widget, panel: bool) -> (Color, Color, Color) {
     (bg, Color::NONE, text)
 }
 
-fn inventory_rows(inventory: &Inventory, campaign: &Campaign, lang: Language) -> Vec<Row> {
+fn inventory_rows(
+    inventory: &Inventory,
+    campaign: &Campaign,
+    lang: Language,
+    door: Option<bool>,
+) -> Vec<Row> {
     let mut rows = vec![Row::action(
         tr(
             lang,
@@ -373,6 +385,34 @@ fn inventory_rows(inventory: &Inventory, campaign: &Campaign, lang: Language) ->
         Action::Sleep,
         true,
     )];
+    if let Some(barricaded) = door {
+        rows.push(Row::action(
+            tr(
+                lang,
+                if barricaded {
+                    "附近入口已封住。拆除可取回一塊木板。"
+                } else {
+                    "封住附近入口：需要槌子與木板 ×1，敲打會引起注意。"
+                },
+                if barricaded {
+                    "Nearby entrance is barricaded. Remove it to recover one plank."
+                } else {
+                    "Barricade nearby entrance: needs a hammer and 1 plank. Hammering makes noise."
+                },
+            ),
+            tr(
+                lang,
+                if barricaded {
+                    "拆木板 B"
+                } else {
+                    "封門 B"
+                },
+                if barricaded { "Remove B" } else { "Board B" },
+            ),
+            Action::Barricade,
+            barricaded || (inventory.count("hammer") > 0 && inventory.count("plank") > 0),
+        ));
+    }
     rows.push(Row {
         text: tr(lang, "時間速度", "Time speed").to_owned(),
         item_kind: None,
@@ -685,7 +725,14 @@ fn view_name(view: View, lang: Language) -> &'static str {
         View::Trade => tr(lang, "交易", "Barter"),
         View::Journal => tr(lang, "日誌", "Journal"),
         View::Moral => tr(lang, "門後的人", "Behind the door"),
+        View::Scavenge => tr(lang, "搜刮", "Scavenge"),
     }
+}
+
+#[derive(Default)]
+struct PanelExtras<'a> {
+    loot: Option<(&'a ScavengeSession, &'a ScavengeState)>,
+    door: Option<bool>,
 }
 
 fn make_frame(
@@ -699,7 +746,19 @@ fn make_frame(
     lang: Language,
     notice: &WorldNotice,
     save: &SaveStatus,
+    extras: PanelExtras,
 ) -> Frame {
+    if state.view == Some(View::Scavenge) {
+        return super::scavenge::make_frame(
+            viewport,
+            state.page,
+            extras.loot,
+            inventory,
+            lang,
+            notice,
+            save,
+        );
+    }
     let mut frame = Frame::default();
     let toolbar = toolbar_rects(viewport);
     let Some(view) = state.view else {
@@ -831,7 +890,7 @@ fn make_frame(
             "Received broadcasts and daily records. The world keeps running while this panel is open.",
         )
         .to_string(),
-        View::Moral => String::new(),
+        View::Moral | View::Scavenge => String::new(),
     };
     if !summary.is_empty() {
         frame.text(ScreenRect::new(x, y, width, 44.0), summary, 14.0);
@@ -842,11 +901,12 @@ fn make_frame(
     let status_y = footer_y - 42.0;
     let available_h = (status_y - y - 4.0).max(42.0);
     let rows = match view {
-        View::Inventory => inventory_rows(inventory, campaign, lang),
+        View::Inventory => inventory_rows(inventory, campaign, lang, extras.door),
         View::Shelter => shelter_rows(shelter, inventory, pos, lang),
         View::Trade => trade_rows(shelter, inventory, pos, lang),
         View::Moral => moral_rows(inventory, lang),
         View::Journal => journal_rows(campaign, shelter, lang),
+        View::Scavenge => Vec::new(),
     };
     let pages = pages(rows, width, available_h);
     let page = state.page.min(pages.len() - 1);
@@ -962,6 +1022,9 @@ pub(super) struct PanelWorld<'w, 's> {
     save_status: Res<'w, SaveStatus>,
     hint: Option<Res<'w, InteractionHint>>,
     geometry: Option<Res<'w, crate::hud::HudGeometry>>,
+    scavenge: ResMut<'w, ScavengeSession>,
+    progress: Option<Res<'w, ScavengeState>>,
+    obstacles: Option<Res<'w, crate::map::Obstacles>>,
 }
 
 pub(super) fn drive_panels(
@@ -991,16 +1054,21 @@ pub(super) fn drive_panels(
         save_status,
         hint,
         geometry,
+        mut scavenge,
+        progress,
+        obstacles,
     } = world;
     let previous_view = state.view;
     if flow.get() != &GameFlow::Playing || pause.0 {
         state.view = None;
+        scavenge.target = None;
         modal.open = false;
         opens.clear();
         return;
     }
     if map.as_ref().is_some_and(|m| m.0) && opens.is_empty() {
         state.view = None;
+        scavenge.target = None;
         modal.open = true;
         return;
     }
@@ -1010,6 +1078,7 @@ pub(super) fn drive_panels(
             PanelKind::Shelter => Some(View::Shelter),
             PanelKind::Trade => Some(View::Trade),
             PanelKind::Journal => Some(View::Journal),
+            PanelKind::Scavenge => scavenge.target.as_ref().map(|_| View::Scavenge),
             PanelKind::Close => None,
         };
         state.page = 0;
@@ -1037,6 +1106,13 @@ pub(super) fn drive_panels(
         *lang,
         &notice,
         &save_status,
+        PanelExtras {
+            loot: progress.as_deref().map(|progress| (&*scavenge, progress)),
+            door: obstacles.as_deref().and_then(|obstacles| {
+                crate::doors::nearest_door(Vec2::from_array(pos), obstacles)
+                    .map(|door| obstacles.doors().is_barricaded(door.id))
+            }),
+        },
     );
     apply_interaction_label(&mut frame, hint.as_deref());
     let mut action = consumed.points.iter().find_map(|point| {
@@ -1145,7 +1221,21 @@ pub(super) fn drive_panels(
             world_actions.write(WorldAction::Moral(choice));
             state.view = None;
         }
+        Some(Action::Loot(take)) => {
+            if let Some(target) = &scavenge.target {
+                world_actions.write(WorldAction::TakeLoot {
+                    container: target.id.clone(),
+                    take,
+                });
+            }
+        }
+        Some(Action::Barricade) => {
+            world_actions.write(WorldAction::Barricade);
+        }
         None => {}
+    }
+    if state.view != Some(View::Scavenge) {
+        scavenge.target = None;
     }
     modal.open = state.view.is_some();
     if previous_view != state.view {
@@ -1165,6 +1255,9 @@ pub(super) struct PanelRenderWorld<'w> {
     font: Res<'w, UiFont>,
     map: Option<Res<'w, crate::worldmap::MapOpen>>,
     hint: Option<Res<'w, InteractionHint>>,
+    scavenge: Res<'w, ScavengeSession>,
+    progress: Option<Res<'w, ScavengeState>>,
+    obstacles: Option<Res<'w, crate::map::Obstacles>>,
 }
 
 pub(super) fn render_panels(
@@ -1189,6 +1282,9 @@ pub(super) fn render_panels(
         font,
         map,
         hint,
+        scavenge,
+        progress,
+        obstacles,
     } = world;
     let mut frame =
         if flow.get() == &GameFlow::Playing && !pause.0 && !map.as_ref().is_some_and(|m| m.0) {
@@ -1208,6 +1304,13 @@ pub(super) fn render_panels(
                 *lang,
                 &notice,
                 &save,
+                PanelExtras {
+                    loot: progress.as_deref().map(|progress| (&*scavenge, progress)),
+                    door: obstacles.as_deref().and_then(|obstacles| {
+                        crate::doors::nearest_door(Vec2::from_array(position(&player)), obstacles)
+                            .map(|door| obstacles.doors().is_barricaded(door.id))
+                    }),
+                },
             )
         } else {
             Frame::default()
@@ -1405,6 +1508,7 @@ mod tests {
                             lang,
                             &notice,
                             &save,
+                            PanelExtras::default(),
                         );
                         let actions: Vec<_> = frame
                             .widgets
@@ -1440,6 +1544,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .insert_state(GameFlow::Playing)
             .init_resource::<PauseOpen>()
+            .init_resource::<ScavengeSession>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ConsumedPresses>()
             .init_resource::<UiModal>()
@@ -1482,6 +1587,7 @@ mod tests {
             Language::ZhTw,
             world.resource::<WorldNotice>(),
             world.resource::<SaveStatus>(),
+            PanelExtras::default(),
         );
         let point = frame
             .widgets
@@ -1538,7 +1644,7 @@ mod tests {
         let mut inventory = Inventory::from_role(&crate::roles::ROLES[0]);
         inventory.add("knife", 1);
         inventory.equipped = "knife".to_owned();
-        let rows = inventory_rows(&inventory, &Campaign::default(), Language::En);
+        let rows = inventory_rows(&inventory, &Campaign::default(), Language::En, None);
         let weapon = rows.iter().find(|row| row.equipped).unwrap();
         assert_eq!(weapon.item_kind, Some(ItemKind::Melee));
         assert!(weapon.text.contains("Equipped"));
@@ -1555,5 +1661,44 @@ mod tests {
         );
         assert_eq!(frame.widgets[0].text, "Open door E");
         assert_eq!(frame.action_at(rect.center()), Some(Action::Interact));
+    }
+
+    #[test]
+    fn android_barricade_smoke_point_hits_the_live_inventory_action() {
+        let mut inventory = Inventory::default();
+        inventory.add("hammer", 1);
+        inventory.add("plank", 2);
+        for barricaded in [false, true] {
+            let frame = make_frame(
+                Vec2::new(390.0, 844.0),
+                &PanelState {
+                    view: Some(View::Inventory),
+                    page: 0,
+                },
+                &Shelter::default(),
+                &inventory,
+                &Campaign::default(),
+                &PlayerNeeds::default(),
+                [0.0, 0.0],
+                Language::ZhTw,
+                &WorldNotice::default(),
+                &SaveStatus::default(),
+                PanelExtras {
+                    door: Some(barricaded),
+                    ..default()
+                },
+            );
+            let button = frame
+                .widgets
+                .iter()
+                .find(|widget| widget.action == Some(Action::Barricade))
+                .unwrap();
+            println!("barricade {barricaded}: {:?}", button.rect.center());
+            assert!(button.rect.contains(Vec2::new(323.0, 279.0)));
+            assert_eq!(
+                frame.action_at(Vec2::new(323.0, 279.0)),
+                Some(Action::Barricade)
+            );
+        }
     }
 }

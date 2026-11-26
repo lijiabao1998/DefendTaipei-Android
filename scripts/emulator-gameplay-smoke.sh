@@ -52,8 +52,7 @@ PY
 }
 
 tap() {
-  # Keep the press across a software-rendered frame, so down/up cannot both be
-  # missed between two updates on a slow CI emulator.
+  # Exercise held presses as well as the short taps used by the map below.
   adb shell input swipe "$1" "$2" "$1" "$2" 1000
   sleep 1
 }
@@ -106,7 +105,7 @@ wait_log() {
 }
 
 tap_wait() {
-  local x="$1" y="$2" pattern="$3" flow="${4:-}" wanted flow_wanted=0
+  local x="$1" y="$2" pattern="$3" flow="${4:-}" mode="${5:-held}" wanted flow_wanted=0
   alive || return 1
   refresh_log || return 1
   # Take both baselines before input: the app may process it during the swipe.
@@ -114,7 +113,11 @@ tap_wait() {
   if [[ -n "$flow" ]]; then
     flow_wanted=$(( $(log_count "$flow") + 1 ))
   fi
-  tap "$x" "$y"
+  if [[ "$mode" == "quick" ]]; then
+    adb shell input tap "$x" "$y"
+  else
+    tap "$x" "$y"
+  fi
   wait_log "$pattern" "$wanted" || return 1
   if [[ -n "$flow" ]]; then
     wait_log "$flow" "$flow_wanted" 90
@@ -183,13 +186,14 @@ capture 02-prologue-portrait 390 844
 tap_wait 195 328 'DTUI action=Skip$' 'DTUI flow=Playing '
 capture 03-playing-portrait 390 844
 
-# The map tool creates a note only when the finger is released. tap_wait takes
-# its log baseline before the one-second press and waits after the matching UP.
+# The map tool creates a note only when the finger is released. A regular short
+# Android tap deliberately permits DOWN/UP to arrive in the same slow frame;
+# ordered raw touch handling must preserve it without retries or longer holds.
 # Reopening while Supplies remains selected catches the held-button regression:
 # the opening finger must never become an annotation on the paper beneath it.
 tap_wait 334 576 'DTMAP open=true$'
-tap 104 719
-tap_wait 220 350 'DTMAP notes=1$'
+tap_wait 104 719 'DTMAP tool=Mark\(Supplies\)$' '' quick
+tap_wait 220 350 'DTMAP notes=1$' '' quick
 tap_wait 342 65 'DTMAP open=false$'
 tap_wait 334 576 'DTMAP open=true$'
 capture 03a-map-supply-portrait 390 844
@@ -306,10 +310,12 @@ refresh_log
 [[ "$(log_count 'DTMAP notes=')" == 1 ]]
 [[ "$(log_count 'DTMAP notes=1$')" == 1 ]]
 
+source "$(dirname "${BASH_SOURCE[0]}")/emulator-interiors-smoke.sh"
+
 adb logcat -d >"$OUT_DIR/logcat.txt"
 if grep -En 'panicked at|FATAL EXCEPTION|Fatal signal|AM crashed:|Native crash|error\[B000' "$OUT_DIR/logcat.txt"; then
   echo "Runtime crash signature found" >&2
   exit 1
 fi
-grep -E 'DTUI|DTMAP|DTPERF' "$OUT_DIR/logcat.txt" >"$OUT_DIR/events.txt"
-printf '%s\n' 'Android gameplay smoke passed: touch panels, map marking, held-pointer capture, persistence and orientation.'
+grep -E 'DTUI|DTMAP|DTLOOT|DTDOOR|DTPERF' "$OUT_DIR/logcat.txt" >"$OUT_DIR/events.txt"
+printf '%s\n' 'Android gameplay smoke passed: touch panels, short map taps, stock and barricade conservation, cold Continue and orientation.'
