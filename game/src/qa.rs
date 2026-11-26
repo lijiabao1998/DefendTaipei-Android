@@ -87,6 +87,8 @@ enum Action {
     Rescue,
     /// v24.20 / v24.21 a thrown grenade, a mortar barrage and an incoming rocket.
     War,
+    /// v22.5 a rooftop sniper locking on in the open.
+    Sniper,
     Shelter,
     Inventory,
     Trade,
@@ -373,6 +375,12 @@ const STAGES: &[Stage] = &[
         name: "04q-war-landscape",
         size: [1280, 720],
         action: Action::War,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04r-sniper-landscape",
+        size: [1280, 720],
+        action: Action::Sniper,
         flow: ExpectedFlow::Playing,
     },
     Stage {
@@ -1118,6 +1126,34 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             });
             move_view(world, p, 0.7)?;
         }
+        Action::Sniper => {
+            crate::war::clear_sky(world);
+            crate::upstairs::force_ground(world);
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            world.resource_mut::<crate::combat::GameState>().hp = 100.0;
+            // stand at a junction a living sniper can see (day 2 morning)
+            let posts = world.resource::<crate::sniper::Posts>().0.clone();
+            let dead = world.resource::<crate::sniper::SniperState>().dead.clone();
+            let obstacles = world.resource::<crate::map::Obstacles>().clone();
+            let spot = posts
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !dead.contains(&(*i as u8)))
+                .flat_map(|(_, p)| {
+                    (0..8)
+                        .map(move |k| {
+                            p.j + Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_4) * 6.0
+                        })
+                        .chain(std::iter::once(p.j))
+                        .map(move |q| (p.clone(), q))
+                })
+                .find(|(p, q)| crate::sniper::sees(p, *q, false, &obstacles))
+                .ok_or("No junction in a sniper's sight")?;
+            move_view(world, spot.1, 1.0)?;
+        }
         Action::Airdrop => {
             // The liaison's first meeting hands over the radio and two batteries.
             world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Liaison));
@@ -1372,7 +1408,7 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // Fifty-four captures include performance controls and scaled 3D rendering, with room for
+    // Fifty-five captures include performance controls and scaled 3D rendering, with room for
     // software Vulkan runner variance without removing any existing stage.
     // CI keeps the 25-minute bound; a slower local software renderer can extend it.
     let deadline = std::env::var("DEFEND_TAIPEI_QA_DEADLINE_SECS")
@@ -1704,6 +1740,15 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         run.report.assertions.push(format!(
             "War: a real Use threw a grenade from the bag; {} mortar rounds and a rocket fall under red rings ({pending} still in the air), war level {:.2}",
             stats.shells, stats.level
+        ));
+    }
+    if matches!(stage.action, Action::Sniper) {
+        let Some(i) = world.resource::<crate::sniper::SniperLock>().0 else {
+            return Ok(());
+        };
+        let name = world.resource::<crate::sniper::Posts>().0[i].name.clone();
+        run.report.assertions.push(format!(
+            "Sniper over {name} locked on the player in the open by day (glint and laser before the shot)"
         ));
     }
     if matches!(stage.action, Action::Airdrop) {

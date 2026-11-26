@@ -25,6 +25,8 @@ pub enum NpcKey {
     StairsUp,
     /// v23.4 a stairwell: go down one floor.
     StairsDown,
+    /// v22.5 the door of a sniper's building: climb up and overpower him.
+    Sniper(u8),
 }
 
 /// What an option does; the owning system interprets it.

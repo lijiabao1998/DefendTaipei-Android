@@ -36,6 +36,7 @@ pub mod roles;
 pub mod save;
 pub mod sectors;
 pub mod settings;
+pub mod sniper;
 mod story;
 pub mod survival;
 mod touch;
@@ -142,6 +143,7 @@ pub fn run() {
             upstairs::UpstairsPlugin,
             rescue::RescuePlugin,
             war::WarPlugin,
+            sniper::SniperPlugin,
         ));
     #[cfg(not(target_os = "android"))]
     if qa_mode {

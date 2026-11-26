@@ -101,6 +101,9 @@ struct SaveFile {
     /// v24.8 the day's call for help from upstairs.
     #[serde(default)]
     rescue: crate::rescue::RescueState,
+    /// v22.5 cleared sniper posts.
+    #[serde(default)]
+    snipers: crate::sniper::SniperState,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -259,6 +262,9 @@ impl SaveFile {
         }
         if !self.rescue.is_valid() {
             return Err(SaveError::Invalid("Invalid rescue state"));
+        }
+        if !self.snipers.is_valid() {
+            return Err(SaveError::Invalid("Invalid sniper state"));
         }
         let loot_ids: HashSet<&str> = world.loot.iter().map(|(id, _)| id.as_str()).collect();
         if [&world.searched, &world.asked, &world.night_seen]
@@ -580,6 +586,10 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
             .get_resource::<crate::rescue::RescueState>()
             .cloned()
             .unwrap_or_default(),
+        snipers: world
+            .get_resource::<crate::sniper::SniperState>()
+            .cloned()
+            .unwrap_or_default(),
     };
     save.validate()?;
     Ok(save)
@@ -658,6 +668,7 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     world.insert_resource(save.remnants);
     world.insert_resource(save.japan);
     world.insert_resource(save.rescue);
+    world.insert_resource(save.snipers);
     if let Some(mut input) = world.get_resource_mut::<MoveInput>() {
         *input = MoveInput::default();
     }
@@ -788,6 +799,7 @@ mod tests {
             remnants: crate::remnant::RemnantState::default(),
             japan: crate::japan::JapanState::default(),
             rescue: crate::rescue::RescueState::default(),
+            snipers: crate::sniper::SniperState::default(),
         }
     }
 
