@@ -5,6 +5,7 @@
 //! viewport inputs as a real window. Screenshots come from GPU readback, and a
 //! save/menu/continue cycle must preserve the live run before QA can succeed.
 
+use std::any::TypeId;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
@@ -48,6 +49,7 @@ enum Action {
     SettingsPerformanceLandscape,
     SettingsDiagnostics,
     PerformanceStreet,
+    Exterior(ExteriorScene),
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -78,6 +80,16 @@ enum Action {
     Trade,
     SaveMenu,
     Continue,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExteriorScene {
+    Townhouse,
+    Walkup,
+    Shophouse,
+    ServiceStair,
+    Rooftop,
+    Cutaway,
 }
 
 #[derive(Clone, Copy)]
@@ -284,6 +296,42 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "04d12-exterior-townhouse-landscape",
+        size: [1280, 720],
+        action: Action::Exterior(ExteriorScene::Townhouse),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d13-exterior-walkup-landscape",
+        size: [1280, 720],
+        action: Action::Exterior(ExteriorScene::Walkup),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d14-exterior-shophouse-landscape",
+        size: [1280, 720],
+        action: Action::Exterior(ExteriorScene::Shophouse),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d15-exterior-service-stair-landscape",
+        size: [1280, 720],
+        action: Action::Exterior(ExteriorScene::ServiceStair),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d16-exterior-rooftop-landscape",
+        size: [1280, 720],
+        action: Action::Exterior(ExteriorScene::Rooftop),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d17-exterior-cutaway-portrait",
+        size: [390, 844],
+        action: Action::Exterior(ExteriorScene::Cutaway),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "04e-survivor-map-portrait",
         size: [390, 844],
         action: Action::Map,
@@ -388,11 +436,69 @@ struct Capture {
     width: u32,
     height: u32,
     sampled_colors: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exterior: Option<ExteriorEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map_workload: Option<MapWorkload>,
+}
+
+/// Counts of map geometry retained at upload, with the real game camera's
+/// visibility list. Excludes characters, dynamic doors, interiors and UI.
+#[derive(Clone, Serialize)]
+struct MapWorkload {
+    measurement: &'static str,
+    resident_meshes: usize,
+    resident_vertices: usize,
+    main_view_meshes: usize,
+    main_view_vertices: usize,
+}
+
+/// Mutually exclusive uploaded groups. A persistent shell contains both the
+/// coarse facade and roof, merged by material; it is never counted as roof fittings.
+#[derive(Clone, Copy, Default, Serialize)]
+struct ExteriorMeshGroup {
+    meshes: usize,
+    vertices: usize,
+    in_main_view: usize,
+}
+
+/// The selected lot and actual renderer state travel with its GPU readback.
+/// Geometry counts describe workload, never measured device performance.
+#[derive(Clone, Serialize)]
+struct ExteriorEvidence {
+    building_id: u32,
+    typology: String,
+    scene: String,
+    player: [f32; 3],
+    camera: [f32; 3],
+    zoom: f32,
+    projected_bounds: [[f32; 2]; 2],
+    balconies: usize,
+    service_stair: bool,
+    rooftop_shacks: usize,
+    roof_access: bool,
+    persistent_shell: ExteriorMeshGroup,
+    facade_detail: ExteriorMeshGroup,
+    roof_fittings: ExteriorMeshGroup,
+    total_meshes: usize,
+    total_vertices: usize,
+    cutaway_hidden: bool,
+    streaming: crate::map::MapRenderStats,
+}
+
+#[derive(Clone, Copy)]
+struct ExteriorFixture {
+    building: u32,
+    position: Vec2,
+    zoom: f32,
+    scene: ExteriorScene,
 }
 
 #[derive(Serialize)]
 struct QaReport {
     success: bool,
+    scope: &'static str,
+    expected_captures: usize,
     renderer: String,
     captures: Vec<Capture>,
     assertions: Vec<String>,
@@ -416,14 +522,17 @@ struct Checkpoint {
 #[derive(Resource)]
 struct QaRun {
     output: PathBuf,
+    stages: Vec<usize>,
     target: Option<Handle<Image>>,
     stage: usize,
     entered: bool,
     frame: u32,
     ready_frames: u32,
+    wait_logged: Instant,
     scene_chunk: Option<crate::map::ChunkKey>,
     entrance_building: Option<u32>,
     interior_building: Option<u32>,
+    exterior: Option<ExteriorFixture>,
     door_test_id: Option<u32>,
     barricade_planks: Option<u32>,
     loot_fixture: Option<String>,
@@ -444,6 +553,8 @@ struct CaptureTicket {
     path: PathBuf,
     size: [u32; 2],
     settings_pixels: Option<SettingsPixels>,
+    exterior: Option<ExteriorEvidence>,
+    map_workload: Option<MapWorkload>,
 }
 
 struct SettingsPixels {
@@ -457,19 +568,50 @@ impl Plugin for QaPlugin {
     fn build(&self, app: &mut App) {
         let output = std::env::var_os("DEFEND_TAIPEI_QA_OUT")
             .map_or_else(|| PathBuf::from("qa-artifacts"), PathBuf::from);
+        // Developer iteration only. The normal CI requires scope=full and all53
+        // captures, so this subset cannot claim the save/continue regression gate.
+        let exterior_only =
+            std::env::var_os("DEFEND_TAIPEI_QA_EXTERIOR_ONLY").is_some_and(|value| value == "1");
+        let stages: Vec<_> = STAGES
+            .iter()
+            .enumerate()
+            .filter_map(|(index, stage)| {
+                (!exterior_only
+                    || index == 0
+                    || matches!(
+                        stage.action,
+                        Action::ChooseSurvivor
+                            | Action::ReviewDeparture
+                            | Action::Depart
+                            | Action::Skip
+                            | Action::Exterior(_)
+                    ))
+                .then_some(index)
+            })
+            .collect();
+        let scope = if exterior_only {
+            "exterior_subset"
+        } else {
+            "full"
+        };
+        let expected_captures = stages.len();
+        println!("DTQA scope={scope} expected_captures={expected_captures}");
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
             1.0 / 60.0,
         )))
         .insert_resource(QaRun {
             output,
+            stages,
             target: None,
             stage: 0,
             entered: false,
             frame: 0,
             ready_frames: 0,
+            wait_logged: Instant::now(),
             scene_chunk: None,
             entrance_building: None,
             interior_building: None,
+            exterior: None,
             door_test_id: None,
             barricade_planks: None,
             loot_fixture: None,
@@ -482,6 +624,8 @@ impl Plugin for QaPlugin {
             started: Instant::now(),
             report: QaReport {
                 success: false,
+                scope,
+                expected_captures,
                 renderer: String::new(),
                 captures: Vec::new(),
                 assertions: Vec::new(),
@@ -571,11 +715,18 @@ fn reset_and_close_settings(world: &mut World) {
 fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), String> {
     set_target(world, run, stage.size)?;
     run.ready_frames = 0;
+    run.wait_logged = Instant::now();
     run.scene_chunk = None;
     run.entrance_building = None;
     run.interior_building = None;
+    run.exterior = None;
     println!("DTQA entering {}", stage.name);
-    if run.stage > 0 && matches!(STAGES[run.stage - 1].action, Action::PerformanceStreet) {
+    if run.stage > 0
+        && matches!(
+            STAGES[run.stages[run.stage - 1]].action,
+            Action::PerformanceStreet
+        )
+    {
         // Restore only this explicit QA fixture before continuing the original
         // gameplay route. Runtime preferences never change themselves on close.
         *world.resource_mut::<crate::performance::PerformancePreferences>() =
@@ -667,6 +818,33 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                 "Street capture uses a clear sidewalk at ({:.2}, {:.2})",
                 position.x, position.y
             ));
+        }
+        Action::Exterior(scene) => {
+            // Actual immutable map lots, ordinary gameplay camera and the same
+            // streaming/cutaway systems used on Android. Only location, zoom and
+            // daylight are explicit fixtures; no demonstration meshes are spawned.
+            let fixture = exterior_fixture(crate::map::world(), scene, stage.size)?;
+            println!(
+                "DTQA exterior fixture scene={scene:?} lot={} player={:?} zoom={:.3}",
+                fixture.building, fixture.position, fixture.zoom
+            );
+            move_view(world, fixture.position, fixture.zoom)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(
+                crate::map::world().blds[fixture.building as usize].c,
+            ));
+            run.exterior = Some(fixture);
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+            world.resource_mut::<Campaign>().game_min = 720.0;
+            world
+                .resource_mut::<crate::survival::ShelterEnvironment>()
+                .power = true;
+            let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+            progress.weather.next = 5000.0;
+            progress.weather.until = 0.0;
+            progress.weather.amount = 0.0;
+            progress.weather.intensity = 0.0;
+            progress.weather.wet = 0.0;
         }
         Action::Entrance => {
             let data = crate::map::world();
@@ -1081,6 +1259,547 @@ fn street_view(data: &crate::map::WorldData) -> Option<(Vec2, crate::map::ChunkK
     })
 }
 
+fn exterior_bounds(building: &crate::map::data::Bld) -> Vec<Vec3> {
+    building
+        .pts
+        .iter()
+        .flat_map(|point| {
+            [
+                Vec3::new(point.x, 0.0, point.y),
+                Vec3::new(point.x, building.h, point.y),
+            ]
+        })
+        .collect()
+}
+
+/// Fit real generated geometry, not a large generic padding cube. This keeps a
+/// full-building view close enough to inspect its facade while retaining every
+/// balcony, stair, sign, roof and antenna that the normal renderer will upload.
+fn exterior_geometry_bounds(
+    building: &crate::map::data::Bld,
+    data: &crate::map::WorldData,
+    kit: &crate::map::detail::WindowKit,
+) -> Option<Vec<Vec3>> {
+    let mut base = crate::map::build::building(building, crate::map::Lod::Near);
+    let structure = crate::map::exterior::structure(building, data, crate::map::Lod::Near);
+    let detail = crate::map::detail::near_detail(building, kit);
+    let fittings = crate::map::detail::near_roof(building);
+    if structure.vcount() == 0 || detail.vcount() < 100 || fittings.vcount() < 20 {
+        return None;
+    }
+    // Match runtime material batching before computing AABBs. A combined roof
+    // and projecting facade has corner combinations absent from separate AABBs;
+    // fitting them separately cropped the first walkup fixture at lot854.
+    base.structure = structure;
+    base.merge_structure_into_roof();
+    let mut bounds = exterior_bounds(building);
+    for parts in [base.walls, base.roof, base.base, detail, fittings] {
+        for mesh in parts.0.values() {
+            let (min, max) = mesh.aabb();
+            bounds.extend(box_corners(min, max));
+        }
+    }
+    Some(bounds)
+}
+
+fn box_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
+    [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
+}
+
+/// Fit the entire real lot, including rooftop additions, with a useful margin.
+/// This changes normal gameplay zoom, not the camera direction or LOD distance.
+fn exterior_zoom(bounds: &[Vec3], position: Vec2, size: [u32; 2]) -> Option<f32> {
+    let right = Vec3::new(1.0, 0.0, -1.0).normalize();
+    let up = crate::camera::CAM_OFFSET.normalize().cross(right);
+    let focus = position.extend(0.0).xzy();
+    let (mut horizontal, mut vertical) = (0.0_f32, 0.0_f32);
+    for point in bounds {
+        horizontal = horizontal.max((*point - focus).dot(right).abs());
+        vertical = vertical.max((*point - focus).dot(up).abs());
+    }
+    let aspect = size[0] as f32 / size[1] as f32;
+    let half = crate::camera::half_height(aspect, 1.0);
+    let zoom = (half * aspect * 0.89 / horizontal.max(0.1))
+        .min(half * 0.89 / vertical.max(0.1))
+        .min(*crate::camera::ZOOM_RANGE.end());
+    (zoom >= *crate::camera::ZOOM_RANGE.start()).then_some(zoom)
+}
+
+fn exterior_camera_clear(data: &crate::map::WorldData, building: u32, target: Vec3) -> bool {
+    let camera = Vec2::ONE.normalize();
+    // A traversable player point alone does not prove the facade can be seen:
+    // reject taller lots along the camera-to-subject ray, including roof clutter.
+    (2..=32).step_by(2).all(|step| {
+        let distance = step as f32;
+        let p = target.xz() + camera * distance;
+        let height = target.y + distance * crate::camera::CAM_OFFSET.y / 40.0_f32.hypot(40.0);
+        data.bld_at(p)
+            .is_none_or(|other| other.id == building || other.h + 4.0 < height)
+            && !data.props.iter().any(|prop| {
+                matches!(prop.kind, crate::map::street::PropKind::Tree(_))
+                    && prop.p.distance(p) < 2.0
+                    && height < 8.0
+            })
+    })
+}
+
+fn exterior_fixture(
+    data: &crate::map::WorldData,
+    scene: ExteriorScene,
+    size: [u32; 2],
+) -> Result<ExteriorFixture, String> {
+    use crate::map::exterior::{Typology, classify, plan};
+
+    if scene == ExteriorScene::Cutaway {
+        // Use the same walkup as its full facade view, then actually put the
+        // player inside its ground floor. The shared cutaway must hide every
+        // architecture and rooftop mesh, including the newly added structures.
+        let outside = exterior_fixture(data, ExteriorScene::Walkup, [1280, 720])?;
+        let b = &data.blds[outside.building as usize];
+        let mut candidates = vec![b.c];
+        for x in 1..10 {
+            for z in 1..10 {
+                candidates.push(b.min + (b.max - b.min) * Vec2::new(x as f32, z as f32) / 10.0);
+            }
+        }
+        candidates.sort_by(|a, b0| a.distance_squared(b.c).total_cmp(&b0.distance_squared(b.c)));
+        let position = candidates
+            .into_iter()
+            .find(|p| data.bld_at(*p).is_some_and(|inside| inside.id == b.id) && data.free(*p, 0.6))
+            .ok_or_else(|| format!("Exterior cutaway lot {} has no clear interior", b.id))?;
+        return Ok(ExteriorFixture {
+            building: b.id,
+            position,
+            zoom: 1.2,
+            scene,
+        });
+    }
+
+    let camera = Vec2::ONE.normalize();
+    let mut candidates = Vec::new();
+    for b in &data.blds {
+        let typology = classify(b);
+        let matches = match scene {
+            ExteriorScene::Townhouse => typology == Typology::Townhouse,
+            ExteriorScene::Walkup | ExteriorScene::ServiceStair => typology == Typology::Walkup,
+            ExteriorScene::Shophouse => typology == Typology::Shophouse,
+            ExteriorScene::Rooftop => b.shack && typology != Typology::Other,
+            ExteriorScene::Cutaway => unreachable!(),
+        };
+        if !matches
+            || b.h > 17.0
+            || (b.max - b.min).max_element() > 32.0
+            || (scene == ExteriorScene::Walkup && b.lv < 3)
+        {
+            continue;
+        }
+        if scene == ExteriorScene::Rooftop {
+            let roof = crate::map::roofs::layout(b);
+            if roof.shacks.is_empty() || roof.access.is_none() {
+                continue;
+            }
+        }
+        let layout = plan(b, data);
+        let (centre, normal) = if scene == ExteriorScene::ServiceStair {
+            let Some(stair) = layout.stair else { continue };
+            (stair.centre, stair.n)
+        } else {
+            let Some(front) = layout.spec.front else {
+                continue;
+            };
+            if scene != ExteriorScene::Rooftop && layout.balconies.is_empty() {
+                continue;
+            }
+            (front.centre(), front.n)
+        };
+        if normal.dot(camera) < 0.55
+            || !exterior_camera_clear(data, b.id, Vec3::new(centre.x, b.h * 0.55, centre.y))
+        {
+            continue;
+        }
+        for distance in [3.5, 5.5, 8.0, 10.0] {
+            let position = centre + normal * distance;
+            if !position.cmpge(data.min + 1.0).all()
+                || !position.cmple(data.max - 1.0).all()
+                || data.bld_at(position).is_some()
+                || !data.free(position, 0.6)
+                || b.c.distance(position) >= 65.0
+                || crate::map::exterior_blocks_camera(b, position)
+            {
+                continue;
+            }
+            let Some(zoom) = exterior_zoom(&exterior_bounds(b), position, size) else {
+                continue;
+            };
+            candidates.push(ExteriorFixture {
+                building: b.id,
+                position,
+                zoom,
+                scene,
+            });
+            break;
+        }
+    }
+    // Whole-lot readability comes before proximity to spawn. The closest infill
+    // lot previously forced a wide, crowded view and could hide its own rear stair.
+    candidates.sort_by(|a, b| {
+        b.zoom
+            .total_cmp(&a.zoom)
+            .then_with(|| {
+                data.blds[a.building as usize]
+                    .fill
+                    .cmp(&data.blds[b.building as usize].fill)
+            })
+            .then_with(|| {
+                a.position
+                    .distance_squared(data.spawn)
+                    .total_cmp(&b.position.distance_squared(data.spawn))
+            })
+            .then(a.building.cmp(&b.building))
+    });
+    let kit = crate::map::detail::WindowKit::new();
+    let mut fitted = Vec::new();
+    for mut fixture in candidates.into_iter().take(24) {
+        let b = &data.blds[fixture.building as usize];
+        let Some(bounds) = exterior_geometry_bounds(b, data, &kit) else {
+            continue;
+        };
+        let Some(zoom) = exterior_zoom(&bounds, fixture.position, size) else {
+            continue;
+        };
+        fixture.zoom = zoom;
+        fitted.push(fixture);
+    }
+    fitted
+        .into_iter()
+        .max_by(|a, b| {
+            a.zoom
+                .total_cmp(&b.zoom)
+                .then_with(|| {
+                    data.blds[b.building as usize]
+                        .fill
+                        .cmp(&data.blds[a.building as usize].fill)
+                })
+                .then_with(|| {
+                    b.position
+                        .distance_squared(data.spawn)
+                        .total_cmp(&a.position.distance_squared(data.spawn))
+                })
+                .then(b.building.cmp(&a.building))
+        })
+        .ok_or_else(|| format!("No clear, fully framed real-world {scene:?} exterior fixture"))
+}
+
+fn exterior_ready(world: &mut World, fixture: ExteriorFixture) -> bool {
+    let id = fixture.building;
+    world
+        .query::<&crate::map::DetailRoot>()
+        .iter(world)
+        .any(|root| root.0 == id)
+        && world
+            .query::<&crate::map::BldWalls>()
+            .iter(world)
+            .any(|walls| walls.id == id && walls.faded == (fixture.scene == ExteriorScene::Cutaway))
+        && exterior_visibility(world, fixture).is_some()
+}
+
+fn main_camera_meshes(world: &mut World) -> Option<HashSet<Entity>> {
+    world
+        .query_filtered::<&bevy::camera::visibility::VisibleEntities, With<GameCamera>>()
+        .iter(world)
+        .next()
+        .map(|visible| visible.iter(TypeId::of::<Mesh3d>()).copied().collect())
+}
+
+/// One entity belongs to exactly one evidence group. Persistent shells carry the
+/// roof tag for cutaway plus BldStructure for ownership; they never count twice.
+fn exterior_group(
+    id: u32,
+    shell: Option<&crate::map::BldStructure>,
+    detail: Option<&crate::map::BldDetail>,
+    roof: Option<&crate::map::BldRoof>,
+) -> Result<Option<usize>, &'static str> {
+    if !shell.is_some_and(|tag| tag.0 == id)
+        && !detail.is_some_and(|tag| tag.0 == id)
+        && !roof.is_some_and(|tag| tag.0 == id)
+    {
+        return Ok(None);
+    }
+    match (shell, detail, roof) {
+        (Some(shell), None, Some(roof)) if shell.0 == id && roof.0 == id => Ok(Some(0)),
+        (None, Some(detail), None) if detail.0 == id => Ok(Some(1)),
+        (None, None, Some(roof)) if roof.0 == id => Ok(Some(2)),
+        _ => Err("conflicting exterior ownership/cutaway tags"),
+    }
+}
+
+/// Wait for propagated visibility and membership of the actual game-camera list.
+/// All three groups must exist; the combined shell cannot stand in for fine detail.
+fn exterior_visibility(world: &mut World, fixture: ExteriorFixture) -> Option<[usize; 3]> {
+    let main_view = main_camera_meshes(world)?;
+    let hidden = fixture.scene == ExteriorScene::Cutaway;
+    let (mut total, mut visible) = ([0_usize; 3], [0_usize; 3]);
+    for (entity, shell, detail, roof, local, inherited, view) in world
+        .query_filtered::<(
+            Entity,
+            Option<&crate::map::BldStructure>,
+            Option<&crate::map::BldDetail>,
+            Option<&crate::map::BldRoof>,
+            &Visibility,
+            &InheritedVisibility,
+            &ViewVisibility,
+        ), Or<(With<crate::map::BldDetail>, With<crate::map::BldRoof>)>>()
+        .iter(world)
+    {
+        let Some(group) = exterior_group(fixture.building, shell, detail, roof).ok()? else {
+            continue;
+        };
+        let in_main_view = main_view.contains(&entity);
+        if hidden {
+            if *local != Visibility::Hidden || inherited.get() || view.get() || in_main_view {
+                return None;
+            }
+        } else if *local == Visibility::Hidden || !inherited.get() || !view.get() {
+            return None;
+        }
+        total[group] += 1;
+        visible[group] += usize::from(in_main_view);
+    }
+    (total.iter().all(|count| *count > 0) && (hidden || visible.iter().all(|count| *count > 0)))
+        .then_some(visible)
+}
+
+/// One bounded diagnostic at most every five seconds while a fixture is waiting.
+/// Keep the exact reason in the log instead of silently exhausting the QA deadline.
+fn exterior_wait_status(world: &mut World, fixture: ExteriorFixture) -> String {
+    let id = fixture.building;
+    let main_view = main_camera_meshes(world).unwrap_or_default();
+    let (mut total, mut local_hidden, mut inherited, mut view, mut main) =
+        ([0; 3], [0; 3], [0; 3], [0; 3], [0; 3]);
+    let mut points = Vec::new();
+    let mut invalid_tags = 0;
+    for (
+        entity,
+        shell,
+        detail,
+        roof,
+        local,
+        inherited_visibility,
+        view_visibility,
+        geometry,
+        transform,
+    ) in world
+        .query_filtered::<(
+            Entity,
+            Option<&crate::map::BldStructure>,
+            Option<&crate::map::BldDetail>,
+            Option<&crate::map::BldRoof>,
+            &Visibility,
+            &InheritedVisibility,
+            &ViewVisibility,
+            &crate::map::MapMeshGeometry,
+            &GlobalTransform,
+        ), Or<(With<crate::map::BldDetail>, With<crate::map::BldRoof>)>>()
+        .iter(world)
+    {
+        let group = match exterior_group(id, shell, detail, roof) {
+            Ok(Some(group)) => group,
+            Ok(None) => continue,
+            Err(_) => {
+                invalid_tags += 1;
+                continue;
+            }
+        };
+        total[group] += 1;
+        local_hidden[group] += usize::from(*local == Visibility::Hidden);
+        inherited[group] += usize::from(inherited_visibility.get());
+        view[group] += usize::from(view_visibility.get());
+        main[group] += usize::from(main_view.contains(&entity));
+        points.extend(
+            box_corners(geometry.min, geometry.max).map(|point| transform.transform_point(point)),
+        );
+    }
+    let walls: Vec<_> = world
+        .query::<&crate::map::BldWalls>()
+        .iter(world)
+        .filter(|walls| walls.id == id)
+        .map(|walls| walls.faded)
+        .collect();
+    let player = player_position(world).ok();
+    let blocks = player.map(|player| {
+        crate::map::exterior_blocks_camera(&crate::map::world().blds[id as usize], player.xz())
+    });
+    let bounds = world
+        .query_filtered::<(&Camera, &GlobalTransform), With<GameCamera>>()
+        .iter(world)
+        .next()
+        .map(|(camera, transform)| {
+            let projected: Vec<_> = points
+                .into_iter()
+                .filter_map(|point| camera.world_to_viewport(transform, point).ok())
+                .collect();
+            if projected.is_empty() {
+                return "none".to_string();
+            }
+            let (lo, hi) = projected.into_iter().fold(
+                (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)),
+                |(lo, hi), point| (lo.min(point), hi.max(point)),
+            );
+            format!("{lo:?}..{hi:?}")
+        })
+        .unwrap_or_else(|| "no-camera".to_string());
+    format!(
+        "lot={id} cutaway_front={blocks:?} walls_faded={walls:?} groups(shell/facade/fittings)={total:?} hidden={local_hidden:?} inherited={inherited:?} view={view:?} main_view={main:?} invalid_tags={invalid_tags} projected={bounds}"
+    )
+}
+
+fn map_workload(world: &mut World) -> Option<MapWorkload> {
+    let visible = main_camera_meshes(world)?;
+    let mut workload = MapWorkload {
+        measurement: "uploaded_map_mesh_counts_not_gpu_time_or_device_performance",
+        resident_meshes: 0,
+        resident_vertices: 0,
+        main_view_meshes: 0,
+        main_view_vertices: 0,
+    };
+    for (entity, geometry) in world
+        .query_filtered::<(Entity, &crate::map::MapMeshGeometry), With<Mesh3d>>()
+        .iter(world)
+    {
+        workload.resident_meshes += 1;
+        workload.resident_vertices += geometry.vertices;
+        if visible.contains(&entity) {
+            workload.main_view_meshes += 1;
+            workload.main_view_vertices += geometry.vertices;
+        }
+    }
+    Some(workload)
+}
+
+fn exterior_evidence(
+    world: &mut World,
+    fixture: ExteriorFixture,
+    size: [u32; 2],
+) -> Result<ExteriorEvidence, String> {
+    let id = fixture.building;
+    let b = &crate::map::world().blds[id as usize];
+    let layout = crate::map::exterior::plan(b, crate::map::world());
+    let roof_layout = crate::map::roofs::layout(b);
+    let hidden = fixture.scene == ExteriorScene::Cutaway;
+    let visible = exterior_visibility(world, fixture).ok_or_else(|| {
+        format!("Exterior {id}: hierarchy or game-camera visibility changed before capture")
+    })?;
+    let mut groups = [ExteriorMeshGroup::default(); 3];
+    let mut uploaded_bounds = Vec::new();
+    let mut handles = Vec::new();
+    for (shell, detail, roof, mesh, geometry, transform) in world
+        .query_filtered::<(
+            Option<&crate::map::BldStructure>,
+            Option<&crate::map::BldDetail>,
+            Option<&crate::map::BldRoof>,
+            &Mesh3d,
+            &crate::map::MapMeshGeometry,
+            &GlobalTransform,
+        ), Or<(With<crate::map::BldDetail>, With<crate::map::BldRoof>)>>()
+        .iter(world)
+    {
+        let Some(group) = exterior_group(id, shell, detail, roof)? else {
+            continue;
+        };
+        groups[group].meshes += 1;
+        groups[group].vertices += geometry.vertices;
+        handles.push(mesh.0.clone());
+        uploaded_bounds.extend(
+            box_corners(geometry.min, geometry.max).map(|point| transform.transform_point(point)),
+        );
+    }
+    for (group, visible) in groups.iter_mut().zip(visible) {
+        group.in_main_view = visible;
+    }
+    let meshes = world.resource::<Assets<Mesh>>();
+    if handles.iter().any(|handle| !meshes.contains(handle)) {
+        return Err(format!("Exterior {id}: missing uploaded mesh"));
+    }
+    if groups
+        .iter()
+        .any(|group| group.meshes == 0 || group.vertices < 20)
+    {
+        return Err(format!(
+            "Exterior {id}: missing persistent shell, facade detail or roof fittings"
+        ));
+    }
+    let position = player_position(world)?;
+    let (camera, transform) = world
+        .query_filtered::<(&Camera, &GlobalTransform), With<GameCamera>>()
+        .iter(world)
+        .next()
+        .ok_or("Exterior camera is missing")?;
+    let camera_position = transform.translation();
+    let mut lo = Vec2::splat(f32::MAX);
+    let mut hi = Vec2::splat(f32::MIN);
+    for point in exterior_bounds(b).into_iter().chain(uploaded_bounds) {
+        let projected = camera
+            .world_to_viewport(transform, point)
+            .map_err(|err| format!("Exterior {id}: cannot project target: {err:?}"))?;
+        lo = lo.min(projected);
+        hi = hi.max(projected);
+    }
+    if !hidden
+        && (lo.x < size[0] as f32 * 0.04
+            || lo.y < size[1] as f32 * 0.04
+            || hi.x > size[0] as f32 * 0.96
+            || hi.y > size[1] as f32 * 0.96)
+    {
+        return Err(format!(
+            "Exterior {id}: full building is cropped: {lo:?}..{hi:?} in {size:?}"
+        ));
+    }
+    if hidden
+        && (crate::map::world()
+            .bld_at(position.xz())
+            .is_none_or(|inside| inside.id != id)
+            || !world
+                .query::<(&crate::map::BldWalls, &Transform)>()
+                .iter(world)
+                .any(|(walls, transform)| {
+                    walls.id == id && walls.faded && (transform.scale.y - 0.12).abs() < 0.001
+                }))
+    {
+        return Err(format!(
+            "Exterior {id}: cutaway did not follow actual interior player position"
+        ));
+    }
+    Ok(ExteriorEvidence {
+        building_id: id,
+        typology: format!("{:?}", layout.spec.typology),
+        scene: format!("{:?}", fixture.scene),
+        player: position.to_array(),
+        camera: camera_position.to_array(),
+        zoom: world.resource::<CameraZoom>().0,
+        projected_bounds: [lo.to_array(), hi.to_array()],
+        balconies: layout.balconies.len(),
+        service_stair: layout.stair.is_some(),
+        rooftop_shacks: roof_layout.shacks.len(),
+        roof_access: roof_layout.access.is_some(),
+        persistent_shell: groups[0],
+        facade_detail: groups[1],
+        roof_fittings: groups[2],
+        total_meshes: groups.iter().map(|group| group.meshes).sum(),
+        total_vertices: groups.iter().map(|group| group.vertices).sum(),
+        cutaway_hidden: hidden,
+        streaming: world.resource::<crate::map::MapRenderStats>().clone(),
+    })
+}
+
 fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     let checkpoint = run.checkpoint.as_ref().ok_or("Missing checkpoint")?;
     let position = player_position(world)?;
@@ -1130,8 +1849,8 @@ fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> 
 fn finish(world: &mut World, run: &mut QaRun) {
     run.finished = true;
     run.report.success = run.report.error.is_none()
-        && run.report.captures.len() == STAGES.len()
-        && run.continuation_checked;
+        && run.report.captures.len() == run.stages.len()
+        && (run.report.scope == "exterior_subset" || run.continuation_checked);
     let report_path = run.output.join("qa-report.json");
     let result = serde_json::to_vec_pretty(&run.report)
         .map_err(|err| err.to_string())
@@ -1164,7 +1883,7 @@ fn drive(world: &mut World) {
         world.insert_resource(run);
         return;
     }
-    if run.report.error.is_some() || run.stage >= STAGES.len() {
+    if run.report.error.is_some() || run.stage >= run.stages.len() {
         finish(world, &mut run);
         world.insert_resource(run);
         return;
@@ -1178,8 +1897,8 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // Forty-seven captures include performance controls and scaled 3D rendering, with room for
-    // software Vulkan runner variance without removing any existing stage.
+    // Fifty-three captures retain the original gameplay/performance checks and
+    // add six fully framed exterior/cutaway views through the actual renderer.
     if run.started.elapsed() > Duration::from_secs(1500) {
         return Err("Visual QA exceeded its 25-minute deadline".into());
     }
@@ -1200,12 +1919,12 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         run.waiting_capture = false;
         run.entered = false;
         run.stage += 1;
-        if run.stage == STAGES.len() {
+        if run.stage == run.stages.len() {
             finish(world, run);
             return Ok(());
         }
     }
-    let stage = &STAGES[run.stage];
+    let stage = &STAGES[run.stages[run.stage]];
     if !run.entered {
         enter_stage(world, run, stage)?;
     }
@@ -1263,7 +1982,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     if run.frame == SETTLE_FRAMES / 2
         && matches!(
             stage.action,
-            Action::Rain | Action::Night | Action::Blackout
+            Action::Rain | Action::Night | Action::Blackout | Action::Exterior(_)
         )
     {
         // The explicit clock/weather fixture can dispatch several catch-up
@@ -1313,6 +2032,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             | Action::Rain
             | Action::ShopInterior
             | Action::HomeInterior
+            | Action::Exterior(_)
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -1342,7 +2062,27 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 .iter(world)
                 .any(|room| room.building == id)
         });
-        if !chunks_ready || !detail_ready || !interior_ready {
+        let exterior_loaded = run
+            .exterior
+            .is_none_or(|fixture| exterior_ready(world, fixture));
+        if !chunks_ready || !detail_ready || !interior_ready || !exterior_loaded {
+            if run.wait_logged.elapsed() >= Duration::from_secs(5) {
+                let exterior = run
+                    .exterior
+                    .map(|fixture| exterior_wait_status(world, fixture))
+                    .unwrap_or_default();
+                println!(
+                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} {}",
+                    stage.name,
+                    run.frame,
+                    chunks_ready,
+                    detail_ready,
+                    interior_ready,
+                    exterior_loaded,
+                    exterior
+                );
+                run.wait_logged = Instant::now();
+            }
             run.ready_frames = 0;
             return Ok(());
         }
@@ -1640,6 +2380,21 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     // open=true while its extracted UI is blank. Check real layout/visibility,
     // then also verify opaque panel and selected-control pixels after readback.
     let settings_pixels = settings_pixels(world, stage.size)?;
+    let exterior = run
+        .exterior
+        .map(|fixture| exterior_evidence(world, fixture, stage.size))
+        .transpose()?;
+    let map_workload = matches!(stage.flow, ExpectedFlow::Playing)
+        .then(|| map_workload(world))
+        .flatten();
+    if let Some(evidence) = &exterior {
+        run.report.assertions.push(format!(
+            "{}: actual lot {} {}, persistent shell {} vertices, facade detail {} vertices, roof fittings {} vertices across {} unique material meshes; cutaway_hidden={}, full_exterior_framing={}; merged shell includes coarse facade and roof; real GPU readback, workload counts are not a device benchmark",
+            stage.name, evidence.building_id, evidence.typology,
+            evidence.persistent_shell.vertices, evidence.facade_detail.vertices, evidence.roof_fittings.vertices,
+            evidence.total_meshes, evidence.cutaway_hidden, !evidence.cutaway_hidden
+        ));
+    }
     let image = run.target.clone().ok_or("No render target")?;
     world
         .spawn((
@@ -1649,6 +2404,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 path: run.output.join(format!("{}.png", stage.name)),
                 size: stage.size,
                 settings_pixels,
+                exterior,
+                map_workload,
             },
         ))
         .observe(capture_finished);
@@ -1787,6 +2544,8 @@ fn capture_finished(
             width: image.width(),
             height: image.height(),
             sampled_colors: colors.len(),
+            exterior: ticket.exterior.clone(),
+            map_workload: ticket.map_workload.clone(),
         })
     })();
     match result {
@@ -1799,5 +2558,78 @@ fn capture_finished(
             run.captured = true;
         }
         Err(error) => run.report.error = Some(error),
+    }
+}
+
+#[cfg(test)]
+mod exterior_tests {
+    use super::*;
+
+    #[test]
+    fn exterior_views_select_real_reachable_lots_with_the_promised_features() {
+        use crate::map::exterior::{Typology, classify, plan};
+
+        let data = crate::map::world();
+        let cases = [
+            (ExteriorScene::Townhouse, Some(Typology::Townhouse)),
+            (ExteriorScene::Walkup, Some(Typology::Walkup)),
+            (ExteriorScene::Shophouse, Some(Typology::Shophouse)),
+            (ExteriorScene::ServiceStair, Some(Typology::Walkup)),
+            (ExteriorScene::Rooftop, None),
+            (ExteriorScene::Cutaway, Some(Typology::Walkup)),
+        ];
+        for (scene, expected) in cases {
+            let size = if scene == ExteriorScene::Cutaway {
+                [390, 844]
+            } else {
+                [1280, 720]
+            };
+            let fixture = exterior_fixture(data, scene, size).unwrap();
+            let b = &data.blds[fixture.building as usize];
+            let layout = plan(b, data);
+            if let Some(expected) = expected {
+                assert_eq!(classify(b), expected);
+            }
+            assert!(
+                data.free(fixture.position, 0.6),
+                "{scene:?}: player intersects collision"
+            );
+            assert!(crate::camera::ZOOM_RANGE.contains(&fixture.zoom));
+            if scene != ExteriorScene::Cutaway {
+                assert!(
+                    !crate::map::exterior_blocks_camera(b, fixture.position),
+                    "{scene:?}: an outdoor fixture must not hide its own subject"
+                );
+            }
+            assert!(
+                b.c.distance(fixture.position) < 65.0,
+                "target is outside near-detail radius"
+            );
+            match scene {
+                ExteriorScene::Townhouse | ExteriorScene::Walkup | ExteriorScene::Shophouse => {
+                    assert!(
+                        !layout.balconies.is_empty(),
+                        "{scene:?}: no actual balcony layout"
+                    );
+                    assert!(data.bld_at(fixture.position).is_none());
+                }
+                ExteriorScene::ServiceStair => assert!(layout.stair.is_some()),
+                ExteriorScene::Rooftop => {
+                    let roof = crate::map::roofs::layout(b);
+                    assert!(!roof.shacks.is_empty());
+                    assert!(roof.access.is_some());
+                }
+                ExteriorScene::Cutaway => {
+                    assert_eq!(
+                        data.bld_at(fixture.position).map(|inside| inside.id),
+                        Some(b.id)
+                    );
+                }
+            }
+            eprintln!(
+                "Exterior fixture {scene:?}: lot={} position={:?} zoom={:.3}",
+                b.id, fixture.position, fixture.zoom
+            );
+        }
     }
 }

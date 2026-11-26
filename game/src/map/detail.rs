@@ -3,9 +3,9 @@
 //! - facade.ts window units at every painted window slot: dark reveal, lit / dark / curtained
 //!   pane, two sliding glass sashes, 鋁窗 aluminium frame, 鐵窗 iron cages (4 patterns), tin
 //!   awnings (雨遮), split AC units; some boarded up or broken;
-//! - rooftin.ts 頂樓加蓋 tin shacks (gable / arched / mono-pitch roof, gutters, downpipe, door,
-//!   barred windows, AC, tank on a stand, laundry pole, potted plants, antenna) placed on the
-//!   roof along the lot, plus the 女兒牆 parapet and solar heater / antenna clutter (dressRoof);
+//! - rooftop fine fittings: gable / arched / mono-pitch shacks are split into a persistent
+//!   shell and near-only doors, barred windows, AC, laundry and plants. Shared roof layouts
+//!   in roofs.rs reserve the whole footprint and preserve the silhouette at Mid LOD;
 //! - walkup.ts vertical shop-sign blades, AC units with drip stains and peeled-render brick.
 
 use bevy::prelude::*;
@@ -41,6 +41,7 @@ const WH: f32 = 1.35;
 /// Shared window-unit parts (facade.ts `def`), local +Z out of the wall.
 pub struct WindowKit {
     reveal: MeshBuf,
+    surround: MeshBuf,
     pane: MeshBuf,
     glass: MeshBuf,
     alu: MeshBuf,
@@ -137,6 +138,14 @@ impl WindowKit {
         };
         Self {
             reveal: geom::plane(WW + 0.24, WH + 0.24).transformed(geom::at(0.0, 0.0, 0.012)),
+            // A raised masonry opening makes the sash sit in a real 22 cm-deep reveal.
+            // The inner edge stays outside the lit pane; this is not an opaque front plate.
+            surround: merge(
+                frame(WW + 0.30, WH + 0.30, 0.12, 0.22, 0.11)
+                    .into_iter()
+                    .chain([bx(WW + 0.34, 0.07, 0.32, 0.0, -WH / 2.0 - 0.13, 0.13)])
+                    .collect(),
+            ),
             pane: geom::plane(WW - 0.1, WH - 0.1).transformed(geom::at(0.0, 0.0, 0.022)),
             glass: geom::plane(WW / 2.0, WH - 0.1),
             alu: merge(alu),
@@ -182,6 +191,7 @@ const AWC: [u32; 10] = [
 
 /// facade.ts window units for one building.
 pub fn windows(b: &Bld, kit: &WindowKit, out: &mut Parts) {
+    let exterior = super::exterior::plan(b, super::world());
     let mut r = Mulberry(20261025 ^ b.id.wrapping_mul(2654435761));
     let style = r.f();
     let alu_c = if style < 0.6 {
@@ -194,10 +204,27 @@ pub fn windows(b: &Bld, kit: &WindowKit, out: &mut Parts) {
     let cage_pat = (r.f() * 4.0) as usize % 4;
     let cage_c = r.pick(&RUST);
     for w in &b.wins {
+        // Rear access landings occupy a few original facade slots. Consume their RNG
+        // draws as before, so hiding one slot cannot change the remaining room lights.
+        let mut suppressed = Parts::default();
+        let out = if super::exterior::window_obscured(&exterior, w) {
+            &mut suppressed
+        } else {
+            &mut *out
+        };
         let base = place(w.p.x, w.p.y, w.p.z, w.ry);
         let (cr, sr) = (w.ry.cos(), w.ry.sin());
         let side = |dx: f32| Vec3::new(w.p.x + cr * dx, w.p.y, w.p.z - sr * dx);
         out.add(Mat::VCol, &kit.reveal, base, hex(0x15181b));
+        const REVEALS: [u32; 7] = [
+            0xc3bbaa, 0xb8b5aa, 0xcac1ac, 0xb4aaa0, 0xbca88e, 0xb4bdbc, 0xc4bbae,
+        ];
+        out.add(
+            Mat::VCol,
+            &kit.surround,
+            base,
+            hex(REVEALS[b.wall_mat % REVEALS.len()]),
+        );
         let q = r.f();
         if q < 0.07 {
             out.add(Mat::VCol, &kit.board, base, hex(0x9a7a4a));
@@ -300,8 +327,10 @@ fn uv_m(g: MeshBuf) -> MeshBuf {
     g.map_uv(|_, p| [p[0], -p[1]])
 }
 
-/// rooftin.ts makeShack: a 頂樓加蓋 tin house, local frame (x along W, z along D, y up from the roof).
-pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
+/// rooftin.ts makeShack, split into independent shell/fine layers from one stable seed.
+/// Local x spans width, +z is its front, and y rises from the building's existing roof.
+pub(crate) fn shack_layer(w: f32, d: f32, seed: u64, open: bool, fine: bool) -> Parts {
+    let mut r = Park(seed);
     let mut o = Parts::default();
     let h = 2.5 + r.f() * 0.4;
     let wall_c = hex(pick_tin(r.f()));
@@ -312,7 +341,7 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
     };
     let det = |g: MeshBuf, t: Mat4, c: u32, o: &mut Parts| o.add(Mat::Metal, &g, t, hex(c));
     let wall = |len: f32, ry: f32, ox: f32, oz: f32, o: &mut Parts| {
-        let p = uv_m(geom::plane2(len, h)).transformed(place(ox, h / 2.0, oz, ry));
+        let p = uv_m(geom::plane(len, h)).transformed(place(ox, h / 2.0, oz, ry));
         o.add(Mat::Tin, &p, Mat4::IDENTITY, wall_c);
     };
     if !open {
@@ -335,10 +364,41 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
     let gable_end = |pts: &[Vec2], ex: f32, o: &mut Parts| {
         let g = geom::shape(pts);
         let g = uv_m(g);
-        let mut two = g.clone();
-        two.append(g.transformed(Mat4::from_rotation_y(PI)));
+        let mut face = if open {
+            let mut two = g.clone();
+            let mut back = g;
+            for triangle in back.idx.chunks_mut(3) {
+                triangle.swap(1, 2);
+            }
+            for normal in &mut back.nrm {
+                *normal = [-normal[0], -normal[1], -normal[2]];
+            }
+            two.append(back);
+            two
+        } else {
+            g
+        };
+        if !open && ex < 0.0 {
+            for triangle in face.idx.chunks_mut(3) {
+                triangle.swap(1, 2);
+            }
+            for normal in &mut face.nrm {
+                *normal = [-normal[0], -normal[1], -normal[2]];
+            }
+        }
         let t = rot * geom::at(ex, h, 0.0) * Mat4::from_rotation_y(FRAC_PI_2);
-        o.add(Mat::Tin, &two, t, wall_c);
+        o.add(Mat::Tin, &face, t, wall_c);
+    };
+    let closed_eave = |side: f32, height: f32, o: &mut Parts| {
+        if !open {
+            o.add(
+                Mat::Tin,
+                &uv_m(geom::plane(l - ov * 2.0, height)),
+                rot * geom::at(0.0, h + height / 2.0, side * (s - ov * 2.0) / 2.0)
+                    * Mat4::from_rotation_y(if side > 0.0 { 0.0 } else { PI }),
+                wall_c,
+            );
+        }
     };
     if kind < 0.45 {
         // gable (雙斜)
@@ -346,46 +406,57 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
         ridge = s / 2.0 * pitch;
         for sd in [-1.0f32, 1.0] {
             let half = (s / 2.0).hypot(ridge);
-            let p = uv_m(geom::plane2(l, half));
+            let p = uv_m(if open {
+                geom::plane2(l, half)
+            } else {
+                geom::plane(l, half)
+            });
             let t = rot
                 * geom::at(0.0, h + ridge / 2.0, sd * s / 4.0)
                 * Mat4::from_rotation_x(-FRAC_PI_2 + sd * ridge.atan2(s / 2.0));
             o.add(Mat::Tin, &p, t, roof_c);
         }
         let s2 = (s - ov * 2.0) / 2.0;
+        let edge = pitch * ov;
         for e in [-1.0f32, 1.0] {
-            let tri = [
+            let profile = [
                 Vec2::new(-s2, 0.0),
                 Vec2::new(s2, 0.0),
-                Vec2::new(0.0, ridge * (s - ov * 2.0) / s),
+                Vec2::new(s2, edge),
+                Vec2::new(0.0, ridge),
+                Vec2::new(-s2, edge),
             ];
-            gable_end(&tri, e * (l - ov * 2.0) / 2.0, &mut o);
+            gable_end(&profile, e * (l - ov * 2.0) / 2.0, &mut o);
+            closed_eave(e, edge, &mut o);
         }
-        det(
-            geom::cuboid(l, 0.12, 0.14),
-            rot * geom::at(0.0, h + ridge + 0.03, 0.0),
-            0x8a8e8c,
-            &mut o,
-        );
     } else if kind < 0.75 {
         // shallow arch (圓弧浪板)
         let rise = 0.35 + r.f() * 0.3;
         let rr = (s * s / 4.0 + rise * rise) / (2.0 * rise);
         let th = 2.0 * (s / 2.0 / rr).asin();
         ridge = rise;
-        let c = geom::cylinder_ex(rr, rr, l, 18, true, -th / 2.0, th);
+        let c = geom::cylinder_ex(rr, rr, l, 8, true, -th / 2.0, th);
         let mut c2 = c.clone();
-        // inside face too (DoubleSide)
-        let mut inner = c.clone();
-        for t in inner.idx.chunks_mut(3) {
-            t.swap(1, 2);
+        // Only an open canopy exposes its underside. Closed sheds have no visible
+        // interior; keeping a second inward skin for every resident shed wastes vertices.
+        if open {
+            let mut inner = c.clone();
+            for t in inner.idx.chunks_mut(3) {
+                t.swap(1, 2);
+            }
+            for n in inner.nrm.iter_mut() {
+                *n = [-n[0], -n[1], -n[2]];
+            }
+            c2.append(inner);
         }
-        for n in inner.nrm.iter_mut() {
-            *n = [-n[0], -n[1], -n[2]];
-        }
-        c2.append(inner);
         let c2 = c2.map_uv(|uv, p| [p[1], uv[0] * th * rr]);
-        let t = rot * geom::at(0.0, h + rise - rr, 0.0) * Mat4::from_rotation_z(FRAC_PI_2);
+        // cylinder_ex's arc is centred on local +Z, not +X. Rotate that radial
+        // direction upward while laying its Y axis along the shed. Without the
+        // second rotation the large-radius arc sits beside/below the building.
+        let t = rot
+            * geom::at(0.0, h + rise - rr, 0.0)
+            * Mat4::from_rotation_z(FRAC_PI_2)
+            * Mat4::from_rotation_y(FRAC_PI_2);
         o.add(Mat::Tin, &c2, t, roof_c);
         let s2 = (s - ov * 2.0) / 2.0;
         let mut prof = vec![Vec2::new(-s2, 0.0), Vec2::new(s2, 0.0)];
@@ -398,37 +469,98 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
         }
         for e in [-1.0f32, 1.0] {
             gable_end(&prof, e * (l - ov * 2.0) / 2.0, &mut o);
+            closed_eave(e, (rr * rr - s2 * s2).max(0.0).sqrt() - (rr - rise), &mut o);
         }
     } else {
         // mono-pitch (單斜)
         let drop = 0.35 + r.f() * 0.25;
         ridge = drop;
-        let p = uv_m(geom::plane2(l, s.hypot(drop)));
+        let p = uv_m(if open {
+            geom::plane2(l, s.hypot(drop))
+        } else {
+            geom::plane(l, s.hypot(drop))
+        });
         let t = rot
             * geom::at(0.0, h + drop / 2.0, 0.0)
             * Mat4::from_rotation_x(-FRAC_PI_2 - drop.atan2(s));
         o.add(Mat::Tin, &p, t, roof_c);
-        let hi = uv_m(geom::plane2(l - ov * 2.0, drop));
-        o.add(
-            Mat::Tin,
-            &hi,
-            rot * geom::at(0.0, h + drop / 2.0, (s - ov * 2.0) / 2.0),
-            wall_c,
+        let low = drop * ov / s;
+        let high = drop - low;
+        for (side, edge_height) in [(1.0, high), (-1.0, low)] {
+            let edge = uv_m(if open {
+                geom::plane2(l - ov * 2.0, edge_height)
+            } else {
+                geom::plane(l - ov * 2.0, edge_height)
+            });
+            o.add(
+                Mat::Tin,
+                &edge,
+                rot * geom::at(0.0, h + edge_height / 2.0, side * (s - ov * 2.0) / 2.0)
+                    * Mat4::from_rotation_y(if side > 0.0 { 0.0 } else { PI }),
+                wall_c,
+            );
+        }
+        // Close the two sloping side wedges as well as the high front edge. Their
+        // exterior faces remain visible after the redundant inward skins are removed.
+        let half = (s - ov * 2.0) * 0.5;
+        let profile = [
+            Vec2::new(-half, 0.0),
+            Vec2::new(half, 0.0),
+            Vec2::new(half, low),
+            Vec2::new(-half, high),
+        ];
+        for side in [-1.0, 1.0] {
+            gable_end(&profile, side * (l - ov * 2.0) * 0.5, &mut o);
+        }
+    }
+    let roof_height = |x: f32, z: f32| {
+        let cross = if long { z } else { x };
+        if kind < 0.45 {
+            h + ridge * (1.0 - cross.abs() / (s * 0.5))
+        } else if kind < 0.75 {
+            let radius = (s * s * 0.25 + ridge * ridge) / (2.0 * ridge);
+            h + ridge - radius + (radius * radius - cross * cross).max(0.0).sqrt()
+        } else {
+            h + ridge * 0.5 + ridge * cross / s
+        }
+    };
+    // Open canopies retain their four structural corner posts at every LOD; they
+    // must never look like floating roofs. The two intermediate posts are fine detail.
+    if open {
+        for (x, z) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+            let px = x * (w / 2.0 - 0.1);
+            let pz = z * (d / 2.0 - 0.1);
+            let top = roof_height(px, pz);
+            det(
+                geom::cuboid(0.09, top, 0.09),
+                geom::at(px, top / 2.0, pz),
+                0x6a6e6a,
+                &mut o,
+            );
+        }
+    }
+    // Both layers consume the same shape RNG before branching. Gutters, downpipes,
+    // ridge trim and small edge uprights are near fittings, not resident silhouette.
+    if !fine {
+        return o;
+    }
+    o = Parts::default();
+    if kind < 0.45 {
+        det(
+            geom::cuboid(l, 0.12, 0.14),
+            rot * geom::at(0.0, h + ridge + 0.03, 0.0),
+            0x8a8e8c,
+            &mut o,
         );
     }
-    // eave gutters + downpipe
-    det(
-        geom::cuboid(l, 0.1, 0.12),
-        rot * geom::at(0.0, h - 0.02, s / 2.0 - 0.06),
-        0x9a9e9a,
-        &mut o,
-    );
-    det(
-        geom::cuboid(l, 0.1, 0.12),
-        rot * geom::at(0.0, h - 0.02, -s / 2.0 + 0.06),
-        0x9a9e9a,
-        &mut o,
-    );
+    for side in [-1.0, 1.0] {
+        det(
+            geom::cuboid(l, 0.1, 0.12),
+            rot * geom::at(0.0, h - 0.02, side * (s / 2.0 - 0.06)),
+            0x9a9e9a,
+            &mut o,
+        );
+    }
     det(
         geom::cuboid(0.08, h, 0.08),
         geom::at(w / 2.0 + 0.06, h / 2.0, d / 2.0 + 0.06),
@@ -436,17 +568,12 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
         &mut o,
     );
     if open {
-        for (x, z) in [
-            (1.0, 1.0),
-            (1.0, -1.0),
-            (-1.0, 1.0),
-            (-1.0, -1.0),
-            (0.0, 1.0),
-            (0.0, -1.0),
-        ] {
+        for z in [-1.0, 1.0] {
+            let pz = z * (d / 2.0 - 0.1);
+            let top = roof_height(0.0, pz);
             det(
-                geom::cuboid(0.09, h, 0.09),
-                geom::at(x * (w / 2.0 - 0.1), h / 2.0, z * (d / 2.0 - 0.1)),
+                geom::cuboid(0.09, top, 0.09),
+                geom::at(0.0, top / 2.0, pz),
                 0x6a6e6a,
                 &mut o,
             );
@@ -460,6 +587,8 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
                 &mut o,
             );
         }
+    }
+    if !open {
         // door on the front (+z) + aluminium windows with 鐵窗 bars
         let dx = (r.f() - 0.5) * (w - 1.4);
         let dc = [0x6a5040u32, 0x8a8a84, 0x3a5a6a][(r.f() * 3.0) as usize % 3];
@@ -643,152 +772,6 @@ pub fn shack(w: f32, d: f32, r: &mut Park, open: bool) -> Parts {
         );
     }
     o
-}
-
-/// Oriented frame of a footprint along its longest edge: origin, u, n (inward), length, depth.
-fn lot_frame(pts: &[Vec2]) -> (Vec2, Vec2, Vec2, f32, f32) {
-    let (mut best, mut u) = (0.0f32, Vec2::X);
-    for i in 0..pts.len() {
-        let d = pts[(i + 1) % pts.len()] - pts[i];
-        if d.length() > best {
-            best = d.length();
-            u = d / best;
-        }
-    }
-    let n = Vec2::new(-u.y, u.x);
-    let (mut a0, mut a1, mut b0, mut b1) = (1e9f32, -1e9f32, 1e9f32, -1e9f32);
-    for p in pts {
-        a0 = a0.min(p.dot(u));
-        a1 = a1.max(p.dot(u));
-        b0 = b0.min(p.dot(n));
-        b1 = b1.max(p.dot(n));
-    }
-    let o = u * (a0 + a1) / 2.0 + n * (b0 + b1) / 2.0;
-    (o, u, n, a1 - a0, b1 - b0)
-}
-
-/// placeRooftop (simplified): one shack along the lot, kept inside the footprint and away from
-/// the street front, then dressRoof's parapet and clutter.
-pub fn rooftop(b: &Bld, out: &mut Parts) {
-    let h = b.h;
-    // 女兒牆 parapet along every roof edge
-    for i in 0..b.pts.len() {
-        let (a, c) = (b.pts[i], b.pts[(i + 1) % b.pts.len()]);
-        let l = a.distance(c);
-        if l < 0.3 {
-            continue;
-        }
-        let d = c - a;
-        let m = (a + c) / 2.0;
-        out.add(
-            Mat::VCol,
-            &geom::cuboid(l + 0.2, 0.9, 0.18),
-            place(m.x, h + 0.45, m.y, -d.y.atan2(d.x)),
-            hex(0xbdb8ac),
-        );
-    }
-    let mut r = Park(b.seed7);
-    if b.shack {
-        let (o, u, n, len, dep) = lot_frame(&b.pts);
-        let mut w = (len * (0.55 + r.f() * 0.3)).clamp(2.6, 11.0);
-        let mut d = (dep * (0.45 + r.f() * 0.3)).clamp(2.4, 8.0);
-        // push toward the back of the lot (away from the door)
-        let back = b.door.map_or(Vec2::ZERO, |dr| -dr.n);
-        let shift = if back.dot(n) > 0.0 { n } else { -n } * (dep - d) * 0.3;
-        for _ in 0..4 {
-            let c = o + shift;
-            let corners = [
-                c + u * (w / 2.0 + 0.35) + n * (d / 2.0 + 0.35),
-                c - u * (w / 2.0 + 0.35) + n * (d / 2.0 + 0.35),
-                c + u * (w / 2.0 + 0.35) - n * (d / 2.0 + 0.35),
-                c - u * (w / 2.0 + 0.35) - n * (d / 2.0 + 0.35),
-                c,
-            ];
-            if corners.iter().all(|p| pip(*p, &b.pts)) {
-                let open = r.f() < 0.12;
-                let s = shack(w, d, &mut r, open);
-                let ang = -u.y.atan2(u.x);
-                let t = place(c.x, h, c.y, ang);
-                for (k, g) in s.0 {
-                    out.add(k, &g, t, WHITE);
-                }
-                break;
-            }
-            w *= 0.8;
-            d *= 0.8;
-            if w < 2.4 || d < 2.2 {
-                break;
-            }
-        }
-    }
-    // dressRoof clutter: 太陽能熱水器, antenna, small AC compressors
-    let mut r = Park(b.seed8);
-    let (o, u, n, len, dep) = lot_frame(&b.pts);
-    let spot = |r: &mut Park| o + u * (r.f() - 0.5) * len * 0.8 + n * (r.f() - 0.5) * dep * 0.8;
-    if b.area > 25.0 && r.f() < 0.45 {
-        let p = spot(&mut r);
-        if pip(p, &b.pts) && b.tank.is_none_or(|t| t.0.distance(p) > 2.0) {
-            let ang = -u.y.atan2(u.x);
-            let t = place(p.x, h, p.y, ang);
-            out.add(
-                Mat::Glass,
-                &geom::cuboid(1.9, 0.08, 1.0),
-                t * trs([0.0, 0.7, 0.0], [-0.6, 0.0, 0.0], [1.0; 3]),
-                WHITE,
-            );
-            out.add(
-                Mat::Metal,
-                &geom::cylinder(0.22, 0.22, 1.9, 10),
-                t * trs([0.0, 1.15, -0.45], [0.0, 0.0, FRAC_PI_2], [1.0; 3]),
-                hex(0xd8dcdc),
-            );
-            for x in [-0.8, 0.8] {
-                out.add(
-                    Mat::Metal,
-                    &geom::cuboid(0.05, 1.0, 0.05),
-                    t * geom::at(x, 0.5, -0.4),
-                    hex(0x7a7e7c),
-                );
-            }
-        }
-    }
-    for _ in 0..(b.area / 80.0).min(3.0) as usize {
-        let p = spot(&mut r);
-        if pip(p, &b.pts) && r.f() < 0.6 {
-            let ang = -u.y.atan2(u.x);
-            out.add(
-                Mat::VCol,
-                &geom::cuboid(0.82, 0.56, 0.32),
-                place(p.x, h + 0.28, p.y, ang),
-                hex(0xe6e2d8),
-            );
-            out.add(
-                Mat::VCol,
-                &geom::cuboid(0.42, 0.42, 0.02),
-                place(p.x, h + 0.28, p.y, ang) * geom::at(-0.12, 0.0, 0.17),
-                hex(0x3a3c3e),
-            );
-        }
-    }
-    if r.f() < 0.35 {
-        let p = spot(&mut r);
-        if pip(p, &b.pts) {
-            out.add(
-                Mat::Metal,
-                &geom::cuboid(0.04, 2.2, 0.04),
-                geom::at(p.x, h + 1.1, p.y),
-                hex(0x777777),
-            );
-            for (y, l) in [(1.9, 1.2), (1.6, 0.9), (1.3, 0.6)] {
-                out.add(
-                    Mat::Metal,
-                    &geom::cuboid(l, 0.03, 0.03),
-                    geom::at(p.x, h + y, p.y),
-                    hex(0x777777),
-                );
-            }
-        }
-    }
 }
 
 /// Outward normal of an actual wall slab. Recessed arcade walls are inside the footprint,
@@ -1007,6 +990,7 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
     if l < 3.0 {
         return;
     }
+    let exterior = super::exterior::plan(b, super::world());
     let u = (w.c - w.a) / l;
     let n = wall_normal(b, w);
     let ry = n.x.atan2(n.y);
@@ -1020,7 +1004,16 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
         let g = geom::cuboid(0.1, 2.8, 0.75)
             .map_uv(|uv, _| [(idx as f32 + uv[0]) / VSIGN_N as f32, 1.0 - uv[1]]);
         let y = (GF + 1.6).min(b.h - 1.5);
-        out.add(Mat::VSign, &g, lt(s, y, 0.5), WHITE);
+        let transform = lt(s, y, 0.5);
+        if !super::exterior::attachment_conflicts(
+            b,
+            &exterior,
+            transform.transform_point3(Vec3::ZERO),
+            Vec3::new(0.05, 1.4, 0.375),
+            n,
+        ) {
+            out.add(Mat::VSign, &g, transform, WHITE);
+        }
     }
     let floors = ((b.h - GF) / FH).floor() as i32;
     for f in 0..floors.max(0) {
@@ -1028,6 +1021,17 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
             let s = 0.8 + r.f() * (l - 1.6);
             let y = GF + f as f32 * FH + 1.0;
             let t = lt(s, y, 0.0);
+            // Keep the same random draw sequence, but omit a whole compressor group
+            // if its body/base would be embedded in a newly admitted balcony.
+            if super::exterior::attachment_conflicts(
+                b,
+                &exterior,
+                t.transform_point3(Vec3::new(0.0, 0.0, 0.2)),
+                Vec3::new(0.42, 0.32, 0.2),
+                n,
+            ) {
+                continue;
+            }
             out.add(
                 Mat::VCol,
                 &geom::cuboid(0.82, 0.56, 0.3),
@@ -1267,18 +1271,130 @@ pub fn near_detail(b: &Bld, kit: &WindowKit) -> Parts {
     p
 }
 
-/// Rooftop shack + clutter (separate so the roof cutaway can hide it with the roof).
+/// Fine roof fittings, separate so the roof cutaway hides them with the persistent shell.
 pub fn near_roof(b: &Bld) -> Parts {
-    let mut p = Parts::default();
-    if b.rcls != RoofClass::None || b.area < 600.0 {
-        rooftop(b, &mut p);
-    }
-    p
+    super::roofs::near_detail(b)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_tin_roof_shape_stays_over_its_walls_in_both_lot_orientations() {
+        for (width, depth) in [(3.2, 6.8), (8.0, 4.0), (5.4, 5.4)] {
+            for seed in 1..=128 {
+                let shell = shack_layer(width, depth, seed * 7919, false, false);
+                assert!(
+                    shell.vcount() <= 64 && shell.0.len() == 1,
+                    "closed shed resident mesh contains fine fittings: {} vertices",
+                    shell.vcount()
+                );
+                let canopy = shack_layer(width, depth, seed * 7919, true, false);
+                assert!(canopy.vcount() <= 176);
+                let posts = &canopy.0[&Mat::Metal];
+                assert_eq!(
+                    posts.vcount(),
+                    96,
+                    "open roof lost its four corner supports"
+                );
+                for mesh in shell.0.values() {
+                    for point in &mesh.pos {
+                        let p = Vec3::from(*point);
+                        assert!(
+                            p.x.abs() <= width * 0.5 + 0.36
+                                && p.z.abs() <= depth * 0.5 + 0.36
+                                && p.y >= -0.01
+                                && p.y <= 5.6,
+                            "shed {width}×{depth} seed {seed} roof leaves its walls: {p:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn open_mono_pitch_caps_do_not_mirror_through_the_roof_plane() {
+        let mut checked = 0;
+        for seed in 1..=128 {
+            let canopy = shack_layer(8.0, 4.0, seed * 7919, true, false);
+            let tin = &canopy.0[&Mat::Tin];
+            let upward: Vec<_> = tin
+                .nrm
+                .iter()
+                .enumerate()
+                .filter(|(_, normal)| normal[1] > 0.1)
+                .collect();
+            let Some(&(first, normal)) = upward.first() else {
+                continue;
+            };
+            let normal = Vec3::from(*normal);
+            if !upward
+                .iter()
+                .all(|(_, n)| normal.dot(Vec3::from(**n)) > 0.9999)
+            {
+                continue;
+            }
+            let origin = Vec3::from(tin.pos[first]);
+            for point in &tin.pos {
+                assert!(normal.dot(Vec3::from(*point) - origin) < 0.002);
+            }
+            // The four permanent posts must reach the actual sloping roof plane.
+            for post in canopy.0[&Mat::Metal].pos.as_chunks::<24>().0 {
+                let centre = post.iter().map(|p| Vec3::from(*p)).sum::<Vec3>() / 24.0;
+                let top = post.iter().map(|p| p[1]).fold(f32::MIN, f32::max);
+                let tip = Vec3::new(centre.x, top, centre.z);
+                assert!(normal.dot(tip - origin).abs() < 0.002);
+            }
+            checked += 1;
+        }
+        assert!(checked > 10);
+    }
+
+    #[test]
+    fn deep_window_surround_has_open_pane_and_shared_bounded_geometry() {
+        let kit = WindowKit::new();
+        assert_eq!(kit.surround.vcount(), 120);
+        let (lo, hi) = kit.surround.aabb();
+        assert!(hi.z - lo.z >= 0.3, "window surround has no physical depth");
+        for triangle in kit.surround.idx.as_chunks::<3>().0 {
+            let (mut lo, mut hi) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+            for &i in triangle {
+                let point = Vec3::from(kit.surround.pos[i as usize]);
+                assert!(point.is_finite());
+                lo = lo.min(point);
+                hi = hi.max(point);
+            }
+            assert!(
+                !(lo.x < (WW - 0.1) * 0.5
+                    && hi.x > -(WW - 0.1) * 0.5
+                    && lo.y < (WH - 0.1) * 0.5
+                    && hi.y > -(WH - 0.1) * 0.5),
+                "masonry occludes the emissive/window opening: {lo:?}..{hi:?}"
+            );
+        }
+        // Check the actual map slots and their rotated placement, not an assumed floor
+        // number. New masonry must stay above every ground door / folded stair ladder.
+        let world = super::super::world();
+        let mut slots = 0;
+        for b in &world.blds {
+            for w in &b.wins {
+                let transform = place(w.p.x, w.p.y, w.p.z, w.ry);
+                for point in &kit.surround.pos {
+                    let p = transform.transform_point3(Vec3::from(*point));
+                    assert!(p.is_finite());
+                    assert!(
+                        p.y >= super::super::exterior::LOWEST_STRUCTURE_Y,
+                        "window masonry crosses the ground corridor at building {}",
+                        b.id
+                    );
+                }
+                slots += 1;
+            }
+        }
+        assert!(slots > 1000);
+    }
 
     #[test]
     fn emissive_windows_are_not_hidden_behind_opaque_glazing() {

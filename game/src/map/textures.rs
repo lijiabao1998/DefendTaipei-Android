@@ -60,6 +60,8 @@ pub struct MapMaterials {
     pub walk: Handle<StandardMaterial>,
     pub curb: Handle<StandardMaterial>,
     pub floor: Handle<StandardMaterial>,
+    /// One neutral, windowless ceramic map, tinted by each building's vertex palette.
+    pub facade_tile: Handle<StandardMaterial>,
     pub arcade_floor: Vec<Handle<StandardMaterial>>,
     pub column: Handle<StandardMaterial>,
     pub shutter: Handle<StandardMaterial>,
@@ -959,6 +961,45 @@ fn roof_tex(kind: usize, seed: u64) -> Canvas {
     c
 }
 
+/// Exterior ceramic cladding in physical metres: eight 12.5 cm tiles by sixteen
+/// 6.25 cm courses. The neutral glaze takes a building's vertex tint, so balcony
+/// owners can have different finishes without a new material or texture per lot.
+fn facade_tile_tex() -> Canvas {
+    let mut r = Rng(0xface_2026);
+    let mut c = Canvas::new(256, 256);
+    c.fill_rect(0.0, 0.0, 256.0, 256.0, css("#898981"));
+    for row in 0..16 {
+        for col in -1..8 {
+            let x = col as f32 * 32.0 + if row % 2 == 0 { 0.0 } else { 16.0 };
+            let y = row as f32 * 16.0;
+            let glaze = 220.0 + r.f() * 29.0;
+            c.fill_rect(x + 1.0, y + 1.0, 30.0, 14.0, rgba(glaze, glaze, glaze, 1.0));
+            c.fill_rect(x + 2.0, y + 1.0, 28.0, 1.0, rgba(255.0, 255.0, 255.0, 0.24));
+            c.fill_rect(x + 1.0, y + 14.0, 30.0, 1.0, rgba(70.0, 70.0, 65.0, 0.18));
+            if r.f() < 0.035 {
+                c.fill_rect(x + 2.0, y + 2.0, 27.0, 11.0, rgba(146.0, 145.0, 137.0, 0.8));
+            }
+        }
+    }
+    // Mild narrow streaks keep repaired ceramic readable without replicating the
+    // dark painted-window motif of the distant wall texture on every balcony.
+    for _ in 0..14 {
+        let x = r.f() * 256.0;
+        let y = r.f() * 200.0;
+        c.grad_rect_v(
+            x,
+            y,
+            1.0 + r.f() * 3.0,
+            35.0,
+            y,
+            y + 35.0,
+            rgba(60.0, 62.0, 53.0, 0.25),
+            rgba(60.0, 62.0, 53.0, 0.0),
+        );
+    }
+    c
+}
+
 fn brick_tex() -> Canvas {
     let mut r = Rng(4242);
     let mut c = Canvas::new(128, 128);
@@ -1031,6 +1072,7 @@ pub fn build_materials(
     let walk_t = tex(sidewalk_tex());
     let curb_t = tex(curb_tex());
     let floor_t = tex(floor_tex());
+    let facade_t = tex(facade_tile_tex());
     let arc_t: Vec<Handle<Image>> = (0..ARCADE_TILE_N)
         .map(|style| tex(arcade_tile_tex(style)))
         .collect();
@@ -1096,6 +1138,7 @@ pub fn build_materials(
             cull_mode: None,
             ..std(Some(floor_t), 0.9)
         }),
+        facade_tile: mats.add(std(Some(facade_t), 0.78)),
         arcade_floor: arc_t
             .into_iter()
             .map(|t| mats.add(std(Some(t), 0.82)))
