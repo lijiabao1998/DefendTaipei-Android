@@ -40,8 +40,9 @@ use crate::player::Player;
 
 /// Chunk edge, metres.
 pub const CHUNK: f32 = 256.0;
-/// Near detail (window units, rooftop shacks) is built for buildings this close…
-const DETAIL_IN: f32 = 70.0;
+/// Near detail (window units and rooftop fittings) is built for buildings this close…
+/// Public so the reproducible geometry audit uses the exact streaming admission rule.
+pub const DETAIL_IN: f32 = 70.0;
 /// …and dropped again beyond this.
 const DETAIL_OUT: f32 = 95.0;
 /// A chunk whose rect is this close to the player is Near (per-building, fadeable)…
@@ -110,6 +111,10 @@ pub fn build_chunk(w: &WorldData, key: ChunkKey, lod: Lod) -> ChunkMeshes {
         let mut m = build::building(b, lod);
         m.structure = exterior::structure(b, w, lod);
         if lod == Lod::Near {
+            // Roofs and facade projections share the same cutaway lifetime.
+            // Batch their identical materials before upload, so one building
+            // does not submit separate metal / vertex-colour shell meshes.
+            m.merge_structure_into_roof();
             buildings.push((b.id, m));
         } else {
             merged.merge(m.walls);
@@ -145,7 +150,12 @@ pub struct BldWalls {
 #[derive(Component, Clone)]
 pub struct BldRoof(pub u32);
 
-/// Window units and wall clutter of a near building.
+/// Persistent roof and facade shell, batched per material and hidden together.
+/// These entities also carry `BldRoof`; close roof fittings do not carry this tag.
+#[derive(Component, Clone)]
+pub struct BldStructure(pub u32);
+
+/// Window units and wall clutter in the close-detail layer of a near building.
 #[derive(Component, Clone)]
 pub struct BldDetail(pub u32);
 
@@ -233,7 +243,9 @@ pub fn spawn_chunk(
         ))
         .with_children(|root| {
             spawn_parts(root, meshes, mats, c.merged, ());
-            for (id, b) in c.buildings {
+            for (id, mut b) in c.buildings {
+                // Also support callers that supply an unbatched BuildingMeshes.
+                b.merge_structure_into_roof();
                 root.spawn((Transform::default(), Visibility::default()))
                     .with_children(|bp| {
                         let wall_mat = b.walls.0.keys().find_map(|k| match k {
@@ -259,16 +271,9 @@ pub fn spawn_chunk(
                             meshes,
                             mats,
                             b.roof,
-                            (BldRoof(id), Visibility::default()),
+                            (BldRoof(id), BldStructure(id), Visibility::default()),
                         );
                         spawn_parts(bp, meshes, mats, b.base, ());
-                        spawn_parts(
-                            bp,
-                            meshes,
-                            mats,
-                            b.structure,
-                            (BldDetail(id), Visibility::default()),
-                        );
                     });
             }
         })
@@ -396,7 +401,8 @@ fn setup_map(
     ));
 }
 
-fn want_lod(k: ChunkKey, p: Vec2) -> Lod {
+/// Desired chunk LOD for both the live streamer and the planned-resident audit.
+pub fn want_lod(k: ChunkKey, p: Vec2) -> Lod {
     let d = k.dist(p);
     if d < NEAR_R {
         Lod::Near
@@ -606,7 +612,16 @@ mod streaming_work_tests {
         building.structure = exterior::structure(b, data, Lod::Near);
         assert!(building.structure.0.contains_key(&Mat::FacadeTile));
         assert!(building.structure.0.contains_key(&Mat::Metal));
-        let expected_vertices = building.structure.vcount();
+        let expected_vertices = building.structure.vcount() + building.roof.vcount();
+        let expected_materials: HashSet<_> = building
+            .structure
+            .0
+            .keys()
+            .chain(building.roof.0.keys())
+            .copied()
+            .collect();
+        let separate_mesh_count = building.structure.0.len() + building.roof.0.len();
+        assert!(expected_materials.len() < separate_mesh_count);
 
         let mut images = Assets::<Image>::default();
         let mut materials = Assets::<StandardMaterial>::default();
@@ -634,14 +649,21 @@ mod streaming_work_tests {
             .id();
         let architecture: HashMap<_, _> = app
             .world_mut()
-            .query_filtered::<(Entity, &MeshMaterial3d<StandardMaterial>), With<BldDetail>>()
+            .query_filtered::<(Entity, &MeshMaterial3d<StandardMaterial>), With<BldStructure>>()
             .iter(app.world())
             .map(|(entity, material)| (entity, material.0.clone()))
             .collect();
-        assert_eq!(architecture.len(), 3);
+        assert_eq!(architecture.len(), expected_materials.len());
+        for expected in &expected_materials {
+            assert!(
+                architecture
+                    .values()
+                    .any(|handle| *handle == material(&mats, *expected))
+            );
+        }
         let uploaded_vertices: usize = app
             .world_mut()
-            .query_filtered::<&MapMeshGeometry, With<BldDetail>>()
+            .query_filtered::<&MapMeshGeometry, With<BldStructure>>()
             .iter(app.world())
             .map(|geometry| geometry.vertices)
             .sum();
@@ -755,6 +777,18 @@ mod streaming_work_tests {
     }
 }
 
+/// Existing fixed-camera obstruction rule, shared with exterior QA selection.
+/// Being inside a building is a separate cutaway condition.
+pub(crate) fn exterior_blocks_camera(b: &data::Bld, p: Vec2) -> bool {
+    let d = b.c - p;
+    d.x.abs() < 40.0
+        && d.y.abs() < 40.0
+        && d.x + d.y > -4.0
+        && d.x + d.y < 30.0
+        && (d.x - d.y).abs() < 22.0
+        && b.h > 4.0
+}
+
 /// The building cutaway of main.ts: a building between the camera and the player (the camera
 /// sits at +x +z) turns its walls see-through and drops its roof; the building the player is
 /// in does too, and its walls shrink to a low ring.
@@ -781,14 +815,7 @@ fn cutaway(
     let mut front: HashSet<u32> = HashSet::new();
     for id in w.blds_in(p - 40.0, p + 40.0) {
         let b = &w.blds[id as usize];
-        let d = b.c - p;
-        if d.x.abs() < 40.0
-            && d.y.abs() < 40.0
-            && d.x + d.y > -4.0
-            && d.x + d.y < 30.0
-            && (d.x - d.y).abs() < 22.0
-            && b.h > 4.0
-        {
+        if exterior_blocks_camera(b, p) {
             front.insert(id);
         }
     }

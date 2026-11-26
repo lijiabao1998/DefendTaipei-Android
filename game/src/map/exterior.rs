@@ -82,8 +82,8 @@ pub struct ExteriorPlan {
 }
 
 /// CPU/upload limits apply to the new structural layer, not pre-existing window detail.
-pub const MAX_NEAR_VERTICES: usize = 10_000;
-pub const MAX_MID_VERTICES: usize = 5_000;
+pub const MAX_NEAR_VERTICES: usize = 5_000;
+pub const MAX_MID_VERTICES: usize = 2_800;
 pub const LOWEST_STRUCTURE_Y: f32 = 2.6;
 
 fn stable_hash(b: &Bld) -> u32 {
@@ -488,8 +488,66 @@ fn divider_position(b: &Bld, f: Frontage, desired: f32, width: f32) -> Option<f3
     candidates.first().copied()
 }
 
-fn tile_box(w: f32, h: f32, d: f32) -> MeshBuf {
-    let mut mesh = geom::cuboid(w, h, d);
+const RIGHT: u8 = 1;
+const LEFT: u8 = 2;
+const TOP: u8 = 4;
+const BOTTOM: u8 = 8;
+const FRONT: u8 = 16;
+const BACK: u8 = 32;
+const ALL_FACES: u8 = RIGHT | LEFT | TOP | BOTTOM | FRONT | BACK;
+
+/// Faces buried in an existing wall or joined to another structural piece never
+/// reach the screen. Keep independent normals/UVs on every remaining flat face.
+fn cuboid_shell(size: Vec3, faces: u8) -> MeshBuf {
+    let source = geom::cuboid(size.x, size.y, size.z);
+    let mut mesh = MeshBuf::default();
+    for face in 0..6 {
+        if faces & (1 << face) == 0 {
+            continue;
+        }
+        let base = mesh.vcount() as u32;
+        let range = face * 4..face * 4 + 4;
+        mesh.pos.extend_from_slice(&source.pos[range.clone()]);
+        mesh.nrm.extend_from_slice(&source.nrm[range.clone()]);
+        mesh.uv.extend_from_slice(&source.uv[range.clone()]);
+        mesh.col.extend_from_slice(&source.col[range]);
+        mesh.idx
+            .extend_from_slice(&[base, base + 2, base + 1, base + 2, base + 3, base + 1]);
+    }
+    mesh
+}
+
+/// Narrow steel rails have a softened highlight and share their eight corner
+/// vertices. The solid outline/AABB and triangle winding remain exactly a box;
+/// only the old per-face duplicate vertices and hard lighting seams disappear.
+fn metal_box(size: Vec3) -> MeshBuf {
+    let source = geom::cuboid(size.x, size.y, size.z);
+    let mut mesh = MeshBuf::default();
+    for vertex in 0..8 {
+        let sign = Vec3::new(
+            if vertex & 1 == 0 { -1.0 } else { 1.0 },
+            if vertex & 2 == 0 { -1.0 } else { 1.0 },
+            if vertex & 4 == 0 { -1.0 } else { 1.0 },
+        );
+        mesh.pos.push((sign * size * 0.5).into());
+        // Do not give a several-metre rail a sphere-like longitudinal highlight.
+        // Inverse dimensions keep its long side normals almost perpendicular to
+        // the rail, while softening the tiny end caps without extra vertices.
+        mesh.nrm.push((sign / size).normalize().into());
+        mesh.uv.push([0.0; 2]);
+        mesh.col.push([1.0; 4]);
+    }
+    for index in source.idx {
+        let p = source.pos[index as usize];
+        let mapped =
+            u32::from(p[0] > 0.0) | (u32::from(p[1] > 0.0) << 1) | (u32::from(p[2] > 0.0) << 2);
+        mesh.idx.push(mapped);
+    }
+    mesh
+}
+
+fn tile_box(size: Vec3, faces: u8) -> MeshBuf {
+    let mut mesh = cuboid_shell(size, faces);
     for i in 0..mesh.pos.len() {
         let p = mesh.pos[i];
         let n = mesh.nrm[i];
@@ -506,10 +564,14 @@ fn tile_box(w: f32, h: f32, d: f32) -> MeshBuf {
 
 #[allow(clippy::too_many_arguments)]
 fn box_at(out: &mut Parts, mat: Mat, t: Mat4, size: Vec3, p: Vec3, color: u32) {
-    let mesh = if mat == Mat::FacadeTile {
-        tile_box(size.x, size.y, size.z)
-    } else {
-        geom::cuboid(size.x, size.y, size.z)
+    shell_at(out, mat, t, size, p, color, ALL_FACES);
+}
+
+fn shell_at(out: &mut Parts, mat: Mat, t: Mat4, size: Vec3, p: Vec3, color: u32, faces: u8) {
+    let mesh = match mat {
+        Mat::FacadeTile => tile_box(size, faces),
+        Mat::Metal => metal_box(size),
+        _ => cuboid_shell(size, faces),
     };
     out.add(mat, &mesh, t * Mat4::from_translation(p), hex(color));
 }
@@ -524,7 +586,7 @@ fn bar(out: &mut Parts, t: Mat4, a: Vec3, b: Vec3, width: f32, color: u32) {
         * Mat4::from_quat(Quat::from_rotation_arc(Vec3::Y, delta / length));
     out.add(
         Mat::Metal,
-        &geom::cuboid(width, length, width),
+        &metal_box(Vec3::new(width, length, width)),
         t * transform,
         hex(color),
     );
@@ -568,23 +630,29 @@ fn facade_rhythm(b: &Bld, spec: ExteriorSpec, lod: Lod, out: &mut Parts) {
         if y > b.h + 0.01 {
             break;
         }
-        box_at(
+        shell_at(
             out,
             Mat::VCol,
             t,
             Vec3::new(width, band_h, 0.24),
             Vec3::new(0.0, y - band_h * 0.5, 0.12),
             concrete,
+            if lod == Lod::Near {
+                FRONT | TOP | BOTTOM | LEFT | RIGHT
+            } else {
+                FRONT | TOP
+            },
         );
         if lod == Lod::Near {
-            // Thin drip edge gives a readable dark underside without real-time shadows.
-            box_at(
+            // The exposed dark face/underside carries the same drip-edge contrast.
+            shell_at(
                 out,
                 Mat::VCol,
                 t,
                 Vec3::new(width, 0.045, 0.255),
                 Vec3::new(0.0, y - band_h - 0.014, 0.13),
                 0x777970,
+                FRONT | BOTTOM,
             );
         }
     }
@@ -613,27 +681,35 @@ fn facade_rhythm(b: &Bld, spec: ExteriorSpec, lod: Lod, out: &mut Parts) {
             continue;
         }
         placed.push(x);
-        box_at(
+        shell_at(
             out,
             Mat::FacadeTile,
             t,
             Vec3::new(divider_w, upper + 0.06, 0.16),
             Vec3::new(x, GF + upper * 0.5, 0.16),
             tile,
+            if lod == Lod::Near {
+                FRONT | LEFT | RIGHT | TOP
+            } else {
+                FRONT
+            },
         );
     }
     if spec.typology == Typology::Townhouse {
-        // One narrow owner cornice, deliberately different from continuous shop bays.
-        box_at(
+        shell_at(
             out,
             Mat::FacadeTile,
             t,
             Vec3::new(width, 0.28, 0.36),
             Vec3::new(0.0, b.h - 0.06, 0.16),
             tile,
+            if lod == Lod::Near {
+                FRONT | TOP | BOTTOM | LEFT | RIGHT
+            } else {
+                FRONT | TOP
+            },
         );
     } else if spec.typology == Typology::Shophouse {
-        // Each proprietor has a separate slightly stepped parapet/coping band.
         let pitch = width / spec.bays as f32;
         for bay in 0..spec.bays {
             let rise = if (bay + spec.palette).is_multiple_of(2) {
@@ -641,13 +717,14 @@ fn facade_rhythm(b: &Bld, spec: ExteriorSpec, lod: Lod, out: &mut Parts) {
             } else {
                 0.06
             };
-            box_at(
+            shell_at(
                 out,
                 Mat::FacadeTile,
                 t,
                 Vec3::new(pitch - 0.1, 0.32, 0.28),
                 Vec3::new(-width * 0.5 + pitch * (bay as f32 + 0.5), b.h + rise, 0.13),
                 tile,
+                FRONT | TOP | LEFT | RIGHT,
             );
         }
     }
@@ -664,38 +741,46 @@ fn balconies(b: &Bld, plan: &ExteriorPlan, lod: Lod, out: &mut Parts) {
         );
         let (width, depth) = (balcony.width, balcony.depth);
         for y in balcony_floors(b, plan.spec) {
-            box_at(
+            shell_at(
                 out,
                 Mat::VCol,
                 t,
                 Vec3::new(width, 0.18, depth),
                 Vec3::new(0.0, y - 0.09, depth * 0.5),
                 concrete,
+                if lod == Lod::Near {
+                    TOP | FRONT | LEFT | RIGHT | BOTTOM
+                } else {
+                    TOP | FRONT | LEFT | RIGHT
+                },
             );
             let wall_h = if plan.spec.typology == Typology::Walkup {
                 0.54
             } else {
                 0.76
             };
-            box_at(
+            // Front and side parapets join each other and the floor. Keep both visible
+            // wall faces and the coping, without hidden bottom or joined end caps.
+            shell_at(
                 out,
                 Mat::FacadeTile,
                 t,
                 Vec3::new(width, wall_h, 0.13),
                 Vec3::new(0.0, y + wall_h * 0.5, depth - 0.065),
                 tile,
+                FRONT | BACK | TOP,
             );
             for side in [-1.0, 1.0] {
-                box_at(
+                shell_at(
                     out,
                     Mat::FacadeTile,
                     t,
                     Vec3::new(0.13, wall_h, (depth - 0.09).max(0.1)),
                     Vec3::new(side * (width * 0.5 - 0.065), y + wall_h * 0.5, depth * 0.5),
                     tile,
+                    LEFT | RIGHT | TOP,
                 );
             }
-            // The top rail remains at Mid to preserve the balcony's open silhouette.
             box_at(
                 out,
                 Mat::Metal,
@@ -724,6 +809,104 @@ fn balconies(b: &Bld, plan: &ExteriorPlan, lod: Lod, out: &mut Parts) {
     }
 }
 
+fn quad(mesh: &mut MeshBuf, points: [Vec3; 4], normal: Vec3) {
+    let base = mesh.vcount() as u32;
+    for point in points {
+        mesh.pos.push(point.into());
+        mesh.nrm.push(normal.into());
+        mesh.uv.push([point.x, point.y]);
+        mesh.col.push([1.0; 4]);
+    }
+    let outward = (points[1] - points[0])
+        .cross(points[2] - points[0])
+        .dot(normal)
+        > 0.0;
+    if outward {
+        mesh.idx
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    } else {
+        mesh.idx
+            .extend_from_slice(&[base, base + 2, base + 1, base, base + 3, base + 2]);
+    }
+}
+
+/// One thin concrete flight with true stepped top and a sloping underside. Adjacent
+/// treads share their two side profiles instead of repeating six faces for every box.
+fn stair_flight(run: f32, rise: f32, width: f32, steps: usize) -> MeshBuf {
+    let mut mesh = MeshBuf::default();
+    let half = width * 0.5;
+    for step in 0..steps {
+        let x0 = run * step as f32 / steps as f32;
+        let x1 = run * (step + 1) as f32 / steps as f32;
+        let y0 = rise * step as f32 / steps as f32;
+        let y1 = rise * (step + 1) as f32 / steps as f32;
+        quad(
+            &mut mesh,
+            [
+                Vec3::new(x0, y1, -half),
+                Vec3::new(x1, y1, -half),
+                Vec3::new(x1, y1, half),
+                Vec3::new(x0, y1, half),
+            ],
+            Vec3::Y,
+        );
+        quad(
+            &mut mesh,
+            [
+                Vec3::new(x0, y0, -half),
+                Vec3::new(x0, y1, -half),
+                Vec3::new(x0, y1, half),
+                Vec3::new(x0, y0, half),
+            ],
+            Vec3::NEG_X,
+        );
+    }
+    let mut profile = vec![
+        Vec2::new(0.0, -0.12),
+        Vec2::new(run, rise - 0.12),
+        Vec2::new(run, rise),
+    ];
+    for step in (0..steps).rev() {
+        let x = run * step as f32 / steps as f32;
+        profile.push(Vec2::new(x, rise * (step + 1) as f32 / steps as f32));
+        if step > 0 {
+            profile.push(Vec2::new(x, rise * step as f32 / steps as f32));
+        }
+    }
+    let side = geom::shape(&profile);
+    mesh.add_white(&side, geom::at(0.0, 0.0, half));
+    mesh.add_white(
+        &side,
+        geom::at(0.0, 0.0, -half) * Mat4::from_scale(Vec3::new(1.0, 1.0, -1.0)),
+    );
+    quad(
+        &mut mesh,
+        [
+            Vec3::new(0.0, -0.12, -half),
+            Vec3::new(run, rise - 0.12, -half),
+            Vec3::new(run, rise - 0.12, half),
+            Vec3::new(0.0, -0.12, half),
+        ],
+        Vec3::new(rise, -run, 0.0).normalize(),
+    );
+    for (x, lo, hi, n) in [
+        (0.0, -0.12, 0.0, Vec3::NEG_X),
+        (run, rise - 0.12, rise, Vec3::X),
+    ] {
+        quad(
+            &mut mesh,
+            [
+                Vec3::new(x, lo, -half),
+                Vec3::new(x, hi, -half),
+                Vec3::new(x, hi, half),
+                Vec3::new(x, lo, half),
+            ],
+            n,
+        );
+    }
+    mesh
+}
+
 fn stair_geometry(stair: ServiceStair, lod: Lod, rail: u32, out: &mut Parts) {
     let t = place(
         stair.centre.x,
@@ -733,18 +916,28 @@ fn stair_geometry(stair: ServiceStair, lod: Lod, rail: u32, out: &mut Parts) {
     );
     let left = -stair.width * 0.5 + 0.45;
     let right = stair.width * 0.5 - 0.45;
-    let run = right - left;
+    // Landings are 0.85 m wide and centred 0.02 m beyond the nominal endpoints.
+    // Join their inner edges; ending at their centres duplicates the final tread
+    // across the landing top and makes two differently coloured surfaces z-fight.
+    let flight_left = left + 0.405;
+    let flight_right = right - 0.405;
+    let run = flight_right - flight_left;
     let lanes = [0.68, 1.72];
     let stories = ((stair.top - stair.bottom) / FH).round() as usize;
     for level in 0..=stories {
         let y = stair.bottom + level as f32 * FH;
-        box_at(
+        shell_at(
             out,
             Mat::VCol,
             t,
             Vec3::new(0.85, 0.16, stair.depth - 0.14),
             Vec3::new(left - 0.02, y - 0.08, stair.depth * 0.5),
             0xb9b5a9,
+            if lod == Lod::Near {
+                TOP | BOTTOM | FRONT | LEFT | RIGHT
+            } else {
+                TOP | FRONT | LEFT | RIGHT
+            },
         );
         // Closed service access makes each landing visibly connect to its owner.
         // These upper doors are part of the scenery, never dynamic ground doors.
@@ -812,13 +1005,18 @@ fn stair_geometry(stair: ServiceStair, lod: Lod, rail: u32, out: &mut Parts) {
             break;
         }
         let mid = y + FH * 0.5;
-        box_at(
+        shell_at(
             out,
             Mat::VCol,
             t,
             Vec3::new(0.85, 0.16, stair.depth - 0.14),
             Vec3::new(right + 0.02, mid - 0.08, stair.depth * 0.5),
             0xb9b5a9,
+            if lod == Lod::Near {
+                TOP | BOTTOM | FRONT | LEFT | RIGHT
+            } else {
+                TOP | FRONT | LEFT | RIGHT
+            },
         );
         bar(
             out,
@@ -840,26 +1038,18 @@ fn stair_geometry(stair: ServiceStair, lod: Lod, rail: u32, out: &mut Parts) {
         }
         for (flight, &z) in lanes.iter().enumerate() {
             let (start, end, base) = if flight == 0 {
-                (left, right, y)
+                (flight_left, flight_right, y)
             } else {
-                (right, left, mid)
+                (flight_right, flight_left, mid)
             };
             let steps = if lod == Lod::Near { 10 } else { 4 };
-            for step in 0..steps {
-                let fraction = (step as f32 + 0.5) / steps as f32;
-                box_at(
-                    out,
-                    Mat::VCol,
-                    t,
-                    Vec3::new(run / steps as f32 + 0.025, 0.13, 0.91),
-                    Vec3::new(
-                        start + (end - start) * fraction,
-                        base + (step + 1) as f32 / steps as f32 * FH * 0.5 - 0.065,
-                        z,
-                    ),
-                    0xa5a69e,
-                );
-            }
+            out.add(
+                Mat::VCol,
+                &stair_flight(run, FH * 0.5, 0.91, steps),
+                t * geom::at(start, base, z)
+                    * Mat4::from_scale(Vec3::new((end - start).signum(), 1.0, 1.0)),
+                hex(0xa5a69e),
+            );
             for edge in [-0.42, 0.42] {
                 bar(
                     out,
@@ -1211,5 +1401,55 @@ mod tests {
             Vec2::new(3.0, 3.0),
         ];
         assert!(!polygons_overlap(&a, &outside));
+    }
+
+    fn outward_triangles(mesh: &MeshBuf) -> bool {
+        mesh.idx.as_chunks::<3>().0.iter().all(|triangle| {
+            let a = Vec3::from(mesh.pos[triangle[0] as usize]);
+            let b = Vec3::from(mesh.pos[triangle[1] as usize]);
+            let c = Vec3::from(mesh.pos[triangle[2] as usize]);
+            let expected = Vec3::from(mesh.nrm[triangle[0] as usize])
+                + Vec3::from(mesh.nrm[triangle[1] as usize])
+                + Vec3::from(mesh.nrm[triangle[2] as usize]);
+            (b - a).cross(c - a).dot(expected) > 0.0
+        })
+    }
+
+    #[test]
+    fn compact_metal_rails_keep_solid_bounds_and_outward_faces() {
+        for size in [Vec3::new(4.4, 0.055, 0.055), Vec3::new(0.04, 0.92, 0.04)] {
+            let compact = metal_box(size);
+            let original = geom::cuboid(size.x, size.y, size.z);
+            assert_eq!(compact.aabb(), original.aabb());
+            assert_eq!(compact.vcount(), 8);
+            assert_eq!(compact.idx.len(), original.idx.len());
+            assert!(outward_triangles(&compact));
+            let long_axis = if size.x > size.y { 0 } else { 1 };
+            assert!(compact.nrm.iter().all(|n| n[long_axis].abs() < 0.04));
+        }
+    }
+
+    #[test]
+    fn shared_stair_shell_keeps_real_steps_and_landings_with_less_payload() {
+        for steps in [10, 4] {
+            let mesh = stair_flight(3.3, FH * 0.5, 0.91, steps);
+            let (lo, hi) = mesh.aabb();
+            assert_eq!(lo, Vec3::new(0.0, -0.12, -0.455));
+            assert_eq!(hi, Vec3::new(3.3, FH * 0.5, 0.455));
+            assert!(outward_triangles(&mesh));
+            for step in 0..steps {
+                let height = FH * 0.5 * (step + 1) as f32 / steps as f32;
+                let top_vertices = mesh
+                    .pos
+                    .iter()
+                    .zip(&mesh.nrm)
+                    .filter(|(p, n)| (p[1] - height).abs() < 1e-5 && n[1] > 0.99)
+                    .count();
+                assert!(top_vertices >= 4, "missing tread {step}/{steps}");
+            }
+            let payload = mesh.vcount() * 48 + mesh.idx.len() * 4;
+            let original_payload = steps * (24 * 48 + 36 * 4);
+            assert!(payload * 10 < original_payload * 7);
+        }
     }
 }

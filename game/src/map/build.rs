@@ -64,12 +64,21 @@ impl Parts {
 pub struct BuildingMeshes {
     /// Fades to see-through when it hides the player (wallMatsT).
     pub walls: Parts,
-    /// Roof slab, rooftop and arcade soffit: hidden while the player is inside (roof cutaway).
+    /// Roof slab, rooftop and arcade soffit; also holds the facade structure
+    /// after Near shell batching. All hide during the same building cutaway.
     pub roof: Parts,
     /// Floor, arcade floor / columns / shutters, signs: always drawn.
     pub base: Parts,
-    /// Balcony/stair/facade masses: hidden with detail during cutaway, never wall-faded.
+    /// Balcony/stair/facade masses before shell batching, never wall-faded.
     pub structure: Parts,
+}
+
+impl BuildingMeshes {
+    /// One shared-material shell per building. This preserves every vertex and
+    /// the original materials while avoiding duplicate roof/facade draw batches.
+    pub fn merge_structure_into_roof(&mut self) {
+        self.roof.merge(std::mem::take(&mut self.structure));
+    }
 }
 
 pub const WHITE: [f32; 4] = [1.0; 4];

@@ -9,7 +9,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use super::build::{Lod, Mat, Parts, WHITE};
 use super::data::{Bld, Park, RoofClass, pip, seg_dist};
-use crate::geom::{self, hex, place, trs};
+use crate::geom::{self, MeshBuf, hex, place, trs};
 
 /// Oriented horizontal footprint. Local +Z faces the existing street entrance.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -276,6 +276,25 @@ fn parapet_height(b: &Bld) -> f32 {
     }
 }
 
+/// Keep only visible faces of a box, using geom::cuboid's documented face order.
+/// Buried bottoms and covered tops do not reach the screen. Joint ends remain capped:
+/// neighbouring roof edges do not fully cover them at every corner angle.
+fn box_faces(width: f32, height: f32, depth: f32, faces: &[usize]) -> MeshBuf {
+    let source = geom::cuboid(width, height, depth);
+    let mut out = MeshBuf::default();
+    for &face in faces {
+        let first = face * 4;
+        let base = out.pos.len() as u32;
+        out.pos.extend_from_slice(&source.pos[first..first + 4]);
+        out.nrm.extend_from_slice(&source.nrm[first..first + 4]);
+        out.uv.extend_from_slice(&source.uv[first..first + 4]);
+        out.col.extend_from_slice(&source.col[first..first + 4]);
+        out.idx
+            .extend([base, base + 2, base + 1, base + 2, base + 3, base + 1]);
+    }
+    out
+}
+
 fn parapets(b: &Bld, fine: bool, out: &mut Parts) {
     if b.rcls == RoofClass::None {
         return;
@@ -295,27 +314,28 @@ fn parapets(b: &Bld, fine: bool, out: &mut Parts) {
         if !fine {
             out.add(
                 Mat::VCol,
-                &geom::cuboid(length + 0.06, ph, 0.18),
+                // The coping covers the top; retain the ends to close roof corners.
+                &box_faces(length + 0.06, ph, 0.18, &[0, 1, 4, 5]),
                 transform * geom::at(0.0, ph / 2.0, 0.0),
                 hex(tint),
             );
             out.add(
                 Mat::VCol,
-                &geom::cuboid(length + 0.12, 0.07, 0.27),
+                &box_faces(length + 0.12, 0.07, 0.27, &[0, 1, 2, 4, 5]),
                 transform * geom::at(0.0, ph + 0.035, 0.0),
                 hex(0xd0c8b7),
             );
-            if b.lv >= 4 {
-                for y in [0.81, 1.02] {
-                    out.add(
-                        Mat::Metal,
-                        &geom::cuboid(length, 0.035, 0.035),
-                        transform * geom::at(0.0, y, 0.0),
-                        hex(0x7b817d),
-                    );
-                }
-            }
         } else if b.lv >= 4 {
+            // Thin rails are near detail along with their uprights; the solid parapet
+            // and its coping remain identical in both chunk LODs.
+            for y in [0.81, 1.02] {
+                out.add(
+                    Mat::Metal,
+                    &geom::cuboid(length, 0.035, 0.035),
+                    transform * geom::at(0.0, y, 0.0),
+                    hex(0x7b817d),
+                );
+            }
             let posts = (length / 2.4).ceil().clamp(1.0, 12.0) as usize;
             for k in 0..=posts {
                 out.add(
@@ -358,17 +378,25 @@ pub fn structure(b: &Bld, lod: Lod) -> Parts {
     }
     if let Some(access) = plan.access {
         let transform = access.transform(b.h);
+        let mut walls = box_faces(2.35, 2.35, 2.7, &[0, 1, 2, 4, 5]);
+        for (point, colour) in walls.pos.iter().zip(&mut walls.col) {
+            // A low damp gradient is vertex colour in the existing mesh/material.
+            // Keep these older concrete volumes quieter than the coloured tin sheds.
+            let shade = 0.72 + 0.28 * ((point[1] + 1.175) / 2.35).clamp(0.0, 1.0);
+            *colour = [shade, shade, shade, 1.0];
+        }
+        let palette = [0x93948a, 0xa29b89, 0x8e9892, 0xaa9e87];
         out.add(
             Mat::VCol,
-            &geom::cuboid(2.35, 2.35, 2.7),
+            &walls,
             transform * geom::at(0.0, 1.175, 0.0),
-            hex(if b.lv <= 3 { 0xc5b7a0 } else { 0xa8afa9 }),
+            hex(palette[((b.seed8 ^ b.seed7) % palette.len() as u64) as usize]),
         );
         out.add(
             Mat::VCol,
-            &geom::cuboid(2.6, 0.16, 2.95),
+            &box_faces(2.6, 0.16, 2.95, &[0, 1, 2, 4, 5]),
             transform * geom::at(0.0, 2.38, 0.0),
-            hex(0xd0c8b6),
+            hex(0xaaa591),
         );
     }
     out
@@ -607,7 +635,7 @@ mod tests {
             assert_eq!(structure(b, Lod::Far).vcount(), 0);
             assert_eq!(near.vcount(), mid.vcount());
             assert!(
-                near.vcount() <= 5200,
+                near.vcount() <= 1280,
                 "roof {} shell {}",
                 b.id,
                 near.vcount()
@@ -633,6 +661,43 @@ mod tests {
             checked += usize::from(near.vcount() > 0);
         }
         assert!(checked > 200);
+    }
+
+    #[test]
+    fn roof_corner_caps_close_the_exposed_wall_and_coping_end_strips() {
+        let mut b = super::super::world().blds[0].clone();
+        b.pts = vec![
+            Vec2::ZERO,
+            Vec2::new(10.0, 0.0),
+            Vec2::splat(10.0),
+            Vec2::new(0.0, 10.0),
+        ];
+        b.rcls = RoofClass::Walkup;
+        b.lv = 4;
+        let mut parts = Parts::default();
+        parapets(&b, false, &mut parts);
+        let mesh = &parts.0[&Mat::VCol];
+        // At this 90-degree corner, the neighbouring edge begins at z=-0.03/-0.06.
+        // These outward-facing end strips would therefore remain open without caps.
+        for point in [
+            Vec3::new(10.03, b.h + 0.2, -0.06),
+            Vec3::new(10.06, b.h + parapet_height(&b) + 0.035, -0.1),
+        ] {
+            let covered = mesh.idx.as_chunks::<3>().0.iter().any(|triangle| {
+                let p = triangle.map(|i| Vec3::from(mesh.pos[i as usize]));
+                if p.iter().any(|p| (p.x - point.x).abs() > 0.002)
+                    || mesh.nrm[triangle[0] as usize][0] < 0.99
+                {
+                    return false;
+                }
+                let q = point.yz();
+                let sides: Vec<_> = (0..3)
+                    .map(|i| (p[(i + 1) % 3].yz() - p[i].yz()).perp_dot(q - p[i].yz()))
+                    .collect();
+                sides.iter().all(|v| *v >= -0.001) || sides.iter().all(|v| *v <= 0.001)
+            });
+            assert!(covered, "uncapped roof corner at {point:?}");
+        }
     }
 
     #[test]

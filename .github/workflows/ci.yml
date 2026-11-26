@@ -55,6 +55,11 @@ jobs:
       - name: cargo test (desktop)
         run: cargo test -p defend_taipei --lib
 
+      - name: Exterior geometry budget and world preservation
+        run: |
+          mkdir -p native-qa
+          cargo run -p defend_taipei --example exterior_workload -- --check > native-qa/exterior-workload.json
+
       - name: cargo build (desktop)
         run: cargo build -p defend_taipei --bin defend-taipei
 
@@ -85,7 +90,22 @@ jobs:
           test -n "$VK_ICD_FILENAMES"
           # Leave a minute after the internal 25-minute deadline to write evidence.
           timeout 1560s target/debug/defend-taipei --qa > native-qa.log 2>&1
-          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 53, report; exterior=[c["exterior"] for c in report["captures"] if "exterior" in c]; assert len(exterior) == 6, report; assert {c["scene"] for c in exterior} == {"Townhouse", "Walkup", "Shophouse", "ServiceStair", "Rooftop", "Cutaway"}, report; assert sum(c["cutaway_hidden"] for c in exterior) == 1, report'
+          python3 - <<'PY'
+          import json
+          report = json.load(open("native-qa/qa-report.json"))
+          assert report["success"] and report["scope"] == "full", report
+          assert report["expected_captures"] == 53 and len(report["captures"]) == 53, report
+          exterior = [capture["exterior"] for capture in report["captures"] if "exterior" in capture]
+          assert len(exterior) == 6, report
+          assert {capture["scene"] for capture in exterior} == {"Townhouse", "Walkup", "Shophouse", "ServiceStair", "Rooftop", "Cutaway"}, report
+          assert sum(capture["cutaway_hidden"] for capture in exterior) == 1, report
+          for capture in exterior:
+              groups = [capture[name] for name in ("persistent_shell", "facade_detail", "roof_fittings")]
+              assert all(group["meshes"] > 0 and group["vertices"] >= 20 for group in groups), capture
+              assert sum(group["meshes"] for group in groups) == capture["total_meshes"], capture
+              assert sum(group["vertices"] for group in groups) == capture["total_vertices"], capture
+              assert all((group["in_main_view"] == 0) == capture["cutaway_hidden"] for group in groups), capture
+          PY
 
       - name: Upload native QA evidence
         if: always()

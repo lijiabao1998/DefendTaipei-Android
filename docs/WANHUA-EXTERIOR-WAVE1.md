@@ -43,9 +43,9 @@ Rear stair assemblies have upper landings, switchback flights, guards, service-a
 | Roof shed, coping and headhouse | Persistent shell | Identical shell and layout | Omitted |
 | Windows, gutters, rooftop appliances and small fittings | Existing 70 m admission / 95 m removal layer | Omitted | Omitted |
 
-Facade architecture has its own `BuildingMeshes.structure` group. Near chunks tag it with `BldDetail`; roofs use `BldRoof`. They hide when the player enters or passes behind that building and return with their original ceramic/metal materials. They are never assigned `BldWalls`, whose material replacement and height scaling are specific to the main walls. Mid chunks merge the same shared material batches.
+Facade architecture is generated in `BuildingMeshes.structure`, then merged into the roof by shared material before Near upload. The resulting persistent shell carries `BldStructure` and `BldRoof`; close facade details keep `BldDetail`, and close roof fittings carry `BldRoof` without `BldStructure`. QA counts these three groups once each. The shell hides when the player enters or passes behind that building and returns with its original ceramic/metal materials. It never receives `BldWalls`, whose material replacement and height scaling are specific to the main walls. Mid chunks merge the same shared material batches across buildings.
 
-The new facade layer is limited to three shared materials, at most 10,000 vertices per building at Near and 5,000 at Mid. Roof shell/fittings also have explicit whole-world mesh and material limits in their tests. These are workload limits, not a claim about physical-phone FPS.
+The new facade layer is limited to three shared materials, at most 5,000 vertices per building at Near and 2,800 at Mid. Wall-mounted strips omit buried faces, balcony parapets retain their visible inner/outer/top faces, steel rails share corner vertices, and stair flights retain their actual stepped top in one connected shell. Small roof rails, gutters, pipes and ridge trim belong to the close-detail layer; open canopies retain structural corner posts at every visible shell LOD. Roof shells are capped at 1,280 vertices and three materials per building; fine fittings are capped at 16,000 vertices and six materials across the whole-world tests. These are workload limits, not a claim about physical-phone FPS.
 
 `WorldData` planning, source footprints, doors, collision segments, building IDs, interior fixture IDs and seeds are unchanged. No save migration is introduced. Existing door, barricade, loot, Continue and APK-update gates remain part of CI.
 
@@ -53,7 +53,7 @@ The new facade layer is limited to three shared materials, at most 10,000 vertic
 
 The standard workflow retains the original 47 GPU screenshots and adds six exterior captures (53 total). Original street/entrance views remain comparable with CI #72. The new captures select actual eligible lots and record the building ID, typology, player/camera position, zoom, projected bounds, admitted balcony/stair/roof features, uploaded mesh counts and streaming state.
 
-The capture gate waits for the target's Near chunk and detailed facade/roof entities. It checks actual camera framing and cutaway visibility. Mesh counts and bounds are recorded before GPU upload, because the production renderer releases CPU vertex arrays after extraction.
+The capture gate waits for the target's Near chunk and detailed facade/roof entities. It checks actual camera framing, propagated visibility and membership in the game camera's visible-entity list. Outdoor fixture selection shares the exact cutaway obstruction predicate with the renderer, so a concave lot's centroid cannot silently hide the subject. Waiting diagnostics identify the missing condition instead of leaving a blocked scene unexplained. Mesh counts and bounds are recorded before GPU upload, because the production renderer releases CPU vertex arrays after extraction.
 
 The CPU regressions cover actual-world family coverage; deterministic layouts; full neighbor, road, concavity and tank clearance; geometry staying above the ground route; retained Near/Mid silhouettes; finite normals and valid indices; material/vertex budgets; window opening clearance; and hide/restore of mixed architectural materials. The same walkup is then shown from outside and from its real interior in GPU QA.
 
@@ -61,8 +61,28 @@ The CPU regressions cover actual-world family coverage; deterministic layouts; f
 cargo fmt --all -- --check
 CARGO_PROFILE_DEV_DEBUG=0 cargo clippy --workspace --all-targets -- -D warnings
 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p defend_taipei --lib
+cargo run -p defend_taipei --example exterior_workload -- --check
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 cargo run -p defend_taipei -- --qa
 ```
+
+`game/examples/exterior_workload.rs` regenerates every chunk at the existing Near/Mid/Far thresholds for the original spawn and `04a` streetscape position, then adds the initial 70 m detail population. Its report compares planned resident attribute/index bytes, vertices, triangles and submitted material meshes with `docs/exterior-baseline.json`. A length-delimited fingerprint verifies the complete building, door, window, collision, road, prop and interior-fixture data, including spawn and map bounds. These are deterministic geometry and compatibility checks; they do not measure visible GPU draw calls, GPU memory or physical-phone frame rate.
+
+For fast visual iteration, `DEFEND_TAIPEI_QA_EXTERIOR_ONLY=1 cargo run -p defend_taipei -- --qa` retains the five normal startup stages and captures the six exterior scenes. Its report explicitly says `exterior_subset` with 11 expected images. CI requires `full`, all 53 images and the Save → Menu → Continue assertions, so a subset run cannot satisfy final acceptance.
+
+### Measured geometry footprint
+
+The final building meshes preserve the baseline world identity `3b33c3a798c7decd`: 2,677 buildings and ground-floor doors, 38,602 windows, 74,337 collision segments, 14,378 interior fixtures and 8,592 loot fixtures. Render-derived planning admits 2,315 balcony buildings (3,142 stacks), 231 upper service-stair assemblies, 2,425 roof sheds and 1,582 roof-access volumes. These counts describe generated features, not surveyed addresses or newly traversable floors.
+
+| Planned resident geometry | Baseline | Wave 1 | Change |
+| --- | ---: | ---: | ---: |
+| Spawn attribute/index payload | 116,807,580 bytes | 166,343,220 bytes | +42.41% |
+| Existing `04a` street payload | 118,572,072 bytes | 166,357,464 bytes | +40.30% |
+| Spawn vertices | 2,064,115 | 2,940,423 | +42.45% |
+| Existing `04a` street vertices | 2,098,077 | 2,941,560 | +40.20% |
+| Spawn submitted material meshes | 2,446 | 3,349 | +36.92% |
+| Existing `04a` street material meshes | 2,939 | 4,315 | +46.82% |
+
+The early implementation required 226,898,820 and 221,475,384 payload bytes at these positions. Visible-shell construction, near-only roof fittings and shared-material batching remove 60,555,600 and 55,117,920 bytes from that version while retaining the planned features. The additional geometry still has a real cost against the baseline. The CI audit limits vertices, triangles and payload to 145% of baseline and material meshes to 150% at both fixed positions; it fails on world-identity drift or a budget overrun. Exact feature and resident totals are emitted in `native-qa/exterior-workload.json` on every run.
 
 The final CI run and capture evidence are recorded in the change's pull request. Android emulator checks exercise the actual APK, audio, performance preferences/thermal policy, touch/rotation, Continue and save-preserving updates. The offscreen native QA uses fixed simulation steps and a software renderer where necessary; physical-device timing remains a separate measurement.

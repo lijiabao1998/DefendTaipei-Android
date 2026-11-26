@@ -1,0 +1,107 @@
+{
+  "positions": [
+    {
+      "chunk_meshes": {
+        "attribute_index_payload_bytes": 99729132,
+        "indices": 3906591,
+        "material_meshes": 1777,
+        "triangles": 1302197,
+        "vertices": 1752141
+      },
+      "chunks": {
+        "far": 27,
+        "mid": 8,
+        "near": 1
+      },
+      "initial_lazy_detail_buildings_within70m": 54,
+      "lazy_detail": {
+        "attribute_index_payload_bytes": 17078448,
+        "indices": 525924,
+        "material_meshes": 669,
+        "triangles": 175308,
+        "vertices": 311974
+      },
+      "name": "spawn",
+      "near_buildings": 234,
+      "planned_resident_total": {
+        "attribute_index_payload_bytes": 116807580,
+        "indices": 4432515,
+        "material_meshes": 2446,
+        "triangles": 1477505,
+        "vertices": 2064115
+      },
+      "position": [
+        147.3111114501953,
+        -135.54612731933594
+      ]
+    },
+    {
+      "chunk_meshes": {
+        "attribute_index_payload_bytes": 96049008,
+        "indices": 3796692,
+        "material_meshes": 2475,
+        "triangles": 1265564,
+        "vertices": 1684630
+      },
+      "chunks": {
+        "far": 28,
+        "mid": 6,
+        "near": 2
+      },
+      "initial_lazy_detail_buildings_within70m": 38,
+      "lazy_detail": {
+        "attribute_index_payload_bytes": 22523064,
+        "indices": 669402,
+        "material_meshes": 464,
+        "triangles": 223134,
+        "vertices": 413447
+      },
+      "name": "existing_04a_streetscape",
+      "near_buildings": 373,
+      "planned_resident_total": {
+        "attribute_index_payload_bytes": 118572072,
+        "indices": 4466094,
+        "material_meshes": 2939,
+        "triangles": 1488698,
+        "vertices": 2098077
+      },
+      "position": [
+        161.94000244140625,
+        -236.83999633789062
+      ]
+    }
+  ],
+  "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Counts are submitted material meshes, not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, materials/textures, actors, dynamic doors, interior runtime meshes, rain and UI. CPU time is one development-build pass, not a benchmark.",
+  "source": "7bc1f4f68ed2534c92263dd88107d99fc160b853 (tree-identical to c17292889e884f8a13d4e14598a20b64dc490f81)",
+  "variant": "baseline",
+  "world_identity": {
+    "algorithm": "FNV-1a 64, length-delimited deterministic Debug records; combined digest includes bounds/spawn and labeled component hashes",
+    "arcades": 464,
+    "bounds": [
+      -555.0,
+      -497.0,
+      555.0,
+      497.0
+    ],
+    "buildings": 2677,
+    "collision_segments": 74337,
+    "component_fingerprints": {
+      "buildings": "ad490f4dc2070652",
+      "collision_segments": "c11680a152dbf3af",
+      "interior_fixtures": "4d09c7c1a10088da",
+      "roads": "a4d2585a7f78f311",
+      "street_props": "ca09ff61ac0dddab"
+    },
+    "doors": 2677,
+    "fingerprint": "3b33c3a798c7decd",
+    "interior_fixtures": 14378,
+    "loot_fixtures": 8592,
+    "roads": 615,
+    "spawn": [
+      147.3111114501953,
+      -135.54612731933594
+    ],
+    "street_props": 3356,
+    "windows": 38602
+  }
+}
