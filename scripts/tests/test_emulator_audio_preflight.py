@@ -45,11 +45,11 @@ class EmulatorAudioPreflightTests(unittest.TestCase):
         self.assertEqual(exported, self.environment)
         self.assertNotIn('DO_NOT_COPY', (self.output / 'pulse-setup.json').read_text())
 
-    def test_legacy_qemu_loader_name_is_checked_before_emulator_launch(self):
+    def test_pulse_runtime_library_is_checked_before_emulator_launch(self):
         with mock.patch.object(preflight.ctypes, 'CDLL', side_effect=OSError('missing')) as load, \
-                self.assertRaisesRegex(RuntimeError, 'libpulse.so; install libpulse-dev'):
+                self.assertRaisesRegex(RuntimeError, 'runtime libpulse.so.0 is unavailable'):
             preflight.pulse_library_version()
-        load.assert_called_once_with('libpulse.so')
+        load.assert_called_once_with('libpulse.so.0')
         library = mock.Mock()
         library.pa_get_library_version.return_value = b'17.0'
         with mock.patch.object(preflight.ctypes, 'CDLL', return_value=library):

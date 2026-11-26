@@ -20,12 +20,12 @@ SINK = 'defendtaipei_android'
 
 
 def pulse_library_version() -> str:
-    # Android's legacy QEMU PA backend dlopens the unversioned libpulse.so.
-    # libpulse0 supplies .so.0; libpulse-dev supplies this loader name.
+    # Check the installed Pulse runtime used by the GUI emulator executable.
+    # The headless executable has PA stubs and cannot validate real output.
     try:
-        library = ctypes.CDLL('libpulse.so')
+        library = ctypes.CDLL('libpulse.so.0')
     except OSError as error:
-        raise RuntimeError('Android QEMU requires libpulse.so; install libpulse-dev') from error
+        raise RuntimeError('PulseAudio runtime libpulse.so.0 is unavailable') from error
     library.pa_get_library_version.argtypes = []
     library.pa_get_library_version.restype = ctypes.c_char_p
     return library.pa_get_library_version().decode('utf-8', errors='replace')

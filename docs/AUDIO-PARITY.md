@@ -39,6 +39,8 @@ Recording starts only after at least half a second of actual PCM and a later adv
 
 The Android emulator uses an explicit authenticated local PulseAudio server and dedicated sink for both QEMU playback and capture. A host preflight checks the actual emulator process's playback stream and sink routing after launch; a missing or muted route fails before the longer gameplay checks. Nine later PCM captures still independently require the expected audible or silent output after real settings touches, including cold restart. Host connection metadata cannot satisfy those audio assertions.
 
+Linux CI starts the full emulator under Xvfb and deliberately omits `-no-window` and `-no-qt`. The upstream [launcher](https://android.googlesource.com/platform/external/qemu/+/ae9d18d2b6261179fbd57fffec720a04f7bfb053/android/emulator/main-emulator.cpp) selects a separate headless binary for those flags; that binary links [PulseAudio stubs](https://android.googlesource.com/platform/external/qemu/+/ae9d18d2b6261179fbd57fffec720a04f7bfb053/audio/paaudio-headless-impl.c) instead of the real host playback implementation. A working host Pulse server alone therefore cannot make the headless binary audible.
+
 Pure/ECS regressions cover settings sanitization, distance limits, actual-motion steps, siren windows, lifecycle admission, blackout/evening boundaries, rain routing, sample/fallback selection, sinkless lifetime cleanup and duplicate-siren prevention. The release should cite the concrete PCM/Android results for its exact commit; this document does not predeclare those outcomes.
 
 ## Remaining differences

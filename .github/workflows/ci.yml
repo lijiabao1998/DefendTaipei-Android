@@ -206,10 +206,43 @@ jobs:
       - name: Enable captured emulator audio
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils libpulse-dev
+          sudo apt-get install -y --no-install-recommends \
+            pulseaudio pulseaudio-utils xvfb x11-utils libgl1 libopengl0 \
+            libx11-xcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 \
+            libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=defendtaipei_android rate=48000 channels=2 format=s16le
           python3 scripts/emulator-audio-preflight.py --configure --out emulator-audio-host
+
+      - name: Start virtual display for emulator audio
+        # Current AOSP audio/paaudio-headless-impl.c intentionally returns NULL
+        # for Pulse contexts. -no-window/-no-qt select that headless executable.
+        # Keep the GUI executable on a local X server so real PA output exists:
+        # https://android.googlesource.com/platform/external/qemu/+/emu-master-dev/audio/paaudio-headless-impl.c
+        run: |
+          mkdir -p emulator-audio-host
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp > emulator-audio-host/xvfb.log 2>&1 &
+          emulator_xvfb_pid=$!
+          emulator_display_ready=0
+          for attempt in $(seq 1 20); do
+            if ! kill -0 "$emulator_xvfb_pid" 2>/dev/null; then
+              cat emulator-audio-host/xvfb.log
+              exit 1
+            fi
+            if timeout 1s env DISPLAY=:99 xdpyinfo >/dev/null 2>&1; then
+              emulator_display_ready=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [[ "$emulator_display_ready" != 1 ]]; then
+            cat emulator-audio-host/xvfb.log
+            echo "Virtual display did not become ready" >&2
+            exit 1
+          fi
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          echo "QT_QPA_PLATFORM=xcb" >> "$GITHUB_ENV"
 
       - name: Build Rust library (.so) x86_64
         run: |
@@ -248,7 +281,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-api34-x86_64-google_apis-audio-v1
+          key: avd-api34-x86_64-google_apis-audio-gui-v2
 
       - name: Create AVD snapshot (cache miss)
         if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -258,7 +291,7 @@ jobs:
           target: google_apis
           arch: x86_64
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          emulator-options: -gpu swiftshader_indirect -no-boot-anim -camera-back none
           disable-animations: true
           script: echo "AVD ready"
 
@@ -270,7 +303,7 @@ jobs:
           target: google_apis
           arch: x86_64
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -gpu swiftshader_indirect -no-boot-anim -camera-back none
           disable-animations: true
           # android-emulator-runner runs each line as its own `sh -c`, so keep
           # this as a single line (no backslash continuations).
