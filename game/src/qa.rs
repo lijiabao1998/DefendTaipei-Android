@@ -1030,8 +1030,10 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    if run.started.elapsed() > Duration::from_secs(900) {
-        return Err("Visual QA exceeded its 15-minute deadline".into());
+    // The expanded 39-capture run took 861 seconds on CI's software Vulkan
+    // renderer. Keep every stage and assertion, with room for runner variance.
+    if run.started.elapsed() > Duration::from_secs(1200) {
+        return Err("Visual QA exceeded its 20-minute deadline".into());
     }
     if run.report.renderer.is_empty() {
         fs::create_dir_all(&run.output).map_err(|err| err.to_string())?;

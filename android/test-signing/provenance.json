@@ -1,0 +1,34 @@
+{
+  "purpose": "PUBLIC development-only signing fixture; not a production secret",
+  "upstream_repository": "https://github.com/aosp-mirror/platform_build",
+  "upstream_commit": "045a3d6a3e359633a14853a5a5e1e4f2a11cbdae",
+  "upstream_directory": "target/product/security",
+  "keystore": {
+    "file": "aosp-public-testkey.p12",
+    "type": "PKCS12",
+    "alias": "androiddebugkey",
+    "store_password": "android",
+    "key_password": "android"
+  },
+  "certificate_sha256_der": "a40da80a59d170caa950cf15c18c454d47a39b26989d8b640ecd745ba71bf5dc",
+  "certificate_not_before_utc": "2008-02-29T01:33:46Z",
+  "certificate_not_after_utc": "2035-07-17T01:33:46Z",
+  "validated_at_utc_date": "2026-11-26",
+  "files": {
+    "testkey.pk8": {
+      "sha256": "495675d32e89a149d5abe191f4e9c0e218b9068714e9b53a7c91e164a0741a23",
+      "git_blob_sha1": "586c1bd5cf96f9358f36b37ea98fef93f4d0a8e3",
+      "bytes": 1217
+    },
+    "testkey.x509.pem": {
+      "sha256": "a4384ba815b9499a5ce349b4e33c1755278873fe2eac150a068823f526e6dbde",
+      "git_blob_sha1": "e242d83e2bf72169ab0abd5280d4d455caef71eb",
+      "bytes": 1675
+    },
+    "aosp-public-testkey.p12": {
+      "sha256": "fe4a98360b31944e4b151ac6acbe2591812d29a8cadc57aff87994303fad8c4d",
+      "git_blob_sha1": "e0182e72f284c851592e27fe67eca93f69fafcdf",
+      "bytes": 3058
+    }
+  }
+}

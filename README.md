@@ -21,7 +21,11 @@ The Wanhua core now connects exploration, combat, carried supplies, a shared she
 
 Open a successful run of [GitHub Actions CI](https://github.com/lijiabao1998/DefendTaipei-Android/actions/workflows/ci.yml), then download the **DefendTaipei-arm64-debug-apk** artifact. Unzip and install `DefendTaipei-arm64-debug.apk`.
 
-The phone build requires **Android 12 / API 31 or newer**, **arm64-v8a**, and **Vulkan**. It is a debug-signed testing APK. The x86_64 artifact is for the CI emulator. Physical-phone screenshots are available and inform the visual work, but hardware frame rate, thermal behavior and compatibility across devices have not been measured.
+The phone build requires **Android 12 / API 31 or newer**, **arm64-v8a**, and **Vulkan**. It is a testing APK signed with a fixed, explicitly public AOSP development key. Both ABI builds verify the expected certificate in CI. This key is only for development; release signing remains separate. See [TEST-SIGNING.md](docs/TEST-SIGNING.md). The x86_64 artifact is for the CI emulator. Physical-phone screenshots are available and inform the visual work, but hardware frame rate, thermal behavior and compatibility across devices have not been measured.
+
+### Updating an older testing APK
+
+Older CI builds used a different random debug certificate on each runner. This build establishes one stable development signer, so those older installations need a one-time migration. Save in the old game first, then use the [save-preserving ADB update helper](docs/ANDROID-TEST-UPDATES.md) if Android reports a signature conflict. The helper requires an explicit migration flag and a validated local backup before uninstalling anything; failed restores retain that backup for recovery. Future builds with the same fixed signer can install normally with their existing save.
 
 ### First run
 
@@ -85,14 +89,16 @@ The shared Rust library is packaged with Android GameActivity. The activity foll
 ```sh
 cargo fmt --all -- --check
 bash scripts/test-gradle-assemble.sh
+python3 -m unittest discover -s scripts/tests -p 'test_android_update.py' -v
 CARGO_PROFILE_DEV_DEBUG=0 cargo clippy --workspace --all-targets -- -D warnings
 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p defend_taipei --lib
 ```
 
-CI also builds both APK ABIs and runs two end-to-end checks:
+CI also builds both APK ABIs, verifies their development signatures and runs three end-to-end checks:
 
 - **Native GPU QA:** `cargo run -p defend_taipei -- --qa` renders **39 actual Bevy screenshots**: Home at three sizes, survivor/departure pages, prologue, streets, closed/open/boarded doors, furnished shops and homes, selective/partial/empty loot panels, survivor maps in both orientations, rain/night/blackout, warning HUD, shelter, inventory, radio history, pause, barter and Save → Menu → Continue. It uses an offscreen GPU texture, does not require a display server, and fails if the restored run differs. CI requires a successful `qa-report.json` with all 39 captures. Outputs are in the **native-qa** artifact. Weather and barricade tools use explicit fixtures; door and pickup actions use actual gameplay messages. The run checks material conservation, exact shelf/bag contents and persisted barricades/leftovers. On Linux, install `mesa-vulkan-drivers` for software Vulkan when no GPU is available. `DEFEND_TAIPEI_QA_OUT` selects the output directory. This uses a fixed simulation timestep and is **not a performance benchmark**.
 - **Android gameplay smoke:** the **emulator-smoke** artifact contains logcat, screenshots and actual private save JSON from touch-driven map marking, held-pointer capture, deposit, prayer, disabled construction, save, menu, continue and map/panel rotation checks. `scripts/emulator-gameplay-smoke.sh` clears the disposable emulator's app data and refuses to run on a physical phone. Its indoor extension uses checked position/stock fixtures, then exercises actual touch pickup, full/partial/empty stock, barricade spending/refunds, door opening and cold-launch Continue against real private save bytes. A provenance JSON identifies the injected fixtures and suppressed patrols; these controlled stages do not test walking to the locations or combat.
+- **Android update smoke:** after gameplay, `scripts/emulator-update-smoke.sh` uses the emulator's actual save to verify an ordinary same-signer update, migration to an ephemeral test signer, and migration back to the delivered signer. Every step must preserve the exact original save bytes. Verified backups and evidence are included in **emulator-smoke**; the temporary signing key is deleted and is never uploaded. The helper also has mocked failure-path regressions covering invalid APKs/saves, device ambiguity, backup failures and recovery after failed installation.
 
 These are verification gates; use the Actions result for the revision you are installing to check their outcome. The Gradle helper retries only recognized HTTP 429/502/503/504 dependency-download failures, up to three attempts, and preserves build failures. To launch a directly built desktop binary, set `BEVY_ASSET_ROOT` to the repository's `game` directory. The usual `cargo run` path supplies the crate's asset root automatically.
 

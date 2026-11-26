@@ -46,6 +46,9 @@ jobs:
       - name: Gradle retry behavior
         run: bash scripts/test-gradle-assemble.sh
 
+      - name: Android save-preserving update helper
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_android_update.py' -v
+
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -64,7 +67,8 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(python3 -c 'from pathlib import Path; paths=sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")); print(paths[0] if paths else "")')"
           test -n "$VK_ICD_FILENAMES"
-          timeout 900s target/debug/defend-taipei --qa > native-qa.log 2>&1
+          # Leave a minute after the internal 20-minute deadline to write evidence.
+          timeout 1260s target/debug/defend-taipei --qa > native-qa.log 2>&1
           python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 39, report'
 
       - name: Upload native QA evidence
@@ -124,11 +128,18 @@ jobs:
           bash ../scripts/gradle-assemble.sh assembleDebug
           cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/DefendTaipei-arm64-debug.apk"
 
+      - name: Verify stable test signature (arm64)
+        run: |
+          bash android/test-signing/verify-apk.sh DefendTaipei-arm64-debug.apk > apk-test-signature-arm64.txt
+          cat apk-test-signature-arm64.txt
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: DefendTaipei-arm64-debug-apk
-          path: DefendTaipei-arm64-debug.apk
+          path: |
+            DefendTaipei-arm64-debug.apk
+            apk-test-signature-arm64.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -191,11 +202,18 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk \
             "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
 
+      - name: Verify stable test signature (x86_64)
+        run: |
+          bash android/test-signing/verify-apk.sh DefendTaipei-x86_64-debug.apk > apk-test-signature-x86_64.txt
+          cat apk-test-signature-x86_64.txt
+
       - name: Upload x86_64 APK
         uses: actions/upload-artifact@v4
         with:
           name: DefendTaipei-x86_64-debug-apk
-          path: DefendTaipei-x86_64-debug.apk
+          path: |
+            DefendTaipei-x86_64-debug.apk
+            apk-test-signature-x86_64.txt
           if-no-files-found: error
           retention-days: 14
 
@@ -232,7 +250,7 @@ jobs:
           disable-animations: true
           # android-emulator-runner runs each line as its own `sh -c`, so keep
           # this as a single line (no backslash continuations).
-          script: chmod +x scripts/emulator-smoke.sh scripts/emulator-gameplay-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && GAMEPLAY_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-gameplay-smoke" ./scripts/emulator-gameplay-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
+          script: chmod +x scripts/emulator-smoke.sh scripts/emulator-gameplay-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && GAMEPLAY_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-gameplay-smoke" ./scripts/emulator-gameplay-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && UPDATE_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-update-smoke" bash scripts/emulator-update-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
 
       - name: Upload smoke artifacts
         if: always()
@@ -242,5 +260,6 @@ jobs:
           path: |
             emulator-smoke/
             emulator-gameplay-smoke/
+            emulator-update-smoke/
           if-no-files-found: warn
           retention-days: 14
