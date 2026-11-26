@@ -50,6 +50,7 @@ enum Action {
     SettingsDiagnostics,
     PerformanceStreet,
     Exterior(ExteriorScene),
+    Commercial(CommercialScene),
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -90,6 +91,25 @@ enum ExteriorScene {
     ServiceStair,
     Rooftop,
     Cutaway,
+}
+
+/// Commercial scenes share the normal fixed isometric camera. The final two
+/// deliberately repeat the exact Food lot, position and zoom with power on/off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommercialScene {
+    Arcade,
+    Food,
+    Essentials,
+    Night,
+    Blackout,
+}
+
+#[derive(Clone, Copy)]
+struct CommercialFixture {
+    building: u32,
+    position: Vec2,
+    zoom: f32,
+    scene: CommercialScene,
 }
 
 #[derive(Clone, Copy)]
@@ -332,6 +352,36 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "04d18-commercial-arcade-landscape",
+        size: [1280, 720],
+        action: Action::Commercial(CommercialScene::Arcade),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d19-commercial-food-landscape",
+        size: [1280, 720],
+        action: Action::Commercial(CommercialScene::Food),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d20-commercial-essentials-landscape",
+        size: [1280, 720],
+        action: Action::Commercial(CommercialScene::Essentials),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d21-commercial-night-landscape",
+        size: [1280, 720],
+        action: Action::Commercial(CommercialScene::Night),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d22-commercial-blackout-landscape",
+        size: [1280, 720],
+        action: Action::Commercial(CommercialScene::Blackout),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "04e-survivor-map-portrait",
         size: [390, 844],
         action: Action::Map,
@@ -439,6 +489,8 @@ struct Capture {
     #[serde(skip_serializing_if = "Option::is_none")]
     exterior: Option<ExteriorEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    commercial: Option<CommercialEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     map_workload: Option<MapWorkload>,
 }
 
@@ -483,6 +535,37 @@ struct ExteriorEvidence {
     total_meshes: usize,
     total_vertices: usize,
     cutaway_hidden: bool,
+    streaming: crate::map::MapRenderStats,
+}
+
+/// Every feature count is render-derived from the selected existing lot. The
+/// uploaded groups include its other shared-material base/shell geometry, so
+/// their vertex totals are explicitly not attributed solely to the storefront.
+#[derive(Clone, Serialize)]
+struct CommercialEvidence {
+    visibility_measurement: &'static str,
+    building_id: u32,
+    family: String,
+    sign_index: usize,
+    scene: String,
+    arcade: bool,
+    frontage_width: f32,
+    building_height: f32,
+    storefront_panels: usize,
+    secondary_fascia: bool,
+    canopy: bool,
+    blade: bool,
+    player: [f32; 3],
+    camera: [f32; 3],
+    zoom: f32,
+    projected_bounds: [[f32; 2]; 2],
+    commercial_vertices: usize,
+    base_batches: ExteriorMeshGroup,
+    persistent_shell_batches: ExteriorMeshGroup,
+    night: f32,
+    power: bool,
+    active_lights: usize,
+    sign_emissive: [f32; 3],
     streaming: crate::map::MapRenderStats,
 }
 
@@ -533,6 +616,7 @@ struct QaRun {
     entrance_building: Option<u32>,
     interior_building: Option<u32>,
     exterior: Option<ExteriorFixture>,
+    commercial: Option<CommercialFixture>,
     door_test_id: Option<u32>,
     barricade_planks: Option<u32>,
     loot_fixture: Option<String>,
@@ -554,6 +638,7 @@ struct CaptureTicket {
     size: [u32; 2],
     settings_pixels: Option<SettingsPixels>,
     exterior: Option<ExteriorEvidence>,
+    commercial: Option<CommercialEvidence>,
     map_workload: Option<MapWorkload>,
 }
 
@@ -568,15 +653,16 @@ impl Plugin for QaPlugin {
     fn build(&self, app: &mut App) {
         let output = std::env::var_os("DEFEND_TAIPEI_QA_OUT")
             .map_or_else(|| PathBuf::from("qa-artifacts"), PathBuf::from);
-        // Developer iteration only. The normal CI requires scope=full and all53
-        // captures, so this subset cannot claim the save/continue regression gate.
+        // Development subsets cannot satisfy CI's full capture/save gate.
         let exterior_only =
             std::env::var_os("DEFEND_TAIPEI_QA_EXTERIOR_ONLY").is_some_and(|value| value == "1");
+        let commercial_only =
+            std::env::var_os("DEFEND_TAIPEI_QA_COMMERCIAL_ONLY").is_some_and(|value| value == "1");
         let stages: Vec<_> = STAGES
             .iter()
             .enumerate()
             .filter_map(|(index, stage)| {
-                (!exterior_only
+                ((!exterior_only && !commercial_only)
                     || index == 0
                     || matches!(
                         stage.action,
@@ -584,12 +670,17 @@ impl Plugin for QaPlugin {
                             | Action::ReviewDeparture
                             | Action::Depart
                             | Action::Skip
-                            | Action::Exterior(_)
-                    ))
+                    )
+                    || (commercial_only && matches!(stage.action, Action::Commercial(_)))
+                    || (!commercial_only
+                        && exterior_only
+                        && matches!(stage.action, Action::Exterior(_))))
                 .then_some(index)
             })
             .collect();
-        let scope = if exterior_only {
+        let scope = if commercial_only {
+            "commercial_subset"
+        } else if exterior_only {
             "exterior_subset"
         } else {
             "full"
@@ -612,6 +703,7 @@ impl Plugin for QaPlugin {
             entrance_building: None,
             interior_building: None,
             exterior: None,
+            commercial: None,
             door_test_id: None,
             barricade_planks: None,
             loot_fixture: None,
@@ -720,6 +812,7 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     run.entrance_building = None;
     run.interior_building = None;
     run.exterior = None;
+    run.commercial = None;
     println!("DTQA entering {}", stage.name);
     if run.stage > 0
         && matches!(
@@ -839,6 +932,35 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world
                 .resource_mut::<crate::survival::ShelterEnvironment>()
                 .power = true;
+            let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+            progress.weather.next = 5000.0;
+            progress.weather.until = 0.0;
+            progress.weather.amount = 0.0;
+            progress.weather.intensity = 0.0;
+            progress.weather.wet = 0.0;
+        }
+        Action::Commercial(scene) => {
+            let fixture = commercial_fixture(crate::map::world(), scene, stage.size)?;
+            println!(
+                "DTQA commercial fixture scene={scene:?} lot={} player={:?} zoom={:.3}",
+                fixture.building, fixture.position, fixture.zoom
+            );
+            move_view(world, fixture.position, fixture.zoom)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(
+                crate::map::world().blds[fixture.building as usize].c,
+            ));
+            run.commercial = Some(fixture);
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+            world.resource_mut::<Campaign>().game_min =
+                if matches!(scene, CommercialScene::Night | CommercialScene::Blackout) {
+                    1320.0
+                } else {
+                    720.0
+                };
+            world
+                .resource_mut::<crate::survival::ShelterEnvironment>()
+                .power = scene != CommercialScene::Blackout;
             let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
             progress.weather.next = 5000.0;
             progress.weather.until = 0.0;
@@ -1062,6 +1184,30 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             ));
         }
         Action::Map => {
+            // Resume the pre-existing route at its exterior-cutaway camera,
+            // time, power and weather after the commercial day/night sequence.
+            // Exploration from the extra real-world fixture positions remains;
+            // these stages are retained, not claimed to have identical pixels.
+            if run.stage > 0
+                && matches!(
+                    STAGES[run.stages[run.stage - 1]].action,
+                    Action::Commercial(_)
+                )
+            {
+                let previous =
+                    exterior_fixture(crate::map::world(), ExteriorScene::Cutaway, [390, 844])?;
+                move_view(world, previous.position, previous.zoom)?;
+                world.resource_mut::<Campaign>().game_min = 720.0;
+                world
+                    .resource_mut::<crate::survival::ShelterEnvironment>()
+                    .power = true;
+                let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+                progress.weather.next = 5000.0;
+                progress.weather.until = 0.0;
+                progress.weather.amount = 0.0;
+                progress.weather.intensity = 0.0;
+                progress.weather.wet = 0.0;
+            }
             let p = player_position(world)?.xz();
             let mut progress = world.resource_mut::<crate::worldmap::MapProgress>();
             progress.add_note(
@@ -1800,6 +1946,460 @@ fn exterior_evidence(
     })
 }
 
+/// Focus the actual commercial assembly rather than zooming out to an entire
+/// tall roof. The camera offset, projection and gameplay zoom limits stay normal.
+fn commercial_zoom(bounds: &[Vec3], position: Vec2, size: [u32; 2]) -> Option<f32> {
+    let right = Vec3::new(1.0, 0.0, -1.0).normalize();
+    let up = crate::camera::CAM_OFFSET.normalize().cross(right);
+    let focus = position.extend(0.0).xzy();
+    let (mut horizontal, mut vertical) = (0.0_f32, 0.0_f32);
+    for point in bounds {
+        horizontal = horizontal.max((*point - focus).dot(right).abs());
+        vertical = vertical.max((*point - focus).dot(up).abs());
+    }
+    let aspect = size[0] as f32 / size[1] as f32;
+    let half = crate::camera::half_height(aspect, 1.0);
+    // Leave room for the ordinary HUD while keeping the storefront legible.
+    let zoom = (half * aspect * 0.76 / horizontal.max(0.1))
+        .min(half * 0.68 / vertical.max(0.1))
+        .min(*crate::camera::ZOOM_RANGE.end());
+    (zoom >= *crate::camera::ZOOM_RANGE.start()).then_some(zoom)
+}
+
+fn commercial_fixture(
+    data: &crate::map::WorldData,
+    scene: CommercialScene,
+    size: [u32; 2],
+) -> Result<CommercialFixture, String> {
+    use crate::map::commercial::{ShopFamily, geometry, plan};
+
+    // This canonical selector makes all three lighting states use the identical
+    // lot and ordinary camera. It is independent of mutable game/weather state.
+    let kind = match scene {
+        CommercialScene::Night | CommercialScene::Blackout => CommercialScene::Food,
+        other => other,
+    };
+    let mut candidates = Vec::new();
+    for b in &data.blds {
+        let Some(layout) = plan(b, data) else {
+            continue;
+        };
+        let eligible = match kind {
+            CommercialScene::Arcade => {
+                b.arcade.is_some()
+                    && layout.panels.len() >= 2
+                    && layout.secondary_fascia
+                    && (8.0..=16.0).contains(&layout.frontage.width)
+                    && b.h <= 12.0
+            }
+            CommercialScene::Food => {
+                b.arcade.is_none()
+                    && layout.family == ShopFamily::Food
+                    && layout.canopy.is_some()
+                    && layout.blade.is_some()
+                    // Both the fascia and the blade's printed side must face
+                    // the fixed camera; a front-on blade would be edge-on.
+                    && layout.frontage.u.dot(Vec2::ONE.normalize()).abs() >= 0.35
+                    && !layout.panels.is_empty()
+            }
+            CommercialScene::Essentials => {
+                matches!(
+                    layout.family,
+                    ShopFamily::Pharmacy | ShopFamily::Convenience
+                ) && !layout.panels.is_empty()
+            }
+            _ => unreachable!(),
+        };
+        let front = layout.frontage;
+        if !eligible
+            || front.n.dot(Vec2::ONE.normalize()) < 0.6
+            || front.width > 24.0
+            || !exterior_camera_clear(
+                data,
+                b.id,
+                Vec3::new(front.centre().x, 2.4, front.centre().y),
+            )
+        {
+            continue;
+        }
+        let generated = geometry(b, &layout, crate::map::Lod::Near);
+        let bounds: Vec<Vec3> = generated
+            .base
+            .0
+            .values()
+            .chain(generated.shell.0.values())
+            .flat_map(|mesh| mesh.pos.iter().copied().map(Vec3::from))
+            .collect();
+        if bounds.len() < 40 {
+            continue;
+        }
+        for distance in [2.0, 3.0, 4.5, 6.0] {
+            let position = front.centre() + front.n * distance;
+            if !position.cmpge(data.min + 1.0).all()
+                || !position.cmple(data.max - 1.0).all()
+                || data.bld_at(position).is_some()
+                || !data.free(position, 0.6)
+                || b.c.distance(position) >= 65.0
+                || crate::map::exterior_blocks_camera(b, position)
+            {
+                continue;
+            }
+            let Some(zoom) = commercial_zoom(&bounds, position, size) else {
+                continue;
+            };
+            candidates.push(CommercialFixture {
+                building: b.id,
+                position,
+                zoom,
+                scene,
+            });
+            break;
+        }
+    }
+    candidates
+        .into_iter()
+        .max_by(|a, b| {
+            a.zoom
+                .total_cmp(&b.zoom)
+                .then_with(|| {
+                    b.position
+                        .distance_squared(data.spawn)
+                        .total_cmp(&a.position.distance_squared(data.spawn))
+                })
+                .then(b.building.cmp(&a.building))
+        })
+        .ok_or_else(|| {
+            format!("No visible, collision-clear real-world {scene:?} commercial fixture")
+        })
+}
+
+fn commercial_group(
+    id: u32,
+    base: Option<&crate::map::BldBase>,
+    shell: Option<&crate::map::BldStructure>,
+) -> Option<usize> {
+    match (base, shell) {
+        (Some(base), None) if base.0 == id => Some(0),
+        (None, Some(shell)) if shell.0 == id => Some(1),
+        _ => None,
+    }
+}
+
+fn commercial_ready(world: &mut World, fixture: CommercialFixture) -> bool {
+    let id = fixture.building;
+    if !world
+        .query::<&crate::map::DetailRoot>()
+        .iter(world)
+        .any(|root| root.0 == id)
+        || !world
+            .query::<&crate::map::BldWalls>()
+            .iter(world)
+            .any(|walls| walls.id == id && !walls.faded)
+    {
+        return false;
+    }
+    let Some(main_view) = main_camera_meshes(world) else {
+        return false;
+    };
+    let mut visible = [0_usize; 2];
+    let mut sign_visible = false;
+    for (entity, base, shell, material, local, inherited, view) in world
+        .query_filtered::<(
+            Entity,
+            Option<&crate::map::BldBase>,
+            Option<&crate::map::BldStructure>,
+            &crate::map::MapMeshMaterial,
+            &Visibility,
+            &InheritedVisibility,
+            &ViewVisibility,
+        ), Or<(With<crate::map::BldBase>, With<crate::map::BldStructure>)>>()
+        .iter(world)
+    {
+        let Some(group) = commercial_group(id, base, shell) else {
+            continue;
+        };
+        if *local == Visibility::Hidden || !inherited.get() {
+            return false;
+        }
+        if view.get() && main_view.contains(&entity) {
+            visible[group] += 1;
+            sign_visible |= material.0 == crate::map::build::Mat::Sign;
+        }
+    }
+    visible.into_iter().all(|count| count > 0) && sign_visible
+}
+
+/// Explain missing base/sign batches and visibility while asynchronous chunks
+/// settle; a blocked fixture must not silently consume the full QA deadline.
+fn commercial_wait_status(world: &mut World, fixture: CommercialFixture) -> String {
+    let id = fixture.building;
+    let main_view = main_camera_meshes(world).unwrap_or_default();
+    let (mut total, mut hidden, mut inherited, mut view, mut main) = (
+        [0_usize; 2],
+        [0_usize; 2],
+        [0_usize; 2],
+        [0_usize; 2],
+        [0_usize; 2],
+    );
+    let mut signs = Vec::new();
+    for (entity, base, shell, material, local, inherited_visibility, view_visibility) in world
+        .query_filtered::<(
+            Entity,
+            Option<&crate::map::BldBase>,
+            Option<&crate::map::BldStructure>,
+            &crate::map::MapMeshMaterial,
+            &Visibility,
+            &InheritedVisibility,
+            &ViewVisibility,
+        ), Or<(With<crate::map::BldBase>, With<crate::map::BldStructure>)>>()
+        .iter(world)
+    {
+        let Some(group) = commercial_group(id, base, shell) else {
+            continue;
+        };
+        total[group] += 1;
+        hidden[group] += usize::from(*local == Visibility::Hidden);
+        inherited[group] += usize::from(inherited_visibility.get());
+        view[group] += usize::from(view_visibility.get());
+        main[group] += usize::from(main_view.contains(&entity));
+        if material.0 == crate::map::build::Mat::Sign {
+            signs.push((group, view_visibility.get(), main_view.contains(&entity)));
+        }
+    }
+    let walls: Vec<_> = world
+        .query::<&crate::map::BldWalls>()
+        .iter(world)
+        .filter(|wall| wall.id == id)
+        .map(|wall| wall.faded)
+        .collect();
+    let detail = world
+        .query::<&crate::map::DetailRoot>()
+        .iter(world)
+        .any(|root| root.0 == id);
+    let position = player_position(world).ok();
+    let blocks = position.map(|p| {
+        crate::map::exterior_blocks_camera(&crate::map::world().blds[id as usize], p.xz())
+    });
+    format!(
+        "commercial lot={id} player={position:?} cutaway_front={blocks:?} walls_faded={walls:?} detail_root={detail} groups(base/shell)={total:?} hidden={hidden:?} inherited={inherited:?} view={view:?} main_view={main:?} sign(group/view/main)={signs:?}"
+    )
+}
+
+fn commercial_evidence(
+    world: &mut World,
+    fixture: CommercialFixture,
+    size: [u32; 2],
+) -> Result<CommercialEvidence, String> {
+    use crate::map::build::{Lod, Mat};
+
+    let id = fixture.building;
+    let data = crate::map::world();
+    let b = &data.blds[id as usize];
+    let layout = crate::map::commercial::plan(b, data)
+        .ok_or_else(|| format!("Commercial {id}: plan disappeared"))?;
+    let generated = crate::map::commercial::geometry(b, &layout, Lod::Near);
+    let features = [generated.base, generated.shell];
+    let commercial_vertices = features.iter().map(|parts| parts.vcount()).sum();
+    if commercial_vertices < 40 || layout.panels.is_empty() {
+        return Err(format!("Commercial {id}: empty promised storefront"));
+    }
+    // Recreate exactly the runtime material batching. Comparing the full batch
+    // counts and bounds catches omitted/misrouted storefront uploads without
+    // allocating separate per-shop materials or pretending an AABB is a draw.
+    let mut all = crate::map::build::building(b, Lod::Near);
+    all.structure = crate::map::exterior::structure(b, data, Lod::Near);
+    all.merge_structure_into_roof();
+    let expected = [all.base, all.roof];
+    let main_view =
+        main_camera_meshes(world).ok_or("Commercial camera has no visible mesh list")?;
+    let mut groups = [ExteriorMeshGroup::default(); 2];
+    let mut found = [HashSet::new(), HashSet::new()];
+    let mut handles = Vec::new();
+    for (entity, base, shell, material, mesh, uploaded, transform, local, inherited, view) in world
+        .query_filtered::<(
+            Entity,
+            Option<&crate::map::BldBase>,
+            Option<&crate::map::BldStructure>,
+            &crate::map::MapMeshMaterial,
+            &Mesh3d,
+            &crate::map::MapMeshGeometry,
+            &GlobalTransform,
+            &Visibility,
+            &InheritedVisibility,
+            &ViewVisibility,
+        ), Or<(With<crate::map::BldBase>, With<crate::map::BldStructure>)>>()
+        .iter(world)
+    {
+        let Some(group) = commercial_group(id, base, shell) else {
+            continue;
+        };
+        let key = material.0;
+        let planned = expected[group]
+            .0
+            .get(&key)
+            .ok_or_else(|| format!("Commercial {id}: unexpected {key:?} batch in group {group}"))?;
+        let (min, max) = planned.aabb();
+        if !found[group].insert(key)
+            || uploaded.vertices != planned.vcount()
+            || uploaded.min.distance(min) > 0.001
+            || uploaded.max.distance(max) > 0.001
+            || transform.translation().length() > 0.001
+            || *local == Visibility::Hidden
+            || !inherited.get()
+        {
+            return Err(format!(
+                "Commercial {id}: actual {key:?} upload differs from generated batch"
+            ));
+        }
+        let visible = view.get() && main_view.contains(&entity);
+        if features[group].0.contains_key(&key) && !visible {
+            return Err(format!(
+                "Commercial {id}: {key:?} storefront material absent from main view"
+            ));
+        }
+        groups[group].meshes += 1;
+        groups[group].vertices += uploaded.vertices;
+        groups[group].in_main_view += usize::from(visible);
+        handles.push(mesh.0.clone());
+    }
+    for (group, (full, feature)) in expected.iter().zip(&features).enumerate() {
+        let expected_materials: HashSet<_> = full
+            .0
+            .iter()
+            .filter_map(|(material, mesh)| (!mesh.is_empty()).then_some(*material))
+            .collect();
+        if found[group] != expected_materials {
+            return Err(format!(
+                "Commercial {id}: incomplete uploaded group {group}"
+            ));
+        }
+        for (material, mesh) in &feature.0 {
+            let full = full.0.get(material).ok_or_else(|| {
+                format!("Commercial {id}: {material:?} commercial part not integrated")
+            })?;
+            // Every feature vertex must survive the material merge. Checking this
+            // against the runtime builder detects a valid but unused planner.
+            let key = |p: [f32; 3]| p.map(|value| (value * 1000.0).round() as i32);
+            let vertices: HashSet<_> = full.pos.iter().copied().map(key).collect();
+            if mesh
+                .pos
+                .iter()
+                .copied()
+                .any(|point| !vertices.contains(&key(point)))
+            {
+                return Err(format!(
+                    "Commercial {id}: feature geometry missing from {material:?} runtime batch"
+                ));
+            }
+        }
+    }
+    if handles
+        .iter()
+        .any(|handle| !world.resource::<Assets<Mesh>>().contains(handle))
+    {
+        return Err(format!("Commercial {id}: referenced mesh asset is missing"));
+    }
+    if !features[1].0.contains_key(&Mat::Sign) {
+        return Err(format!(
+            "Commercial {id}: original typed sign texture is missing"
+        ));
+    }
+    let position = player_position(world)?;
+    if position.xz().distance(fixture.position) > 0.001
+        || data.bld_at(position.xz()).is_some()
+        || !data.free(position.xz(), 0.6)
+        || crate::map::exterior_blocks_camera(b, position.xz())
+    {
+        return Err(format!(
+            "Commercial {id}: storefront camera is inside/blocked or moved"
+        ));
+    }
+    let (camera, transform) = world
+        .query_filtered::<(&Camera, &GlobalTransform), With<GameCamera>>()
+        .iter(world)
+        .next()
+        .ok_or("Commercial camera is missing")?;
+    let mut lo = Vec2::splat(f32::MAX);
+    let mut hi = Vec2::splat(f32::MIN);
+    for point in features
+        .iter()
+        .flat_map(|parts| parts.0.values())
+        .flat_map(|mesh| mesh.pos.iter().copied().map(Vec3::from))
+    {
+        let point = camera
+            .world_to_viewport(transform, point)
+            .map_err(|err| format!("Commercial {id}: cannot project feature: {err:?}"))?;
+        lo = lo.min(point);
+        hi = hi.max(point);
+    }
+    if lo.x < size[0] as f32 * 0.08
+        || lo.y < size[1] as f32 * 0.08
+        || hi.x > size[0] as f32 * 0.92
+        || hi.y > size[1] as f32 * 0.92
+        || (hi - lo).min_element() < 35.0
+    {
+        return Err(format!(
+            "Commercial {id}: cropped or unreadably small storefront {lo:?}..{hi:?}"
+        ));
+    }
+    let camera_position = transform.translation().to_array();
+    let atmosphere = world.resource::<crate::map::atmosphere::AtmosphereState>();
+    let signs = &world.resource::<crate::map::textures::MapMaterials>().signs;
+    let emissive = world
+        .resource::<Assets<StandardMaterial>>()
+        .get(signs)
+        .ok_or("Commercial sign material is missing")?
+        .emissive;
+    let sign_emissive = [emissive.red, emissive.green, emissive.blue];
+    let lighting_ok = match fixture.scene {
+        CommercialScene::Night => {
+            atmosphere.night > 0.9
+                && atmosphere.power
+                && atmosphere.active_lights > 0
+                && atmosphere.active_lights <= 6
+                && sign_emissive.iter().all(|value| *value > 0.8)
+        }
+        CommercialScene::Blackout => {
+            atmosphere.night > 0.9
+                && !atmosphere.power
+                && atmosphere.active_lights == 0
+                && sign_emissive.iter().all(|value| *value == 0.0)
+        }
+        _ => atmosphere.night < 0.1 && atmosphere.power,
+    };
+    if !lighting_ok {
+        return Err(format!(
+            "Commercial {id}: lighting/power state mismatch: {atmosphere:?} emissive={sign_emissive:?}"
+        ));
+    }
+    Ok(CommercialEvidence {
+        visibility_measurement: "uploaded_batches_and_main_view_membership_not_pixel_occlusion",
+        building_id: id,
+        family: format!("{:?}", layout.family),
+        sign_index: layout.sign_index,
+        scene: format!("{:?}", fixture.scene),
+        arcade: b.arcade.is_some(),
+        frontage_width: layout.frontage.width,
+        building_height: b.h,
+        storefront_panels: layout.panels.len(),
+        secondary_fascia: layout.secondary_fascia,
+        canopy: layout.canopy.is_some(),
+        blade: layout.blade.is_some(),
+        player: position.to_array(),
+        camera: camera_position,
+        zoom: world.resource::<CameraZoom>().0,
+        projected_bounds: [lo.to_array(), hi.to_array()],
+        commercial_vertices,
+        base_batches: groups[0],
+        persistent_shell_batches: groups[1],
+        night: atmosphere.night,
+        power: atmosphere.power,
+        active_lights: atmosphere.active_lights,
+        sign_emissive,
+        streaming: world.resource::<crate::map::MapRenderStats>().clone(),
+    })
+}
+
 fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     let checkpoint = run.checkpoint.as_ref().ok_or("Missing checkpoint")?;
     let position = player_position(world)?;
@@ -1850,7 +2450,8 @@ fn finish(world: &mut World, run: &mut QaRun) {
     run.finished = true;
     run.report.success = run.report.error.is_none()
         && run.report.captures.len() == run.stages.len()
-        && (run.report.scope == "exterior_subset" || run.continuation_checked);
+        && (matches!(run.report.scope, "exterior_subset" | "commercial_subset")
+            || run.continuation_checked);
     let report_path = run.output.join("qa-report.json");
     let result = serde_json::to_vec_pretty(&run.report)
         .map_err(|err| err.to_string())
@@ -1897,8 +2498,8 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // Fifty-three captures retain the original gameplay/performance checks and
-    // add six fully framed exterior/cutaway views through the actual renderer.
+    // Retain all original gameplay, performance and architecture captures, then
+    // add commercial fronts with paired day/night/power-loss evidence.
     if run.started.elapsed() > Duration::from_secs(1500) {
         return Err("Visual QA exceeded its 25-minute deadline".into());
     }
@@ -1982,7 +2583,11 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     if run.frame == SETTLE_FRAMES / 2
         && matches!(
             stage.action,
-            Action::Rain | Action::Night | Action::Blackout | Action::Exterior(_)
+            Action::Rain
+                | Action::Night
+                | Action::Blackout
+                | Action::Exterior(_)
+                | Action::Commercial(_)
         )
     {
         // The explicit clock/weather fixture can dispatch several catch-up
@@ -2033,6 +2638,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             | Action::ShopInterior
             | Action::HomeInterior
             | Action::Exterior(_)
+            | Action::Commercial(_)
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -2065,21 +2671,35 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         let exterior_loaded = run
             .exterior
             .is_none_or(|fixture| exterior_ready(world, fixture));
-        if !chunks_ready || !detail_ready || !interior_ready || !exterior_loaded {
+        let commercial_loaded = run
+            .commercial
+            .is_none_or(|fixture| commercial_ready(world, fixture));
+        if !chunks_ready
+            || !detail_ready
+            || !interior_ready
+            || !exterior_loaded
+            || !commercial_loaded
+        {
             if run.wait_logged.elapsed() >= Duration::from_secs(5) {
                 let exterior = run
                     .exterior
                     .map(|fixture| exterior_wait_status(world, fixture))
                     .unwrap_or_default();
+                let commercial = run
+                    .commercial
+                    .map(|fixture| commercial_wait_status(world, fixture))
+                    .unwrap_or_default();
                 println!(
-                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} {}",
+                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} commercial={} {} {}",
                     stage.name,
                     run.frame,
                     chunks_ready,
                     detail_ready,
                     interior_ready,
                     exterior_loaded,
-                    exterior
+                    commercial_loaded,
+                    exterior,
+                    commercial
                 );
                 run.wait_logged = Instant::now();
             }
@@ -2384,6 +3004,44 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         .exterior
         .map(|fixture| exterior_evidence(world, fixture, stage.size))
         .transpose()?;
+    let commercial = run
+        .commercial
+        .map(|fixture| commercial_evidence(world, fixture, stage.size))
+        .transpose()?;
+    if let Some(evidence) = &commercial {
+        if matches!(
+            stage.action,
+            Action::Commercial(CommercialScene::Night | CommercialScene::Blackout)
+        ) {
+            let day = run
+                .report
+                .captures
+                .iter()
+                .find_map(|capture| {
+                    capture
+                        .commercial
+                        .as_ref()
+                        .filter(|value| value.scene == "Food")
+                })
+                .ok_or("Commercial night comparison is missing its daylight capture")?;
+            if evidence.building_id != day.building_id
+                || evidence.player != day.player
+                || evidence.camera != day.camera
+                || evidence.zoom != day.zoom
+                || evidence.projected_bounds != day.projected_bounds
+            {
+                return Err(
+                    "Commercial day/night/blackout camera or feature bounds drifted".into(),
+                );
+            }
+        }
+        run.report.assertions.push(format!(
+            "{}: real lot {} {} sign atlas cell {}, {} solid-flank panels, canopy={}, blade={}, {} commercial vertices within verified uploaded base/shell batches; night={:.2} power={} sign_emissive={:?}; actual main-camera visibility and storefront framing checked",
+            stage.name, evidence.building_id, evidence.family, evidence.sign_index,
+            evidence.storefront_panels, evidence.canopy, evidence.blade, evidence.commercial_vertices,
+            evidence.night, evidence.power, evidence.sign_emissive
+        ));
+    }
     let map_workload = matches!(stage.flow, ExpectedFlow::Playing)
         .then(|| map_workload(world))
         .flatten();
@@ -2405,6 +3063,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 size: stage.size,
                 settings_pixels,
                 exterior,
+                commercial,
                 map_workload,
             },
         ))
@@ -2545,6 +3204,7 @@ fn capture_finished(
             height: image.height(),
             sampled_colors: colors.len(),
             exterior: ticket.exterior.clone(),
+            commercial: ticket.commercial.clone(),
             map_workload: ticket.map_workload.clone(),
         })
     })();
@@ -2564,6 +3224,73 @@ fn capture_finished(
 #[cfg(test)]
 mod exterior_tests {
     use super::*;
+
+    #[test]
+    fn commercial_views_use_real_features_clear_positions_and_identical_lighting_cameras() {
+        use crate::map::commercial::{ShopFamily, plan};
+
+        let data = crate::map::world();
+        let size = [1280, 720];
+        let food = commercial_fixture(data, CommercialScene::Food, size).unwrap();
+        for scene in [
+            CommercialScene::Arcade,
+            CommercialScene::Food,
+            CommercialScene::Essentials,
+            CommercialScene::Night,
+            CommercialScene::Blackout,
+        ] {
+            let fixture = commercial_fixture(data, scene, size).unwrap();
+            let building = &data.blds[fixture.building as usize];
+            let layout = plan(building, data).unwrap();
+            assert!(data.bld_at(fixture.position).is_none());
+            assert!(data.free(fixture.position, 0.6));
+            assert!(!crate::map::exterior_blocks_camera(
+                building,
+                fixture.position
+            ));
+            assert!(crate::camera::ZOOM_RANGE.contains(&fixture.zoom));
+            assert!(building.c.distance(fixture.position) < 65.0);
+            assert!(!layout.panels.is_empty());
+            assert_eq!(layout.sign_index, building.sign.unwrap().idx);
+            match scene {
+                CommercialScene::Arcade => {
+                    assert!(building.arcade.is_some());
+                    assert!(layout.panels.len() >= 2);
+                    assert!(layout.secondary_fascia);
+                    assert!((8.0..=16.0).contains(&layout.frontage.width));
+                    assert!(building.h <= 12.0);
+                }
+                CommercialScene::Essentials => {
+                    assert!(matches!(
+                        layout.family,
+                        ShopFamily::Pharmacy | ShopFamily::Convenience
+                    ));
+                }
+                _ => {
+                    assert_eq!(layout.family, ShopFamily::Food);
+                    assert!(building.arcade.is_none());
+                    assert!(layout.canopy.is_some());
+                    assert!(layout.blade.is_some());
+                    assert!(layout.frontage.u.dot(Vec2::ONE.normalize()).abs() >= 0.35);
+                    assert_eq!(fixture.building, food.building);
+                    assert_eq!(fixture.position, food.position);
+                    assert_eq!(fixture.zoom, food.zoom);
+                }
+            }
+            eprintln!(
+                "Commercial fixture {scene:?}: lot={} family={:?} panels={} canopy={} blade={} position={:?} zoom={:.3} frontage={:.2} height={:.2}",
+                building.id,
+                layout.family,
+                layout.panels.len(),
+                layout.canopy.is_some(),
+                layout.blade.is_some(),
+                fixture.position,
+                fixture.zoom,
+                layout.frontage.width,
+                building.h
+            );
+        }
+    }
 
     #[test]
     fn exterior_views_select_real_reachable_lots_with_the_promised_features() {

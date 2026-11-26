@@ -13,6 +13,7 @@ pub mod blocks;
 pub mod build;
 pub mod canvas;
 pub mod collide;
+pub mod commercial;
 pub mod data;
 pub mod detail;
 pub mod evac;
@@ -155,6 +156,11 @@ pub struct BldRoof(pub u32);
 #[derive(Component, Clone)]
 pub struct BldStructure(pub u32);
 
+/// Ground-floor/base meshes keep their existing visibility during building cutaway.
+/// Ownership is retained for renderer QA without splitting shared material batches.
+#[derive(Component, Clone)]
+pub struct BldBase(pub u32);
+
 /// Window units and wall clutter in the close-detail layer of a near building.
 #[derive(Component, Clone)]
 pub struct BldDetail(pub u32);
@@ -171,6 +177,11 @@ pub(crate) struct MapMeshGeometry {
     pub min: Vec3,
     pub max: Vec3,
 }
+
+/// The shared material slot used for this uploaded city batch. Unlike a handle,
+/// this remains stable across runs and lets QA identify the actual sign surface.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct MapMeshMaterial(pub Mat);
 
 fn material(m: &MapMaterials, k: Mat) -> Handle<StandardMaterial> {
     match k {
@@ -220,6 +231,7 @@ fn spawn_parts<B: Bundle + Clone>(
             Mesh3d(meshes.add(m.into_mesh())),
             MeshMaterial3d(material(mats, k)),
             geometry,
+            MapMeshMaterial(k),
             extra.clone(),
         ));
     }
@@ -273,7 +285,13 @@ pub fn spawn_chunk(
                             b.roof,
                             (BldRoof(id), BldStructure(id), Visibility::default()),
                         );
-                        spawn_parts(bp, meshes, mats, b.base, ());
+                        spawn_parts(
+                            bp,
+                            meshes,
+                            mats,
+                            b.base,
+                            (BldBase(id), Visibility::default()),
+                        );
                     });
             }
         })
@@ -597,7 +615,7 @@ mod streaming_work_tests {
     use super::*;
 
     #[test]
-    fn architectural_materials_and_roofs_follow_cutaway_without_wall_material_swaps() {
+    fn architectural_and_commercial_materials_follow_cutaway_without_wall_swaps() {
         let data = world();
         let b = data
             .blds
@@ -605,13 +623,28 @@ mod streaming_work_tests {
             .find(|b| {
                 exterior::classify(b) == exterior::Typology::Walkup
                     && !exterior::plan(b, data).balconies.is_empty()
+                    && commercial::plan(b, data).is_some_and(|plan| !plan.panels.is_empty())
                     && data.bld_at(b.c).is_some_and(|inside| inside.id == b.id)
             })
-            .expect("real walkup with a clear centre and balconies");
+            .expect("real commercial walkup with a clear centre and balconies");
         let mut building = build::building(b, Lod::Near);
         building.structure = exterior::structure(b, data, Lod::Near);
+        let shop = commercial::geometry(b, &commercial::plan(b, data).unwrap(), Lod::Near);
+        assert!(shop.base.vcount() > 0);
+        assert!(
+            shop.base
+                .0
+                .values()
+                .flat_map(|mesh| &mesh.pos)
+                .all(|point| point[1] <= 0.341),
+            "permanent shop trim must not recreate an opaque wall during interior cutaway"
+        );
         assert!(building.structure.0.contains_key(&Mat::FacadeTile));
         assert!(building.structure.0.contains_key(&Mat::Metal));
+        assert!(
+            building.roof.0.contains_key(&Mat::Sign),
+            "raised commercial signs must follow the building cutaway"
+        );
         let expected_vertices = building.structure.vcount() + building.roof.vcount();
         let expected_materials: HashSet<_> = building
             .structure
@@ -661,6 +694,24 @@ mod streaming_work_tests {
                     .any(|handle| *handle == material(&mats, *expected))
             );
         }
+        let base_entities: Vec<_> = app
+            .world_mut()
+            .query::<(Entity, &BldBase, &MapMeshMaterial)>()
+            .iter(app.world())
+            .map(|(entity, owner, slot)| {
+                assert_eq!(owner.0, b.id);
+                assert_eq!(
+                    app.world()
+                        .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                        .unwrap()
+                        .0,
+                    material(&mats, slot.0),
+                    "retained material metadata must identify the actual uploaded surface"
+                );
+                entity
+            })
+            .collect();
+        assert!(!base_entities.is_empty());
         let uploaded_vertices: usize = app
             .world_mut()
             .query_filtered::<&MapMeshGeometry, With<BldStructure>>()
@@ -689,6 +740,13 @@ mod streaming_work_tests {
                     *world.get::<Visibility>(entity).unwrap() == Visibility::Hidden,
                     hidden,
                     "balconies and stairs must disappear and return with the cutaway"
+                );
+            }
+            for &entity in &base_entities {
+                assert_ne!(
+                    *app.world().get::<Visibility>(entity).unwrap(),
+                    Visibility::Hidden,
+                    "low shop trim and floors retain their base visibility"
                 );
             }
             for (roof, visibility) in app

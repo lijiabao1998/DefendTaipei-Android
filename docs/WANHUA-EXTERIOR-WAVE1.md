@@ -1,5 +1,9 @@
 # Wanhua exterior wave 1 — building architecture
 
+This records the completed Wave 1 scope, captures and geometry budget at PR #22.
+The current commercial follow-up, combined capture count and incremental budget are
+documented in [Wave 2](WANHUA-COMMERCIAL-WAVE2.md); the Wave 1 measurements below remain the historical reference.
+
 ## Starting point and scope
 
 The baseline is Android main `c17292889e884f8a13d4e14598a20b64dc490f81`, after PR #21. Its actual [CI #72 native GPU images](https://github.com/lijiabao1998/DefendTaipei-Android/actions/runs/45802533773/artifacts/15109786108) already show weathered walls, three-dimensional iron windows, air conditioners, arcade floors and detailed tin roof additions. The visible gap was repeated flat building masses: little balcony depth or owner/apartment rhythm, uniform roof edges, and the entire roof addition disappearing outside the close-detail radius.

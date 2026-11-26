@@ -67,7 +67,8 @@ pub struct BuildingMeshes {
     /// Roof slab, rooftop and arcade soffit; also holds the facade structure
     /// after Near shell batching. All hide during the same building cutaway.
     pub roof: Parts,
-    /// Floor, arcade floor / columns / shutters, signs: always drawn.
+    /// Floors, arcade columns / unreplaced legacy shutters, low commercial trim
+    /// and fallback signs: always drawn. Tall shop panels/signs belong to roof.
     pub base: Parts,
     /// Balcony/stair/facade masses before shell batching, never wall-faded.
     pub structure: Parts,
@@ -131,6 +132,7 @@ fn arc_box(w: f32, h: f32, d: f32, p: Vec2, y: f32, ang: f32) -> (MeshBuf, Mat4)
 
 pub fn arcade(b: &Bld, out: &mut BuildingMeshes) {
     let Some(a) = b.arcade else { return };
+    let commercial = super::commercial::plan(b, super::world());
     let ang = a.u.y.atan2(a.u.x);
     let at = |s: f32, d: f32| a.a + a.u * s - a.n * d;
     let nb = ((a.dl - COL) / BAY).round().max(1.0) as usize;
@@ -168,7 +170,11 @@ pub fn arcade(b: &Bld, out: &mut BuildingMeshes) {
         let (g, t) = arc_box(1.0, 0.04, 0.18, at(s, ARC / 2.0), GF - 0.24, ang);
         out.roof.add(Mat::Lamp, &g, t, WHITE);
         // roll-up shutter on each bay of the recessed shopfront, except at the shop door
-        if (s - a.dl / 2.0).abs() - (step - COL) / 2.0 > DOOR_W / 2.0 + 0.1 {
+        if (s - a.dl / 2.0).abs() - (step - COL) / 2.0 > DOOR_W / 2.0 + 0.1
+            && !commercial.as_ref().is_some_and(|plan| {
+                super::commercial::replaces_shutter(plan, at(s, ARC), step - COL - 0.1)
+            })
+        {
             let (g, t) = arc_box(step - COL - 0.1, 2.9, 0.06, at(s, ARC - 0.15), 1.45, ang);
             let g = g.map_uv(|uv, _| [uv[0], uv[1] * 6.0]);
             out.base.add(Mat::Shutter, &g, t, WHITE);
@@ -371,7 +377,9 @@ pub fn building(b: &Bld, lod: Lod) -> BuildingMeshes {
         .append(flat_poly(&b.pts, 0.03, true, 2.0));
     arcade(b, &mut out);
     out.base.merge(entrance(b, lod));
-    sign(b, &mut out);
+    if !super::commercial::building(b, super::world(), lod, &mut out) {
+        sign(b, &mut out);
+    }
     tank(b, &mut out);
     out.roof.merge(super::roofs::structure(b, lod));
     out

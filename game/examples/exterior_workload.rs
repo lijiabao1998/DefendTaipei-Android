@@ -1,4 +1,4 @@
-//! Reproducible CPU mesh workload and world-identity audit for exterior wave 1.
+//! Reproducible CPU mesh workload and world-identity audit for the exterior waves.
 //! Run `cargo run -p defend_taipei --example exterior_workload -- --check`.
 //! These counts describe planned resident geometry, never measured phone FPS.
 use bevy::prelude::Vec2;
@@ -10,7 +10,7 @@ use defend_taipei::map::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{fmt::Debug, mem::size_of, time::Instant};
+use std::{collections::BTreeMap, fmt::Debug, mem::size_of, time::Instant};
 
 #[derive(Clone, Default, Serialize)]
 struct MeshTotals {
@@ -223,41 +223,122 @@ fn features(world: &WorldData) -> Value {
     })
 }
 
+fn commercial_features(world: &WorldData) -> Value {
+    use defend_taipei::map::commercial::{self, PanelFinish};
+
+    let mut families = BTreeMap::<&str, usize>::new();
+    let mut panels = [0usize; 3];
+    let mut frontages = 0;
+    let mut arcaded = 0;
+    let mut canopies = 0;
+    let mut striped_canopies = 0;
+    let mut blades = 0;
+    let mut max_vertices = [0usize; 2];
+    let mut total_vertices = [0usize; 2];
+    for b in &world.blds {
+        let Some(plan) = commercial::plan(b, world) else {
+            continue;
+        };
+        frontages += 1;
+        *families.entry(plan.family.name()).or_default() += 1;
+        arcaded += usize::from(plan.arcaded);
+        canopies += usize::from(plan.canopy.is_some());
+        striped_canopies += usize::from(plan.canopy.is_some_and(|canopy| canopy.striped));
+        blades += usize::from(plan.blade.is_some());
+        for panel in &plan.panels {
+            panels[match panel.finish {
+                PanelFinish::Glazed => 0,
+                PanelFinish::Shutter => 1,
+                PanelFinish::Timber => 2,
+            }] += 1;
+        }
+        for (index, lod) in [Lod::Near, Lod::Mid].into_iter().enumerate() {
+            let mesh = commercial::geometry(b, &plan, lod);
+            let vertices = mesh.base.vcount() + mesh.shell.vcount();
+            max_vertices[index] = max_vertices[index].max(vertices);
+            total_vertices[index] += vertices;
+        }
+    }
+    json!({
+        "scope": "Render-only business identities from existing signs; closed frontage panels are not new doors or loot fixtures. Assembly vertices below exclude the old geometry they replace; use resident totals for the actual net cost.",
+        "original_signed_buildings": world.blds.iter().filter(|b| b.sign.is_some()).count(),
+        "planned_commercial_frontages": frontages,
+        "family_frontages": families,
+        "arcaded_frontages": arcaded,
+        "admitted_panels": {"glazed": panels[0], "shutter": panels[1], "timber": panels[2]},
+        "admitted_exposed_canopies": canopies,
+        "striped_canopies": striped_canopies,
+        "admitted_matching_projecting_signs": blades,
+        "commercial_vertices_max": {"near": max_vertices[0], "mid": max_vertices[1]},
+        "all_world_commercial_vertices_if_same_lod": {"near": total_vertices[0], "mid": total_vertices[1]},
+    })
+}
+
 fn main() {
     let started = Instant::now();
     let world = map::world();
     let world_load_ms = started.elapsed().as_secs_f64() * 1000.0;
     let kit = WindowKit::new();
     let mut result = json!({
-        "variant": "wave1",
-        "baseline_commit": "c17292889e884f8a13d4e14598a20b64dc490f81",
+        "variant": "wave2_commercial",
+        "baseline_commit": "6d0bbd55964d802e2ddaae886baf9ca8dc17dcb0",
+        "original_baseline_commit": "c17292889e884f8a13d4e14598a20b64dc490f81",
         "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Counts are submitted material meshes, not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, materials/textures, actors, dynamic doors, interior runtime meshes, rain and UI. CPU time is one development-build pass, not a benchmark.",
         "world_identity": world_identity(world),
         "world_load_ms": world_load_ms,
         "features": features(world),
+        "commercial_features": commercial_features(world),
         "positions": [
             position_workload(world, "spawn", world.spawn, &kit),
             position_workload(world, "existing_04a_streetscape", Vec2::new(161.94, -236.84), &kit),
         ],
     });
-    let baseline: Value = serde_json::from_str(include_str!("../../docs/exterior-baseline.json"))
-        .expect("checked-in baseline audit JSON");
+    let baseline: Value =
+        serde_json::from_str(include_str!("../../docs/commercial-wave1-baseline.json"))
+            .expect("checked-in CI75 wave-one audit JSON");
+    let original: Value = serde_json::from_str(include_str!("../../docs/exterior-baseline.json"))
+        .expect("checked-in original exterior audit JSON");
     let identity_matches = result["world_identity"] == baseline["world_identity"];
+    let original_identity_matches = result["world_identity"] == original["world_identity"];
+    let architecture_matches = result["features"] == baseline["features"];
     let mut comparisons = Vec::new();
+    let mut original_comparisons = Vec::new();
     let mut within_geometry_budget = true;
-    for (current, previous) in result["positions"]
+    for ((current, previous), before_architecture) in result["positions"]
         .as_array()
         .unwrap()
         .iter()
         .zip(baseline["positions"].as_array().unwrap())
+        .zip(original["positions"].as_array().unwrap())
     {
         assert_eq!(current["name"], previous["name"]);
+        assert_eq!(current["name"], before_architecture["name"]);
+        // The engine's positions are f32. Decimal JSON round-tripping through
+        // CI and Python can differ by one f64 ULP without changing either engine
+        // coordinate; compare the exact f32 bits used by the streaming planner.
+        let coordinate_bits = |value: &Value| {
+            value
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|coordinate| (coordinate.as_f64().unwrap() as f32).to_bits())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            coordinate_bits(&current["position"]),
+            coordinate_bits(&previous["position"])
+        );
+        assert_eq!(current["chunks"], previous["chunks"]);
         let mut changes = serde_json::Map::new();
+        let mut original_changes = serde_json::Map::new();
+        // Wave 2 is a separately bounded increment over the verified Wave 1
+        // source. Keep the original pre-architecture comparison visible below;
+        // never present the new baseline as a smaller cumulative cost.
         for (metric, maximum_baseline_percent) in [
-            ("vertices", 145),
-            ("triangles", 145),
-            ("material_meshes", 150),
-            ("attribute_index_payload_bytes", 145),
+            ("vertices", 106),
+            ("triangles", 106),
+            ("material_meshes", 105),
+            ("attribute_index_payload_bytes", 106),
         ] {
             let before = previous["planned_resident_total"][metric].as_u64().unwrap();
             let after = current["planned_resident_total"][metric].as_u64().unwrap();
@@ -275,19 +356,43 @@ fn main() {
                     "change_percent": (after as f64 / before as f64 - 1.0) * 100.0,
                 }),
             );
+            let original_before = before_architecture["planned_resident_total"][metric]
+                .as_u64()
+                .unwrap();
+            original_changes.insert(
+                metric.to_owned(),
+                json!({
+                    "original_baseline": original_before,
+                    "wave1": before,
+                    "current": after,
+                    "cumulative_change_percent": (after as f64 / original_before as f64 - 1.0) * 100.0,
+                }),
+            );
         }
         comparisons.push(json!({"name": current["name"], "metrics": changes}));
+        original_comparisons.push(json!({"name": current["name"], "metrics": original_changes}));
     }
     result["baseline_comparison"] = json!({
+        "reference": "Verified wave-one CI75 resident geometry at merged main 6d0bbd5",
         "world_identity_matches": identity_matches,
+        "wave1_feature_and_facade_vertex_counts_match": architecture_matches,
         "geometry_budget_passed": within_geometry_budget,
         "positions": comparisons,
+    });
+    result["original_baseline_comparison"] = json!({
+        "reference": "Pre-architecture main c172928; cumulative costs, not the incremental wave-two budget",
+        "world_identity_matches": original_identity_matches,
+        "positions": original_comparisons,
     });
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
     if std::env::args().any(|arg| arg == "--check") {
         assert!(
-            identity_matches,
+            identity_matches && original_identity_matches,
             "exterior-only work changed the baseline world/save identity"
+        );
+        assert!(
+            architecture_matches,
+            "commercial work changed the verified wave-one feature or facade vertex counts"
         );
         assert!(
             within_geometry_budget,
