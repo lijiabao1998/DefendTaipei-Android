@@ -29,7 +29,7 @@ For example, a reported 120 Hz mode supports the policy's 120, 60 and 30 FPS cho
 
 The bridge uses [`Display.getSupportedModes()`](https://developer.android.com/reference/android/view/Display#getSupportedModes()) and [`WindowManager.LayoutParams.preferredRefreshRate`](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#preferredRefreshRate). Android retains control of actual display behavior. The report therefore records the requested frame rate, applied refresh hint and observed refresh rate separately.
 
-The app cap uses a monotonic deadline at the next main-loop boundary: it sleeps only for the remaining interval when the preceding work finished early. Menus and Pause are capped at no more than 30 app updates per second. A slow frame is not given an additional full-frame sleep.
+The app cap uses a monotonic deadline at the next main-loop boundary: it sleeps only for the remaining interval when the preceding work finished early. Non-playing screens and Pause are capped at no more than 30 app updates per second. In-game modal panels retain the gameplay cap while their time is excluded from sampling. A slow frame is not given an additional full-frame sleep.
 
 This is an **application-side cap**, not AGDK Swappy integration, a GPU timestamp, or proof of display presentation cadence. Android's [Frame Pacing library](https://developer.android.com/games/sdk/frame-pacing) additionally coordinates presentation timestamps and fences with the display pipeline. That integration is outside this change; high-refresh requests still need physical-device verification for smoothness, latency and sustained power behavior.
 
@@ -100,11 +100,11 @@ Cancelling a capture preserves the previous complete report. A completed report 
 | `duration_seconds`, `warmup_seconds` | Actual accumulated recorded and discarded-warmup interval durations |
 | `frames` | Each observed interval in milliseconds, with its effective target FPS and scene scale |
 | `summary` | Sample count, mean interval, reciprocal FPS, P50/P95/P99/max, over-budget count and ratio |
-| `device_start`, `device_end` | Android snapshots at capture request and completion, including sample ages |
+| `device_start`, `device_end` | Android snapshots at the first measured frame after warmup and at capture completion, including sample ages |
 | `gpu` | Available render-adapter name, backend, driver and vendor/device metadata; no GPU utilization or timing claim |
-| `render_dimensions_start/end` | Physical UI and scene dimensions and scene-scale percentage |
-| `preferences_start`, `effective_start/end`, `events` | Requested configuration, effective policy and bounded policy-change history |
-| `interruptions`, `notes` | Excluded inactive intervals and measurement limitations |
+| `render_dimensions_start/end` | Physical UI and scene dimensions and scene-scale percentage at the first measured frame after warmup and at completion |
+| `preferences_start`, `effective_start/end`, `events` | Requested configuration and effective policy at the first measured frame after warmup, final effective policy, and bounded policy-change history during sampling |
+| `interruptions`, `notes` | Count of transitions out of eligible sampling, and accompanying measurement limitations |
 
 The timer uses monotonic `Instant` observations of the application loop. Its intervals include frame-cap sleep, scheduling delays and rendering waits. The reported FPS is `1000 / mean_ms`, not a count of confirmed screen presentations. P95 and P99 use nearest-rank percentiles. “Over budget” means an interval greater than **125% of that sample's effective cap budget**; at 60 FPS the threshold is about 20.83 ms, and at 30 FPS about 41.67 ms. It is an application-interval indicator, not Android's official jank classification.
 
@@ -145,7 +145,7 @@ python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 cargo run -p defend_taipei -- --qa
 ```
 
-Native QA checks the real render pipeline, portrait/landscape performance controls, persisted settings, full-resolution UI and scaled-scene geometry. It uses the fixed-timestep harness; automatic frame-history adaptation and app-cap sleeping are disabled there. Its render evidence is not a physical-phone benchmark, even though a harness report can contain observed wall-clock intervals.
+Native QA checks the real render pipeline, portrait/landscape performance controls, persisted settings, full-resolution UI and scaled-scene geometry. Settings captures require a visible, correctly sized UI root on the presentation camera and readback pixels matching the opaque settings panel and selected control border; an open-state flag alone cannot pass. It uses the fixed-timestep harness; automatic frame-history adaptation and app-cap sleeping are disabled there. Its render evidence is not a physical-phone benchmark, even though a harness report can contain observed wall-clock intervals.
 
 After the existing disposable-emulator gameplay and audio stages, CI runs:
 
