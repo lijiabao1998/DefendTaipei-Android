@@ -264,6 +264,7 @@ struct HudWorld<'w> {
     scavenge: Option<Res<'w, ScavengeState>>,
     hint: Option<Res<'w, InteractionHint>>,
     notice: Option<Res<'w, WorldNotice>>,
+    sectors: Option<Res<'w, crate::sectors::SectorStatus>>,
     lang: Res<'w, Language>,
 }
 
@@ -342,6 +343,7 @@ fn update_hud(
         scavenge,
         hint,
         notice,
+        sectors,
         lang,
     } = world;
     let conditions = condition_text(
@@ -421,9 +423,21 @@ fn update_hud(
         String::new()
     };
     let gear = format!("{weapon_name}{ammo} · {:.1} kg", inventory.weight());
+    // v21 the area the player stands in and whether it is still occupied.
+    let area = sectors.as_deref().map_or_else(
+        || tr(*lang, "萬華", "Wanhua").to_owned(),
+        |s| {
+            let name = crate::sectors::SECTORS[s.here].name(*lang);
+            if s.reclaimed_here {
+                format!("{name}★")
+            } else {
+                format!("{name}{}", tr(*lang, "（佔領）", " (occupied)"))
+            }
+        },
+    );
     let utilities = format!(
         "{} · {} · {} · {} {}",
-        tr(*lang, "萬華", "Wanhua"),
+        area,
         if env.power {
             tr(*lang, "有電", "Power")
         } else {

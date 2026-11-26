@@ -988,7 +988,7 @@ fn brick_tex() -> Canvas {
     c
 }
 
-fn embedded(bytes: &[u8]) -> Image {
+pub(crate) fn embedded(bytes: &[u8]) -> Image {
     let mut img = Image::from_buffer(
         bytes,
         ImageType::Extension("png"),

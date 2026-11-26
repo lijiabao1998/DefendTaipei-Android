@@ -190,6 +190,8 @@ fn cabinet_owner(id: &str) -> String {
 struct Patrol {
     id: u32,
     route: Vec<Vec2>,
+    /// Sentry at a checkpoint: holds `route[0]` instead of walking it.
+    post: bool,
 }
 
 #[derive(Resource)]
@@ -238,6 +240,8 @@ impl Plugin for WorldPlayPlugin {
             .init_resource::<ScavengeSession>()
             .init_resource::<DoorPrompt>()
             .init_resource::<FrameProgress>()
+            .init_resource::<crate::dialogue::NpcSpots>()
+            .add_message::<crate::dialogue::TalkTo>()
             .add_message::<WorldAction>()
             .configure_sets(Update, WorldSet.after(ShelterSet).after(combat::CombatSet))
             .add_systems(Startup, (plan_world, setup_loot_art))
@@ -367,7 +371,7 @@ fn plan_world(mut commands: Commands) {
         .filter(|r| r.p.len() >= 3 && r.t != "footway")
         .collect();
     let mut seed = 20_261_024_u32;
-    let patrols = (0..64)
+    let patrols: Vec<Patrol> = (0..64)
         .filter_map(|id| {
             if roads.is_empty() {
                 return None;
@@ -376,9 +380,24 @@ fn plan_world(mut commands: Commands) {
             let start = (next(&mut seed) * (road.p.len() - 1) as f64) as usize;
             let route: Vec<_> =
                 road.p[start.saturating_sub(3)..(start + 4).min(road.p.len())].to_vec();
-            Some(Patrol { id, route })
+            Some(Patrol {
+                id,
+                route,
+                post: false,
+            })
         })
         .collect();
+    // main.ts boot: the first soldiers man the two checkpoints, two at each.
+    let mut patrols = patrols;
+    for (k, patrol) in patrols.iter_mut().take(4).enumerate() {
+        if let Some(cp) = map.checkpoints.get(k / 2) {
+            patrol.route = vec![cp.post(k % 2)];
+            patrol.post = true;
+        }
+    }
+    commands.insert_resource(crate::sectors::PatrolRoster(
+        patrols.iter().map(|p| (p.id, p.route[0])).collect(),
+    ));
     commands.insert_resource(WorldCatalog {
         containers,
         patrols,
@@ -408,7 +427,9 @@ fn spawn_patrols(commands: &mut Commands, catalog: &WorldCatalog, dead: &[u32]) 
         if dead.contains(&patrol.id) {
             continue;
         }
-        let kind = if patrol.id >= 48 {
+        let kind = if patrol.post {
+            EnemyKind::Garrison
+        } else if patrol.id >= 48 {
             EnemyKind::NightPatrol
         } else {
             EnemyKind::Patrol
@@ -649,18 +670,30 @@ fn nearest_container(
                 .as_ref()
                 .is_none_or(|b| q.distance_squared(pos) < b.pos.distance_squared(pos))
         {
+            let (label_zh, label_en) = drop_label(id);
             best = Some(Container {
                 id: id.clone(),
                 pos: q,
                 kind: "crate",
                 cabinet: false,
                 furnished: false,
-                label_zh: "遺留物資",
-                label_en: "Dropped supplies",
+                label_zh,
+                label_en,
             });
         }
     }
     best
+}
+
+/// Names of the crates left in the street, by the id scheme of their owner.
+fn drop_label(id: &str) -> (&'static str, &'static str) {
+    if id.starts_with("remgear") {
+        ("國軍殘部遺留裝備", "ROC remnant gear")
+    } else if id.starts_with("jpdrop") {
+        ("日本空投物資箱", "Japanese airdrop crate")
+    } else {
+        ("遺留物資", "Dropped supplies")
+    }
 }
 
 fn container_by_id(
@@ -678,14 +711,17 @@ fn container_by_id(
                 .drops
                 .iter()
                 .find(|(key, _)| key == id)
-                .map(|(_, pos)| Container {
-                    id: id.into(),
-                    pos: Vec2::from_array(*pos),
-                    kind: "crate",
-                    cabinet: false,
-                    furnished: false,
-                    label_zh: "遺留物資",
-                    label_en: "Dropped supplies",
+                .map(|(_, pos)| {
+                    let (label_zh, label_en) = drop_label(id);
+                    Container {
+                        id: id.into(),
+                        pos: Vec2::from_array(*pos),
+                        kind: "crate",
+                        cabinet: false,
+                        furnished: false,
+                        label_zh,
+                        label_en,
+                    }
                 })
         })
 }
@@ -746,6 +782,8 @@ fn migrate_fixture_loot(progress: &mut ScavengeState) {
 
 #[derive(Clone)]
 enum InteractionTarget {
+    /// Someone to talk to (ROC remnants, the JSDF liaison, a family upstairs).
+    Npc(crate::dialogue::NpcSpot),
     Door(DoorTarget),
     Container(Container),
     Trade,
@@ -759,12 +797,20 @@ fn interaction_target(
     progress: &ScavengeState,
     shelter: &Shelter,
     obstacles: &Obstacles,
+    npcs: &crate::dialogue::NpcSpots,
 ) -> InteractionTarget {
     if trade_at(pos.to_array()).is_some() {
         return InteractionTarget::Trade;
     }
     let door = crate::doors::nearest_door(pos, obstacles);
     let container = nearest_container(pos, catalog, progress, Some(obstacles));
+    // A person within reach answers before the door or a crate beside them,
+    // unless that crate is right under the player's hand.
+    if let Some(npc) = npcs.nearest(pos, |p| obstacles.los(pos, p))
+        && container.as_ref().is_none_or(|c| c.pos.distance(pos) > 1.2)
+    {
+        return InteractionTarget::Npc(npc.clone());
+    }
     if let Some(door) = door
         && container
             .as_ref()
@@ -794,6 +840,7 @@ fn update_interaction_hint(
     lang: Res<Language>,
     mut hint: ResMut<InteractionHint>,
     mut door_prompt: ResMut<DoorPrompt>,
+    npcs: Res<crate::dialogue::NpcSpots>,
 ) {
     door_prompt.0 = None;
     let mut next = InteractionHint::default();
@@ -808,9 +855,16 @@ fn update_interaction_hint(
             &progress,
             &shelter,
             &obstacles,
+            &npcs,
         );
         let (label, detail) =
             match target {
+                InteractionTarget::Npc(npc) => {
+                    next.label = npc.label;
+                    next.detail = npc.detail;
+                    hint.set_if_neq(next);
+                    return;
+                }
                 InteractionTarget::Door(door) => {
                     door_prompt.0 = Some(door);
                     if obstacles.doors().is_barricaded(door.id) {
@@ -1141,7 +1195,11 @@ fn apply_actions(
     selected: Res<SelectedRole>,
     env: Res<ShelterEnvironment>,
     obstacles: Res<Obstacles>,
-    civilians: Query<&Transform, With<crate::human::Civilian>>,
+    mut npc: (
+        Query<&Transform, With<crate::human::Civilian>>,
+        Res<crate::dialogue::NpcSpots>,
+        MessageWriter<crate::dialogue::TalkTo>,
+    ),
 ) {
     let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game, mut session) =
         states;
@@ -1234,7 +1292,12 @@ fn apply_actions(
                 if prompt.0.is_some() {
                     continue;
                 }
-                let target = interaction_target(pos, &catalog, &progress, &shelter, &obstacles);
+                let target =
+                    interaction_target(pos, &catalog, &progress, &shelter, &obstacles, &npc.1);
+                if let InteractionTarget::Npc(spot) = &target {
+                    npc.2.write(crate::dialogue::TalkTo(spot.key));
+                    continue;
+                }
                 if let InteractionTarget::Trade = target {
                     panels.write(OpenPanel(PanelKind::Trade));
                     continue;
@@ -1252,7 +1315,7 @@ fn apply_actions(
                                 .filter(|e| e.0.alive())
                                 .map(|e| (e.0.pos, 0.4)),
                         )
-                        .chain(civilians.iter().map(|c| (c.translation.xz(), 0.35)));
+                        .chain(npc.0.iter().map(|c| (c.translation.xz(), 0.35)));
                     if target.open && !crate::doors::can_close(door, occupants) {
                         notice.text = tr(
                             *lang,
@@ -1374,6 +1437,13 @@ fn apply_actions(
                         prompt.0 = None;
                     }
                     Err(error) => notice.text = error.message(*lang).into(),
+                }
+            }
+            WorldAction::Use(id) if id == "jpradio" => {
+                // v24.4 the field radio opens its own card (three kinds of support)
+                if inventory.count("jpradio") > 0 {
+                    npc.2
+                        .write(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Radio));
                 }
             }
             WorldAction::Use(id) => {
@@ -1778,7 +1848,7 @@ mod tests {
         let shelter = Shelter::default();
         obstacles.doors().set_open(id, false);
         assert!(
-            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles), InteractionTarget::Door(d) if d.id == id && !d.open)
+            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default()), InteractionTarget::Door(d) if d.id == id && !d.open)
         );
         assert_eq!(
             fill_water(
@@ -1796,7 +1866,7 @@ mod tests {
         obstacles.doors().set_open(id, true);
         let inside = door.p - door.n * 1.1;
         assert!(
-            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
+            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default()), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
         );
         fill_water(
             inside,
@@ -2306,6 +2376,8 @@ mod tests {
             .add_message::<WorldAction>()
             .add_message::<OpenPanel>()
             .add_message::<SfxEvent>()
+            .init_resource::<crate::dialogue::NpcSpots>()
+            .add_message::<crate::dialogue::TalkTo>()
             .add_systems(Update, apply_actions);
         let player = app
             .world_mut()
@@ -2432,6 +2504,8 @@ mod tests {
             .add_message::<WorldAction>()
             .add_message::<OpenPanel>()
             .add_message::<SfxEvent>()
+            .init_resource::<crate::dialogue::NpcSpots>()
+            .add_message::<crate::dialogue::TalkTo>()
             .add_systems(Update, apply_actions);
         app.world_mut().spawn((Player, Transform::default()));
         {

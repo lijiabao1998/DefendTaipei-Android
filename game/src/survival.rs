@@ -1039,7 +1039,13 @@ fn tick(
     mut dawn: ResMut<DawnTracker>,
 ) {
     if dawn.crossed(f64::from(campaign.game_min)) {
+        // v24.14 the reclaimed districts look after the shelter before the day's meals are counted.
+        let gift = crate::sectors::reclaim_dawn(&mut shelter, campaign.reclaimed.len(), *lang);
         shelter.day_tick(&mut env, *lang);
+        if let Some(line) = gift {
+            shelter.log.insert(0, line);
+            shelter.log.truncate(30);
+        }
     }
 }
 

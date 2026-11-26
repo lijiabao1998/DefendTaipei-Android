@@ -13,6 +13,7 @@ pub mod chunk;
 mod city;
 pub mod combat;
 pub mod device;
+pub mod dialogue;
 pub mod doors;
 pub mod game_flow;
 mod geom;
@@ -21,14 +22,18 @@ mod human;
 pub mod i18n;
 pub mod input;
 pub mod inventory;
+pub mod japan;
 pub mod map;
 mod perf;
 pub mod performance;
 mod player;
 #[cfg(not(target_os = "android"))]
 mod qa;
+pub mod reclaim_street;
+pub mod remnant;
 pub mod roles;
 pub mod save;
+pub mod sectors;
 pub mod settings;
 mod story;
 pub mod survival;
@@ -123,6 +128,14 @@ pub fn run() {
             doors::DoorPlugin,
             worldmap::WorldMapPlugin,
             map::atmosphere::AtmospherePlugin,
+        ))
+        .add_plugins((
+            sectors::SectorPlugin,
+            dialogue::DialoguePlugin,
+            remnant::RemnantPlugin,
+            japan::JapanPlugin,
+            map::wreckage::WreckagePlugin,
+            reclaim_street::ReclaimStreetPlugin,
         ));
     #[cfg(not(target_os = "android"))]
     if qa_mode {

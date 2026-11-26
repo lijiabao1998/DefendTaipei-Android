@@ -92,6 +92,12 @@ struct SaveFile {
     world: ScavengeState,
     #[serde(default)]
     map: MapProgress,
+    /// v24.3 the ROC remnant positions (absent in older native saves).
+    #[serde(default)]
+    remnants: crate::remnant::RemnantState,
+    /// v24.4 the JSDF liaison, radio cooldowns and airdrops.
+    #[serde(default)]
+    japan: crate::japan::JapanState,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -179,6 +185,11 @@ impl SaveFile {
             || !finite_range(campaign.notice_t, 0.0, 3600.0)
             || campaign.notice.len() > 16_384
             || campaign.reclaimed.len() > WANHUA_DISTRICTS.len()
+            || campaign.reclaim_at.len() > WANHUA_DISTRICTS.len()
+            || campaign.reclaim_at.iter().any(|(name, p)| {
+                !WANHUA_DISTRICTS.contains(&name.as_str())
+                    || p.iter().any(|n| !n.is_finite() || n.abs() > 1_000_000.0)
+            })
             || !unique_strings(&campaign.reclaimed, 128)
             || campaign
                 .reclaimed
@@ -236,6 +247,12 @@ impl SaveFile {
                 .any(|id| !closed_doors.contains(id))
         {
             return Err(SaveError::Invalid("Invalid saved barricades"));
+        }
+        if !self.remnants.is_valid() {
+            return Err(SaveError::Invalid("Invalid ROC remnant state"));
+        }
+        if !self.japan.is_valid() {
+            return Err(SaveError::Invalid("Invalid JSDF support state"));
         }
         let loot_ids: HashSet<&str> = world.loot.iter().map(|(id, _)| id.as_str()).collect();
         if [&world.searched, &world.asked, &world.night_seen]
@@ -539,6 +556,14 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
             .get_resource::<MapProgress>()
             .cloned()
             .unwrap_or_default(),
+        remnants: world
+            .get_resource::<crate::remnant::RemnantState>()
+            .cloned()
+            .unwrap_or_default(),
+        japan: world
+            .get_resource::<crate::japan::JapanState>()
+            .cloned()
+            .unwrap_or_default(),
     };
     save.validate()?;
     Ok(save)
@@ -614,6 +639,8 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     }
     world.insert_resource(save.world);
     world.insert_resource(save.map);
+    world.insert_resource(save.remnants);
+    world.insert_resource(save.japan);
     if let Some(mut input) = world.get_resource_mut::<MoveInput>() {
         *input = MoveInput::default();
     }
@@ -741,6 +768,8 @@ mod tests {
             needs: PlayerNeeds::default(),
             world: ScavengeState::default(),
             map: MapProgress::default(),
+            remnants: crate::remnant::RemnantState::default(),
+            japan: crate::japan::JapanState::default(),
         }
     }
 

@@ -57,6 +57,8 @@ pub(super) enum View {
     Journal,
     Moral,
     Scavenge,
+    /// A conversation card from [`crate::dialogue::Dialogue`].
+    Talk,
 }
 
 #[derive(Resource, Default)]
@@ -88,6 +90,8 @@ pub(super) enum Action {
     Moral(MoralChoice),
     Loot(LootTake),
     Barricade,
+    /// An option of the open conversation card, by index.
+    Talk(usize),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -727,6 +731,7 @@ fn view_name(view: View, lang: Language) -> &'static str {
         View::Journal => tr(lang, "日誌", "Journal"),
         View::Moral => tr(lang, "門後的人", "Behind the door"),
         View::Scavenge => tr(lang, "搜刮", "Scavenge"),
+        View::Talk => tr(lang, "交談", "Talk"),
     }
 }
 
@@ -734,6 +739,23 @@ fn view_name(view: View, lang: Language) -> &'static str {
 struct PanelExtras<'a> {
     loot: Option<(&'a ScavengeSession, &'a ScavengeState)>,
     door: Option<bool>,
+    talk: Option<&'a crate::dialogue::DialogueCard>,
+}
+
+fn talk_rows(card: Option<&crate::dialogue::DialogueCard>) -> Vec<Row> {
+    let Some(card) = card else {
+        return Vec::new();
+    };
+    let mut rows = vec![Row::text(card.body.clone())];
+    rows.extend(card.options.iter().enumerate().map(|(i, option)| {
+        Row::action(
+            option.detail.clone(),
+            &option.label,
+            Action::Talk(i),
+            option.enabled,
+        )
+    }));
+    rows
 }
 
 fn make_frame(
@@ -805,6 +827,10 @@ fn make_frame(
             || view_name(view, lang).to_string(),
             |i| TRADE_SPOTS[i].name(lang).to_string(),
         ),
+        View::Talk => extras.talk.map_or_else(
+            || view_name(view, lang).to_string(),
+            |card| card.title.clone(),
+        ),
         _ => view_name(view, lang).to_string(),
     };
     frame.text(
@@ -821,7 +847,7 @@ fn make_frame(
     );
 
     let mut y = header_y + 50.0;
-    if view != View::Moral {
+    if view != View::Moral && view != View::Talk {
         let gap = 5.0;
         let tab_w = (width - gap * 3.0) / 4.0;
         for (i, tab) in [View::Inventory, View::Shelter, View::Trade, View::Journal]
@@ -891,7 +917,7 @@ fn make_frame(
             "Received broadcasts and daily records. The world keeps running while this panel is open.",
         )
         .to_string(),
-        View::Moral | View::Scavenge => String::new(),
+        View::Moral | View::Scavenge | View::Talk => String::new(),
     };
     if !summary.is_empty() {
         frame.text(ScreenRect::new(x, y, width, 44.0), summary, 14.0);
@@ -906,6 +932,7 @@ fn make_frame(
         View::Shelter => shelter_rows(shelter, inventory, pos, lang),
         View::Trade => trade_rows(shelter, inventory, pos, lang),
         View::Moral => moral_rows(inventory, lang),
+        View::Talk => talk_rows(extras.talk),
         View::Journal => journal_rows(campaign, shelter, lang),
         View::Scavenge => Vec::new(),
     };
@@ -1005,7 +1032,7 @@ fn make_frame(
         ScreenRect::new(x + width - nav_w, footer_y, nav_w, 42.0),
         tr(lang, "儲存", "Save").to_owned(),
         Action::Save,
-        view != View::Moral,
+        view != View::Moral && view != View::Talk,
     );
     frame
 }
@@ -1018,6 +1045,7 @@ pub(super) struct PanelWorld<'w, 's> {
     campaign: Res<'w, Campaign>,
     needs: Res<'w, PlayerNeeds>,
     prompt: Res<'w, MoralPrompt>,
+    dialogue: ResMut<'w, crate::dialogue::Dialogue>,
     lang: Res<'w, Language>,
     notice: ResMut<'w, WorldNotice>,
     save_status: Res<'w, SaveStatus>,
@@ -1043,6 +1071,7 @@ pub(super) fn drive_panels(
     mut pauses: MessageWriter<TogglePause>,
     map: Option<Res<crate::worldmap::MapOpen>>,
     mut sound: MessageWriter<SfxEvent>,
+    mut talk_choices: MessageWriter<crate::dialogue::DialogueChosen>,
 ) {
     let PanelWorld {
         player,
@@ -1051,6 +1080,7 @@ pub(super) fn drive_panels(
         campaign,
         needs,
         prompt,
+        mut dialogue,
         lang,
         mut notice,
         save_status,
@@ -1091,6 +1121,15 @@ pub(super) fn drive_panels(
     } else if prompt.0.is_none() && state.view == Some(View::Moral) {
         state.view = None;
     }
+    if prompt.0.is_none() {
+        if dialogue.0.is_some() && state.view != Some(View::Talk) {
+            state.view = Some(View::Talk);
+            state.page = 0;
+            scavenge.target = None;
+        } else if dialogue.0.is_none() && state.view == Some(View::Talk) {
+            state.view = None;
+        }
+    }
     let viewport = windows
         .iter()
         .next()
@@ -1114,6 +1153,7 @@ pub(super) fn drive_panels(
                 crate::doors::nearest_door(Vec2::from_array(pos), obstacles)
                     .map(|door| obstacles.doors().is_barricaded(door.id))
             }),
+            talk: dialogue.0.as_ref(),
         },
     );
     apply_interaction_label(&mut frame, hint.as_deref());
@@ -1131,7 +1171,7 @@ pub(super) fn drive_panels(
     if state.view.is_some() && keys.just_pressed(KeyCode::Escape) {
         keys.clear_just_pressed(KeyCode::Escape);
         action = Some(Action::Close);
-    } else if state.view != Some(View::Moral) {
+    } else if state.view != Some(View::Moral) && state.view != Some(View::Talk) {
         for (key, view) in [
             (KeyCode::KeyI, View::Inventory),
             (KeyCode::KeyC, View::Shelter),
@@ -1159,6 +1199,9 @@ pub(super) fn drive_panels(
         Some(Action::Close) => {
             if state.view == Some(View::Moral) {
                 world_actions.write(WorldAction::Moral(MoralChoice::Leave));
+            }
+            if state.view == Some(View::Talk) {
+                dialogue.0 = None;
             }
             state.view = None;
             sound.write(SfxEvent::Ui { confirm: false });
@@ -1247,6 +1290,18 @@ pub(super) fn drive_panels(
             world_actions.write(WorldAction::Moral(choice));
             state.view = None;
         }
+        Some(Action::Talk(index)) => {
+            if let Some(option) = dialogue
+                .0
+                .take()
+                .and_then(|card| card.options.get(index).cloned())
+                .filter(|option| option.enabled)
+            {
+                talk_choices.write(crate::dialogue::DialogueChosen(option.key));
+                sound.write(SfxEvent::Ui { confirm: true });
+            }
+            state.view = None;
+        }
         Some(Action::Loot(take)) => {
             if let Some(target) = &scavenge.target {
                 world_actions.write(WorldAction::TakeLoot {
@@ -1284,6 +1339,7 @@ pub(super) struct PanelRenderWorld<'w> {
     scavenge: Res<'w, ScavengeSession>,
     progress: Option<Res<'w, ScavengeState>>,
     obstacles: Option<Res<'w, crate::map::Obstacles>>,
+    dialogue: Option<Res<'w, crate::dialogue::Dialogue>>,
 }
 
 pub(super) fn render_panels(
@@ -1311,6 +1367,7 @@ pub(super) fn render_panels(
         scavenge,
         progress,
         obstacles,
+        dialogue,
     } = world;
     let mut frame =
         if flow.get() == &GameFlow::Playing && !pause.0 && !map.as_ref().is_some_and(|m| m.0) {
@@ -1336,6 +1393,7 @@ pub(super) fn render_panels(
                         crate::doors::nearest_door(Vec2::from_array(position(&player)), obstacles)
                             .map(|door| obstacles.doors().is_barricaded(door.id))
                     }),
+                    talk: dialogue.as_deref().and_then(|d| d.0.as_ref()),
                 },
             )
         } else {
@@ -1598,6 +1656,8 @@ mod tests {
             .add_message::<SaveGame>()
             .add_message::<TogglePause>()
             .add_message::<SfxEvent>()
+            .init_resource::<crate::dialogue::Dialogue>()
+            .add_message::<crate::dialogue::DialogueChosen>()
             .add_systems(Update, drive_panels);
         app.world_mut().spawn((Player, Transform::default()));
         app.world_mut().resource_mut::<Shelter>().home = Some([0.0, 0.0]);

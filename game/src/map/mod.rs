@@ -16,9 +16,11 @@ pub mod collide;
 pub mod data;
 pub mod detail;
 pub mod evac;
+pub mod fortify;
 pub mod interiors;
 pub mod street;
 pub mod textures;
+pub mod wreckage;
 
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};

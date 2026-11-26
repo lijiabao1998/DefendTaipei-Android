@@ -188,6 +188,7 @@ mod tests {
             &ScavengeState::default(),
             &crate::survival::Shelter::default(),
             &obstacles,
+            &crate::dialogue::NpcSpots::default(),
         );
         assert!(matches!(target, super::super::InteractionTarget::Container(c) if c.id == cold.id));
         let actual = serde_json::json!({

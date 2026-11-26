@@ -124,6 +124,13 @@ pub struct Body {
     t: f32,
 }
 
+impl Body {
+    /// A body that lies for the usual time (for kills by allies and air support).
+    pub fn new(kind: EnemyKind) -> Self {
+        Self { kind, t: BODY_SECS }
+    }
+}
+
 // ── Messages ────────────────────────────────────────────────────────────
 
 /// Request: spawn one enemy standing at `pos` (y ignored). Patrols a short route through `pos`.

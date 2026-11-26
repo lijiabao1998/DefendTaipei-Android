@@ -107,6 +107,7 @@ impl ItemDef {
             || (self.kind.is_weapon() && self.anti_armor == 0.0)
             || self.mag > 0
             || self.id == "cstove"
+            || self.id == "jpradio"
     }
 }
 

@@ -27,6 +27,8 @@ pub enum Driver {
     Player,
     Soldier,
     Civilian,
+    /// Driven by its owner writing [`RigAnim`] (ROC remnants, the JSDF liaison, families).
+    Ally,
 }
 
 /// Put this on an entity (with a Transform) to give it a 白面人 body.

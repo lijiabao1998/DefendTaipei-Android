@@ -53,6 +53,8 @@ impl Plugin for FlowUiPlugin {
             .init_resource::<title::TitleAssets>()
             .init_resource::<title::TitleCache>()
             .init_resource::<ConsumedPresses>()
+            .init_resource::<crate::dialogue::Dialogue>()
+            .add_message::<crate::dialogue::DialogueChosen>()
             .init_resource::<PauseOpen>()
             .init_resource::<settings::SettingsUi>()
             .init_resource::<settings::SettingsCache>()
