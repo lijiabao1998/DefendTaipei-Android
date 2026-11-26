@@ -11,7 +11,10 @@ mod render;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bevy::{
-    input::mouse::{AccumulatedMouseScroll, MouseScrollUnit},
+    input::{
+        mouse::{AccumulatedMouseScroll, MouseScrollUnit},
+        touch::{TouchInput, TouchPhase},
+    },
     prelude::*,
     window::PrimaryWindow,
 };
@@ -324,6 +327,7 @@ struct MapGesture {
     pointers: BTreeMap<u64, PointerTrack>,
     ignored: BTreeSet<u64>,
     pinched: bool,
+    viewport: Option<Vec2>,
 }
 
 pub struct WorldMapPlugin;
@@ -335,6 +339,7 @@ impl Plugin for WorldMapPlugin {
             .init_resource::<MapGesture>()
             .init_resource::<render::MapCache>()
             .add_message::<ToggleMap>()
+            .add_message::<TouchInput>()
             .configure_sets(Update, MapInputSet.before(crate::input::InputSet))
             .add_systems(
                 Update,
@@ -386,14 +391,167 @@ fn discover(
     }
 }
 
+impl MapGesture {
+    /// A toolbar press, rotation or focus change cancels unfinished gestures.
+    /// Keep their IDs captured until UP, so crossing onto the paper cannot
+    /// turn an old button press into a new annotation.
+    fn cancel_tracks(&mut self) {
+        self.ignored.extend(self.pointers.keys().copied());
+        self.pointers.clear();
+        self.pinched = false;
+    }
+
+    fn begin(&mut self, id: u64, p: Vec2) {
+        self.pointers.insert(
+            id,
+            PointerTrack {
+                last: p,
+                origin: p,
+                moved: false,
+            },
+        );
+        if self.pointers.len() > 1 {
+            self.pinched = true;
+            for track in self.pointers.values_mut() {
+                track.moved = true;
+            }
+        }
+    }
+
+    fn motion(&mut self, id: u64, p: Vec2, view: &mut MapView, rect: ScreenRect) {
+        let Some(old) = self.pointers.get(&id).cloned() else {
+            return;
+        };
+        if !p.is_finite() {
+            self.cancel_tracks();
+            return;
+        }
+        if let Some(other) = self.pointers.iter().find(|(key, _)| **key != id) {
+            let other = other.1.last;
+            let old_distance = old.last.distance(other);
+            if old_distance > 2.0 {
+                let old_center = (old.last + other) * 0.5;
+                let center = (p + other) * 0.5;
+                view.center -= (center - old_center) / view.scale;
+                view.zoom_at(p.distance(other) / old_distance, center, rect);
+            }
+        } else {
+            let delta = p - old.last;
+            if delta.length_squared() > 0.0 {
+                view.center -= delta / view.scale;
+                view.constrain();
+                view.revision += 1;
+            }
+        }
+        if let Some(track) = self.pointers.get_mut(&id) {
+            track.moved |= p.distance(track.origin) > 6.0;
+            track.last = p;
+        }
+    }
+
+    fn end(
+        &mut self,
+        id: u64,
+        p: Vec2,
+        canceled: bool,
+        view: &mut MapView,
+        rect: ScreenRect,
+        progress: &mut MapProgress,
+    ) -> bool {
+        // UP carries its own final position; the last MOVE need not have been
+        // presented in a rendered frame. CANCEL must never create a mark.
+        if !canceled {
+            self.motion(id, p, view, rect);
+        }
+        let mut changed = false;
+        if let Some(track) = self.pointers.remove(&id)
+            && !canceled
+            && !track.moved
+            && !self.pinched
+            && rect.contains(track.last)
+        {
+            let world = view.world(track.last, rect);
+            changed = match view.tool {
+                MapTool::Pan => false,
+                MapTool::Mark(kind) => progress.add_note(world, kind),
+                MapTool::Erase => progress.remove_near(world, 18.0 / view.scale),
+            };
+            if changed {
+                view.revision += 1;
+            }
+        }
+        self.ignored.remove(&id);
+        if self.pointers.is_empty() {
+            self.pinched = false;
+        }
+        changed
+    }
+}
+
+fn pointer_start(
+    id: u64,
+    point: Vec2,
+    viewport: Vec2,
+    player: Vec2,
+    layout: &MapLayout,
+    open: &mut MapOpen,
+    modal: &mut UiModal,
+    view: &mut MapView,
+    gesture: &mut MapGesture,
+) {
+    if gesture.ignored.contains(&id) || !point.is_finite() {
+        return;
+    }
+    if !open.0 {
+        if !modal.open && toggle_rect(viewport).contains(point) {
+            open.0 = true;
+            modal.open = true;
+            modal.pointer_captured = true;
+            gesture.cancel_tracks();
+            view.center_on(player);
+            println!("DTMAP open=true");
+        }
+        gesture.ignored.insert(id);
+        return;
+    }
+    modal.pointer_captured = true;
+    if let Some((_, action)) = layout.buttons.iter().find(|(rect, _)| rect.contains(point)) {
+        match action {
+            Button::Close => {
+                open.0 = false;
+                modal.open = false;
+                println!("DTMAP open=false");
+            }
+            Button::ZoomIn => view.zoom_at(1.35, layout.content.center(), layout.content),
+            Button::ZoomOut => view.zoom_at(1.0 / 1.35, layout.content.center(), layout.content),
+            Button::Center => view.center_on(player),
+            Button::Fit => view.fit(layout.content),
+            Button::Tool(tool) => {
+                view.tool = *tool;
+                view.revision += 1;
+                println!("DTMAP tool={tool:?}");
+            }
+        }
+        gesture.cancel_tracks();
+        gesture.ignored.insert(id);
+    } else if layout.content.contains(point) {
+        gesture.begin(id, point);
+    } else {
+        gesture.ignored.insert(id);
+    }
+}
+
 fn input(
     flow: Res<State<GameFlow>>,
     pause: Res<PauseOpen>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     player: Query<&Transform, With<Player>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    pointer_inputs: (
+        Res<ButtonInput<MouseButton>>,
+        Res<Touches>,
+        MessageReader<TouchInput>,
+    ),
     scroll: Res<AccumulatedMouseScroll>,
     consumed: Res<ConsumedPresses>,
     mut toggles: MessageReader<ToggleMap>,
@@ -404,13 +562,18 @@ fn input(
     mut modal: ResMut<UiModal>,
     mut saves: MessageWriter<SaveGame>,
 ) {
+    let (mouse, touches, mut touch_events) = pointer_inputs;
+    // Read the ordered event stream even when closed, including complete taps
+    // between two slow frames and multiple gestures reusing Android pointer 0.
+    // Touches is a final-state snapshot and cannot represent those sequences.
+    let events: Vec<_> = touch_events.read().copied().collect();
     let toggled = toggles.read().count() % 2 == 1;
     if flow.get() != &GameFlow::Playing || pause.0 {
         open.0 = false;
         *gesture = MapGesture::default();
         return;
     }
-    let Some(window) = windows.iter().next() else {
+    let Some((window_id, window)) = windows.iter().next() else {
         return;
     };
     let viewport = Vec2::new(window.width(), window.height());
@@ -419,6 +582,17 @@ fn input(
         .iter()
         .next()
         .map_or(Vec2::ZERO, |t| Vec2::new(t.translation.x, t.translation.z));
+    let resized = gesture.viewport.is_some_and(|old| old != viewport);
+    if resized || !window.focused {
+        gesture.cancel_tracks();
+        gesture
+            .ignored
+            .extend(touches.iter().map(|touch| touch.id()));
+    }
+    gesture.viewport = Some(viewport);
+    if !window.focused {
+        return;
+    }
     let map_key = keys.just_pressed(KeyCode::KeyM);
     let close_key = open.0 && keys.just_pressed(KeyCode::Escape);
     if map_key {
@@ -427,61 +601,114 @@ fn input(
     if close_key {
         keys.clear_just_pressed(KeyCode::Escape);
     }
-    let clicked_open = !open.0
-        && !modal.open
-        && consumed
-            .points
-            .iter()
-            .any(|p| toggle_rect(viewport).contains(*p));
-    if close_key || ((toggled || map_key || clicked_open) && (open.0 || !modal.open)) {
+    let toggle_requested = close_key || ((toggled || map_key) && (open.0 || !modal.open));
+    if toggle_requested {
         open.0 = !open.0;
         modal.open = open.0;
-        *gesture = MapGesture::default();
+        gesture.cancel_tracks();
+        gesture
+            .ignored
+            .extend(touches.iter().map(|touch| touch.id()));
+        if mouse.pressed(MouseButton::Left) {
+            gesture.ignored.insert(u64::MAX);
+        }
+        if mouse.pressed(MouseButton::Left) || touches.iter().next().is_some() {
+            modal.pointer_captured = true;
+        }
         if open.0 {
             view.center_on(pos);
-            gesture
-                .ignored
-                .extend(touches.iter().map(|touch| touch.id()));
-            if mouse.pressed(MouseButton::Left) {
-                gesture.ignored.insert(u64::MAX);
-            }
         }
         println!("DTMAP open={}", open.0);
-        return;
+    }
+
+    let mut changed = false;
+    for event in events.iter().filter(|event| event.window == window_id) {
+        match event.phase {
+            // A complete tap may have old-orientation coordinates while the
+            // final Touches snapshot is already empty. Quarantine every new
+            // DOWN in this frame, not just fingers still held after resize.
+            TouchPhase::Started if resized || toggle_requested => {
+                gesture.ignored.insert(event.id);
+            }
+            TouchPhase::Started => pointer_start(
+                event.id,
+                event.position,
+                viewport,
+                pos,
+                &layout,
+                &mut open,
+                &mut modal,
+                &mut view,
+                &mut gesture,
+            ),
+            TouchPhase::Moved if open.0 => {
+                gesture.motion(event.id, event.position, &mut view, layout.content);
+            }
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                changed |= gesture.end(
+                    event.id,
+                    event.position,
+                    event.phase == TouchPhase::Canceled || !open.0,
+                    &mut view,
+                    layout.content,
+                    &mut progress,
+                );
+            }
+            _ => {}
+        }
+    }
+    // UI press capture also serves desktop mouse input. Exclude touchscreen
+    // starts already handled above, so neither toolbar actions nor notes fire
+    // twice. On desktop, a full click in one frame still gets a matching UP.
+    for &point in &consumed.points {
+        if resized
+            || toggle_requested
+            || events.iter().any(|event| {
+                event.window == window_id
+                    && event.phase == TouchPhase::Started
+                    && event.position == point
+            })
+        {
+            continue;
+        }
+        pointer_start(
+            u64::MAX,
+            point,
+            viewport,
+            pos,
+            &layout,
+            &mut open,
+            &mut modal,
+            &mut view,
+            &mut gesture,
+        );
+    }
+    if let Some(track) = gesture.pointers.get(&u64::MAX) {
+        let p = window.cursor_position().unwrap_or(track.last);
+        if mouse.pressed(MouseButton::Left) && open.0 {
+            gesture.motion(u64::MAX, p, &mut view, layout.content);
+        } else {
+            changed |= gesture.end(
+                u64::MAX,
+                p,
+                !open.0,
+                &mut view,
+                layout.content,
+                &mut progress,
+            );
+        }
+    }
+    if !mouse.pressed(MouseButton::Left) {
+        gesture.ignored.remove(&u64::MAX);
+    }
+    if changed {
+        saves.write(SaveGame);
+        println!("DTMAP notes={}", progress.notes.len());
     }
     if !open.0 {
         return;
     }
     modal.open = true;
-    for point in &consumed.points {
-        if let Some((_, action)) = layout
-            .buttons
-            .iter()
-            .find(|(rect, _)| rect.contains(*point))
-        {
-            match action {
-                Button::Close => {
-                    open.0 = false;
-                    modal.open = false;
-                    println!("DTMAP open=false");
-                }
-                Button::ZoomIn => view.zoom_at(1.35, layout.content.center(), layout.content),
-                Button::ZoomOut => {
-                    view.zoom_at(1.0 / 1.35, layout.content.center(), layout.content)
-                }
-                Button::Center => view.center_on(pos),
-                Button::Fit => view.fit(layout.content),
-                Button::Tool(tool) => {
-                    view.tool = *tool;
-                    view.revision += 1;
-                }
-            }
-            *gesture = MapGesture::default();
-        }
-    }
-    if !open.0 {
-        return;
-    }
     let dy = match scroll.unit {
         MouseScrollUnit::Line => scroll.delta.y,
         MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
@@ -492,99 +719,6 @@ fn input(
             .filter(|p| layout.content.contains(*p))
             .unwrap_or(layout.content.center());
         view.zoom_at(1.15f32.powf(dy), anchor, layout.content);
-    }
-    let mut active: BTreeMap<u64, Vec2> = touches.iter().map(|t| (t.id(), t.position())).collect();
-    if active.is_empty()
-        && mouse.pressed(MouseButton::Left)
-        && let Some(p) = window.cursor_position()
-    {
-        active.insert(u64::MAX, p);
-    }
-    let released: Vec<_> = gesture
-        .pointers
-        .keys()
-        .filter(|id| !active.contains_key(id))
-        .copied()
-        .collect();
-    for id in released {
-        if let Some(track) = gesture.pointers.remove(&id)
-            && !track.moved
-            && !gesture.pinched
-            && layout.content.contains(track.last)
-        {
-            let p = view.world(track.last, layout.content);
-            let changed = match view.tool {
-                MapTool::Pan => false,
-                MapTool::Mark(kind) => progress.add_note(p, kind),
-                MapTool::Erase => progress.remove_near(p, 18.0 / view.scale),
-            };
-            if changed {
-                view.revision += 1;
-                saves.write(SaveGame);
-                println!("DTMAP notes={}", progress.notes.len());
-            }
-        }
-    }
-    gesture.ignored.retain(|id| active.contains_key(id));
-    if active.is_empty() {
-        gesture.pinched = false;
-    }
-    // Only a gesture that began on the paper can pan it. A held toolbar button
-    // cannot become a drag when the finger crosses into the map.
-    for (&id, &p) in &active {
-        if !layout.content.contains(p) && !gesture.pointers.contains_key(&id) {
-            gesture.ignored.insert(id);
-        }
-        if layout.content.contains(p)
-            && !gesture.pointers.contains_key(&id)
-            && !gesture.ignored.contains(&id)
-        {
-            gesture.pointers.insert(
-                id,
-                PointerTrack {
-                    last: p,
-                    origin: p,
-                    moved: false,
-                },
-            );
-        }
-    }
-    let tracked: Vec<_> = active
-        .iter()
-        .filter(|(id, _)| gesture.pointers.contains_key(id))
-        .map(|(id, p)| (*id, *p))
-        .collect();
-    if tracked.len() >= 2 {
-        let (a, pa) = tracked[0];
-        let (b, pb) = tracked[1];
-        let oa = gesture.pointers[&a].last;
-        let ob = gesture.pointers[&b].last;
-        let old_distance = oa.distance(ob);
-        if old_distance > 2.0 {
-            let old_center = (oa + ob) * 0.5;
-            let center = (pa + pb) * 0.5;
-            let scale = view.scale;
-            view.center -= (center - old_center) / scale;
-            view.zoom_at(pa.distance(pb) / old_distance, center, layout.content);
-        }
-        gesture.pinched = true;
-        for track in gesture.pointers.values_mut() {
-            track.moved = true;
-        }
-    } else if let Some(&(id, p)) = tracked.first() {
-        let old = &gesture.pointers[&id];
-        let delta = p - old.last;
-        if delta.length_squared() > 0.0 {
-            let scale = view.scale;
-            view.center -= delta / scale;
-            view.constrain();
-            view.revision += 1;
-        }
-    }
-    for (id, p) in tracked {
-        let track = gesture.pointers.get_mut(&id).expect("tracked pointer");
-        track.moved |= p.distance(track.origin) > 6.0;
-        track.last = p;
     }
 }
 

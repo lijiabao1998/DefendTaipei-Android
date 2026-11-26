@@ -23,7 +23,22 @@ android {
         }
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+    // Intentionally PUBLIC AOSP development key. A stable signer lets debug
+    // builds from independent CI jobs update each other while retaining saves.
+    // Never use this fixture for production: see docs/TEST-SIGNING.md.
+    signingConfigs {
+        debug {
+            storeFile rootProject.file('test-signing/aosp-public-testkey.p12')
+            storeType 'PKCS12'
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

@@ -1,6 +1,6 @@
 //! Isometric orthographic follow camera, matching the web build's feel:
 //! fixed offset (40, 56, 40) from the player, ~44 m of street visible vertically
-//! in landscape, a tighter framing in portrait, wheel / pinch zoom 0.5×–2.2×.
+//! in landscape, a tighter framing in portrait, wheel / pinch zoom 0.5×–3.2×.
 
 use bevy::{
     camera::ScalingMode,
@@ -12,6 +12,8 @@ use bevy::{
 use crate::player::Player;
 
 pub const CAM_OFFSET: Vec3 = Vec3::new(40.0, 56.0, 40.0);
+/// Shared desktop / phone range, including a closer view of indoor fixtures.
+pub const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.5..=3.2;
 
 /// Current zoom factor (1 = default). Touch pinch writes to it from `touch.rs`.
 #[derive(Resource)]
@@ -75,7 +77,7 @@ fn wheel_zoom(
         MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
     };
     if dy != 0.0 {
-        zoom.0 = (zoom.0 * 1.1f32.powf(dy)).clamp(0.5, 2.2);
+        zoom.0 = (zoom.0 * 1.1f32.powf(dy)).clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end());
     }
 }
 

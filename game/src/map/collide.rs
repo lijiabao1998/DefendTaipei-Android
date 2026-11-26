@@ -63,7 +63,10 @@ impl Obstacles {
             let k = ((pt.x / CELL).floor() as i32, (pt.y / CELL).floor() as i32);
             for &s in self.0.segs_in_cell(k) {
                 if seen.insert(s) {
-                    f(&self.0.segs[s as usize], false);
+                    f(
+                        &self.0.segs[s as usize],
+                        s as usize >= self.0.interior_seg_start,
+                    );
                 }
             }
         }
@@ -173,7 +176,7 @@ impl Obstacles {
         let d = q - p;
         let len = d.length().max(1e-6);
         let mut best = 1.0f32;
-        self.segs_along(p, q, |s, door| {
+        self.segs_along(p, q, |s, solid_near_origin| {
             let e = s.b - s.a;
             let den = d.x * e.y - d.y * e.x;
             if den.abs() < 1e-9 {
@@ -181,7 +184,11 @@ impl Obstacles {
             }
             let t = ((s.a.x - p.x) * e.y - (s.a.y - p.y) * e.x) / den;
             let u = ((s.a.x - p.x) * d.y - (s.a.y - p.y) * d.x) / den;
-            if t < 0.0 || t > best || !(0.0..=1.0).contains(&u) || (!door && t * len < own) {
+            if t < 0.0
+                || t > best
+                || !(0.0..=1.0).contains(&u)
+                || (!solid_near_origin && t * len < own)
+            {
                 return;
             }
             if s.h.is_some_and(|h| ys + (yt - ys) * t > h) {

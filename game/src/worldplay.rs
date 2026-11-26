@@ -84,6 +84,9 @@ pub struct ScavengeState {
     /// Building IDs with closed entrances. Missing in older native saves means
     /// their previously open passages stay open; new games set their own defaults.
     pub closed_doors: Vec<u32>,
+    pub barricaded_doors: Vec<u32>,
+    /// Zero denotes a save from before individual indoor fixtures existed.
+    pub fixtures_version: u8,
     pub weather: WeatherState,
 }
 
@@ -102,9 +105,46 @@ pub struct InteractionHint {
 #[derive(Resource, Default)]
 pub struct MoralPrompt(pub Option<String>);
 
+/// A panel keeps one real container selected; every transfer is revalidated
+/// against the world, so a stale panel cannot take supplies through a wall.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ScavengeSession {
+    pub target: Option<LootTarget>,
+    pub reachable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LootTarget {
+    pub id: String,
+    pub label_zh: String,
+    pub label_en: String,
+}
+
+impl LootTarget {
+    pub fn name(&self, lang: Language) -> &str {
+        match lang {
+            Language::ZhTw => &self.label_zh,
+            Language::En => &self.label_en,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LootTake {
+    One(String),
+    Stack(String),
+    All,
+}
+
+/// The Web player's bag has a fixed 15 kg pickup ceiling. Role carry skill
+/// separately changes the movement slowdown threshold, not this ceiling.
+pub const LOOT_CAPACITY_KG: f32 = 15.0;
+
 #[derive(Message, Clone, Debug)]
 pub enum WorldAction {
     Interact,
+    Barricade,
+    TakeLoot { container: String, take: LootTake },
     FillWater,
     Use(String),
     Sleep,
@@ -118,6 +158,26 @@ struct Container {
     pos: Vec2,
     kind: &'static str,
     cabinet: bool,
+    furnished: bool,
+    label_zh: &'static str,
+    label_en: &'static str,
+}
+
+impl Container {
+    fn target(&self) -> LootTarget {
+        LootTarget {
+            id: self.id.clone(),
+            label_zh: self.label_zh.into(),
+            label_en: self.label_en.into(),
+        }
+    }
+}
+
+fn cabinet_owner(id: &str) -> String {
+    id.strip_prefix('x')
+        .and_then(|key| key.split_once('_'))
+        .filter(|(building, _)| building.parse::<u32>().is_ok())
+        .map_or_else(|| id.into(), |(building, _)| format!("c{building}"))
 }
 
 #[derive(Clone)]
@@ -169,6 +229,7 @@ impl Plugin for WorldPlayPlugin {
             .init_resource::<WorldNotice>()
             .init_resource::<MoralPrompt>()
             .init_resource::<InteractionHint>()
+            .init_resource::<ScavengeSession>()
             .init_resource::<DoorPrompt>()
             .init_resource::<FrameProgress>()
             .add_message::<WorldAction>()
@@ -203,6 +264,7 @@ impl Plugin for WorldPlayPlugin {
                     update_evac,
                     stream_loot,
                     update_interaction_hint,
+                    update_scavenge_reach,
                 )
                     .chain()
                     .in_set(WorldSet),
@@ -260,17 +322,37 @@ fn plan_world(mut commands: Commands) {
                 pos,
                 kind,
                 cabinet: kind == "home",
+                furnished: false,
+                label_zh: "室內置物箱",
+                label_en: "Indoor supply box",
             })
         })
         .collect();
-    // The native map supplies door/interior geometry, not the web's furniture.
-    // A visible water fixture is placed at the home spawn; its refill rule is
-    // the original sink/water-dispenser rule (one bottle per 90 game minutes).
+    // A furnished building's old c{id} stock belongs to its first fixture;
+    // additional fixtures have stable IDs independent of streaming order.
+    for fixture in &map.interiors {
+        let Some(kind) = fixture.loot else { continue };
+        containers.retain(|c| c.id != fixture.id);
+        containers.push(Container {
+            id: fixture.id.clone(),
+            pos: fixture.approach,
+            kind,
+            cabinet: map.blds[fixture.building as usize].kind == "home",
+            furnished: true,
+            label_zh: fixture.label_zh,
+            label_en: fixture.label_en,
+        });
+    }
+    // A visible water fixture retains the original refill rule: one bottle
+    // every 90 game minutes while the water supply is running.
     containers.push(Container {
         id: HOME_TAP_ID.into(),
         pos: home,
         kind: "tap",
         cabinet: false,
+        furnished: false,
+        label_zh: "避難所飲水設備",
+        label_en: "Shelter water fixture",
     });
     let roads: Vec<_> = map
         .roads
@@ -354,9 +436,10 @@ fn reset_new_run(
     *inventory = Inventory::from_role(selected.role());
     *needs = PlayerNeeds::default();
     *progress = ScavengeState::default();
+    progress.fixtures_version = 1;
     obstacles
         .doors()
-        .replace_closed(&obstacles.doors().all_ids());
+        .replace_state(&obstacles.doors().all_ids(), &[]);
     // The player's shelter has an open exit on a fresh run. Every other door
     // starts closed, as in the Web game, without modifying the world planner.
     if let Some(home) = world()
@@ -395,7 +478,7 @@ fn restore_world(
     mut commands: Commands,
     mut loaded: MessageReader<LoadCompleted>,
     catalog: Res<WorldCatalog>,
-    progress: Res<ScavengeState>,
+    mut progress: ResMut<ScavengeState>,
     shelter: Res<Shelter>,
     mut frame: ResMut<FrameProgress>,
     mut campaign: ResMut<Campaign>,
@@ -406,6 +489,7 @@ fn restore_world(
     if loaded.read().count() == 0 {
         return;
     }
+    migrate_fixture_loot(&mut progress);
     for entity in &old {
         commands.entity(entity).despawn();
     }
@@ -459,6 +543,9 @@ fn keyboard_actions(
     }
     if keys.just_pressed(KeyCode::KeyE) {
         actions.write(WorldAction::Interact);
+    }
+    if keys.just_pressed(KeyCode::KeyB) {
+        actions.write(WorldAction::Barricade);
     }
     if keys.just_pressed(KeyCode::KeyZ) {
         actions.write(WorldAction::Sleep);
@@ -560,10 +647,94 @@ fn nearest_container(
                 pos: q,
                 kind: "crate",
                 cabinet: false,
+                furnished: false,
+                label_zh: "遺留物資",
+                label_en: "Dropped supplies",
             });
         }
     }
     best
+}
+
+fn container_by_id(
+    id: &str,
+    catalog: &WorldCatalog,
+    progress: &ScavengeState,
+) -> Option<Container> {
+    catalog
+        .containers
+        .iter()
+        .find(|c| c.id == id)
+        .cloned()
+        .or_else(|| {
+            progress
+                .drops
+                .iter()
+                .find(|(key, _)| key == id)
+                .map(|(_, pos)| Container {
+                    id: id.into(),
+                    pos: Vec2::from_array(*pos),
+                    kind: "crate",
+                    cabinet: false,
+                    furnished: false,
+                    label_zh: "遺留物資",
+                    label_en: "Dropped supplies",
+                })
+        })
+}
+
+fn container_reachable(pos: Vec2, container: &Container, obstacles: &Obstacles) -> bool {
+    pos.distance(container.pos) < 2.2
+        && world().bld_at(pos).map(|b| b.id) == world().bld_at(container.pos).map(|b| b.id)
+        && obstacles.los(pos, container.pos)
+}
+
+fn update_scavenge_reach(
+    flow: Res<State<GameFlow>>,
+    player: Query<&Transform, With<Player>>,
+    catalog: Res<WorldCatalog>,
+    progress: Res<ScavengeState>,
+    obstacles: Res<Obstacles>,
+    mut session: ResMut<ScavengeSession>,
+) {
+    if flow.get() != &GameFlow::Playing {
+        *session = ScavengeSession::default();
+        return;
+    }
+    session.reachable = session.target.as_ref().is_some_and(|target| {
+        container_by_id(&target.id, &catalog, &progress).is_some_and(|container| {
+            player
+                .single()
+                .is_ok_and(|p| container_reachable(p.translation.xz(), &container, &obstacles))
+        })
+    });
+}
+
+/// Already-opened legacy buildings must not gain a fresh second stockpile when
+/// upgrading to the per-fixture map. The original c{id} record stays untouched.
+fn migrate_fixture_loot(progress: &mut ScavengeState) {
+    if progress.fixtures_version >= 1 {
+        return;
+    }
+    for fixture in &world().interiors {
+        if fixture.loot.is_none() || !fixture.id.starts_with('x') {
+            continue;
+        }
+        let old = format!("c{}", fixture.building);
+        let was_opened = progress.searched.contains(&old)
+            || progress.asked.contains(&old)
+            || progress.loot.iter().any(|(id, _)| id == &old);
+        if was_opened && !progress.loot.iter().any(|(id, _)| id == &fixture.id) {
+            progress.loot.push((fixture.id.clone(), Stash::default()));
+            if !progress.searched.contains(&fixture.id) {
+                progress.searched.push(fixture.id.clone());
+            }
+            if !progress.night_seen.contains(&fixture.id) {
+                progress.night_seen.push(fixture.id.clone());
+            }
+        }
+    }
+    progress.fixtures_version = 1;
 }
 
 #[derive(Clone)]
@@ -631,55 +802,55 @@ fn update_interaction_hint(
             &shelter,
             &obstacles,
         );
-        let (label, detail) = match target {
-            InteractionTarget::Door(door) => {
-                door_prompt.0 = Some(door);
-                (
-                    tr(
-                        *lang,
-                        if door.open { "關門" } else { "開門" },
-                        if door.open { "Close door" } else { "Open door" },
-                    ),
-                    tr(*lang, "建築入口 · E 互動", "Entrance · E to interact"),
-                )
-            }
-            InteractionTarget::Container(c) if c.id == HOME_TAP_ID => (
-                tr(*lang, "裝水", "Fill water"),
-                tr(*lang, "避難所飲水設備", "Shelter water fixture"),
-            ),
-            InteractionTarget::Container(c) if progress.searched.contains(&c.id) => (
-                tr(*lang, "查看", "Inspect"),
-                tr(*lang, "已搜尋的物資", "Previously searched supplies"),
-            ),
-            InteractionTarget::Container(c) if c.cabinet => (
-                tr(*lang, "搜尋", "Search"),
-                tr(
-                    *lang,
-                    "屋內櫥櫃 · E 互動",
-                    "Household cabinet · E to interact",
+        let (label, detail) =
+            match target {
+                InteractionTarget::Door(door) => {
+                    door_prompt.0 = Some(door);
+                    if obstacles.doors().is_barricaded(door.id) {
+                        (
+                            tr(*lang, "已封門", "Barricaded"),
+                            tr(*lang, "背包可拆除封門 · B", "Remove barricade in Bag · B"),
+                        )
+                    } else {
+                        (
+                            tr(
+                                *lang,
+                                if door.open { "關門" } else { "開門" },
+                                if door.open { "Close door" } else { "Open door" },
+                            ),
+                            tr(*lang, "建築入口 · E 互動", "Entrance · E to interact"),
+                        )
+                    }
+                }
+                InteractionTarget::Container(c) if c.id == HOME_TAP_ID => (
+                    tr(*lang, "裝水", "Fill water"),
+                    tr(*lang, "避難所飲水設備", "Shelter water fixture"),
                 ),
-            ),
-            InteractionTarget::Container(_) => (
-                tr(*lang, "搜尋", "Search"),
-                tr(
-                    *lang,
-                    "附近物資 · E 互動",
-                    "Nearby supplies · E to interact",
+                InteractionTarget::Container(c) => (
+                    if progress.loot.iter().any(|(id, stash)| {
+                        id == &c.id && stash.stacks().iter().all(|(_, n)| *n == 0)
+                    }) {
+                        tr(*lang, "已搜空", "Empty")
+                    } else if progress.searched.contains(&c.id) {
+                        tr(*lang, "查看", "Inspect")
+                    } else {
+                        tr(*lang, "搜尋", "Search")
+                    },
+                    tr(*lang, c.label_zh, c.label_en),
                 ),
-            ),
-            InteractionTarget::Trade => (
-                tr(*lang, "交易", "Barter"),
-                tr(*lang, "龍山交易攤", "Longshan barter stall"),
-            ),
-            InteractionTarget::Shelter => (
-                tr(*lang, "避難所", "Shelter"),
-                tr(*lang, "你已回到家中", "You are back at home"),
-            ),
-            InteractionTarget::None => (
-                tr(*lang, "互動", "Interact"),
-                tr(*lang, "走近門口或物資", "Approach an entrance or supplies"),
-            ),
-        };
+                InteractionTarget::Trade => (
+                    tr(*lang, "交易", "Barter"),
+                    tr(*lang, "龍山交易攤", "Longshan barter stall"),
+                ),
+                InteractionTarget::Shelter => (
+                    tr(*lang, "避難所", "Shelter"),
+                    tr(*lang, "你已回到家中", "You are back at home"),
+                ),
+                InteractionTarget::None => (
+                    tr(*lang, "互動", "Interact"),
+                    tr(*lang, "走近門口或物資", "Approach an entrance or supplies"),
+                ),
+            };
         next.label = label.into();
         next.detail = detail.into();
     }
@@ -756,11 +927,17 @@ enum TapError {
     TooFar,
     WaterOff,
     Cooldown,
+    BagFull,
 }
 
 impl TapError {
     fn message(&self, lang: Language) -> &'static str {
         match self {
+            Self::BagFull => tr(
+                lang,
+                "背包太重，先騰出一瓶水的空間。",
+                "Your bag is full. Make room for one bottle of water.",
+            ),
             Self::TooFar => tr(
                 lang,
                 "請走近避難所的藍色飲水設備。",
@@ -795,6 +972,9 @@ fn fill_water(
     if !water {
         return Err(TapError::WaterOff);
     }
+    if pickable_count(inventory, "water", 1) == 0 {
+        return Err(TapError::BagFull);
+    }
     if let Some((_, next)) = progress.taps.iter_mut().find(|(id, _)| id == &fixture.id) {
         // The web comparison is strictly >, not >=.
         if minute <= *next {
@@ -817,6 +997,108 @@ fn fill_water(
     Ok(())
 }
 
+/// Stock preview and first search share one deterministic rule. Once a record
+/// exists, even an empty record is authoritative and can never be rolled again.
+pub(crate) fn preview_container_loot(
+    id: &str,
+    kind: &str,
+    minute: f32,
+    progress: &ScavengeState,
+) -> Stash {
+    preview_loot_at(id, kind, minute, progress, is_night(f64::from(minute)))
+}
+
+fn preview_loot_at(
+    id: &str,
+    kind: &str,
+    minute: f32,
+    progress: &ScavengeState,
+    night: bool,
+) -> Stash {
+    if let Some((_, stock)) = progress.loot.iter().find(|(key, _)| key == id) {
+        return stock.clone();
+    }
+    if progress.searched.iter().any(|key| key == id) {
+        return Stash::default();
+    }
+    let mut stock = if id == HOME_TAP_ID {
+        Stash::default()
+    } else {
+        roll_loot(id, kind, minute)
+    };
+    let hash = id_hash(id);
+    if id != HOME_TAP_ID
+        && night
+        && !progress.night_seen.iter().any(|key| key == id)
+        && hash.is_multiple_of(3)
+    {
+        stock.add(
+            ["cig", "battery", "can", "rice", "pill"][(hash % 5) as usize],
+            1,
+        );
+    }
+    stock
+}
+
+fn search_container(
+    c: &Container,
+    progress: &mut ScavengeState,
+    night: bool,
+    minute: f32,
+) -> usize {
+    let index = progress
+        .loot
+        .iter()
+        .position(|(id, _)| id == &c.id)
+        .unwrap_or_else(|| {
+            let stock = preview_loot_at(&c.id, c.kind, minute, progress, night);
+            progress.loot.push((c.id.clone(), stock));
+            progress.loot.len() - 1
+        });
+    if !progress.night_seen.contains(&c.id) {
+        progress.night_seen.push(c.id.clone());
+    }
+    if !progress.searched.contains(&c.id) {
+        progress.searched.push(c.id.clone());
+    }
+    index
+}
+
+/// Whole units only; a nearly-full bag can take part of a stack. Accumulating
+/// weights as f64 prevents rounding from offering a button that then takes zero.
+pub fn pickable_count(inventory: &Inventory, id: &str, available: u32) -> u32 {
+    let Some(definition) = item(id) else { return 0 };
+    let carried: f64 = inventory
+        .stacks()
+        .iter()
+        .map(|(key, n)| item(key).map_or(0.0, |def| f64::from(def.weight) * f64::from(*n)))
+        .sum();
+    let remaining = (f64::from(LOOT_CAPACITY_KG) - carried + 0.000_01).max(0.0);
+    if definition.weight <= 0.0 {
+        available
+    } else {
+        available.min((remaining / f64::from(definition.weight)).floor() as u32)
+    }
+}
+
+pub(crate) fn transfer_loot(stock: &mut Stash, inventory: &mut Inventory, take: &LootTake) -> u32 {
+    let requested: Vec<(String, u32)> = match take {
+        LootTake::One(id) => vec![(id.clone(), 1.min(stock.count(id)))],
+        LootTake::Stack(id) => vec![(id.clone(), stock.count(id))],
+        LootTake::All => stock.stacks().to_vec(),
+    };
+    let mut moved: u32 = 0;
+    for (id, count) in requested {
+        let count = pickable_count(inventory, &id, count);
+        if count > 0 && stock.take(&id, count) {
+            inventory.add(&id, count);
+            moved = moved.saturating_add(count);
+        }
+    }
+    stock.remove_empty();
+    moved
+}
+
 fn loot_container(
     c: &Container,
     progress: &mut ScavengeState,
@@ -824,41 +1106,8 @@ fn loot_container(
     night: bool,
     minute: f32,
 ) -> u32 {
-    let index = progress
-        .loot
-        .iter()
-        .position(|(id, _)| id == &c.id)
-        .unwrap_or_else(|| {
-            progress.loot.push((
-                c.id.clone(),
-                if c.id == HOME_TAP_ID {
-                    Stash::default()
-                } else {
-                    roll_loot(&c.id, c.kind, minute)
-                },
-            ));
-            progress.loot.len() - 1
-        });
-    if !progress.night_seen.contains(&c.id) {
-        progress.night_seen.push(c.id.clone());
-        let hash = id_hash(&c.id);
-        if c.id != HOME_TAP_ID && night && hash.is_multiple_of(3) {
-            progress.loot[index].1.add(
-                ["cig", "battery", "can", "rice", "pill"][(hash % 5) as usize],
-                1,
-            );
-        }
-    }
-    let mut total = 0;
-    for (key, count) in progress.loot[index].1.stacks() {
-        inventory.add(key, *count);
-        total += count;
-    }
-    progress.loot[index].1 = Stash::default();
-    if !progress.searched.contains(&c.id) {
-        progress.searched.push(c.id.clone());
-    }
-    total
+    let index = search_container(c, progress, night, minute);
+    transfer_loot(&mut progress.loot[index].1, inventory, &LootTake::All)
 }
 
 fn apply_actions(
@@ -875,6 +1124,7 @@ fn apply_actions(
         ResMut<Shelter>,
         ResMut<PlayerNeeds>,
         ResMut<GameState>,
+        ResMut<ScavengeSession>,
     ),
     mut prompt: ResMut<MoralPrompt>,
     mut notice: ResMut<WorldNotice>,
@@ -886,7 +1136,8 @@ fn apply_actions(
     obstacles: Res<Obstacles>,
     civilians: Query<&Transform, With<crate::human::Civilian>>,
 ) {
-    let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game) = states;
+    let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game, mut session) =
+        states;
     if flow.get() != &GameFlow::Playing || pause.0 || game.hp <= 0.0 || game.over {
         actions.clear();
         return;
@@ -899,6 +1150,57 @@ fn apply_actions(
     let night = is_night(f64::from(campaign.game_min));
     for action in actions.read() {
         match action {
+            WorldAction::Barricade => {}
+            WorldAction::TakeLoot { container, take } => {
+                if prompt.0.is_some()
+                    || session
+                        .target
+                        .as_ref()
+                        .is_none_or(|target| target.id != *container)
+                {
+                    continue;
+                }
+                let Some(c) = container_by_id(container, &catalog, &progress) else {
+                    continue;
+                };
+                if c.id == HOME_TAP_ID || !container_reachable(pos, &c, &obstacles) {
+                    session.reachable = false;
+                    notice.text = tr(
+                        *lang,
+                        "物資已不在伸手可及的地方，請靠近並保持通道暢通。",
+                        "Supplies are out of reach. Move closer and keep the path clear.",
+                    )
+                    .into();
+                    continue;
+                }
+                let Some((_, stock)) = progress.loot.iter_mut().find(|(id, _)| id == container)
+                else {
+                    continue;
+                };
+                let moved = transfer_loot(stock, &mut inventory, take);
+                let left: u32 = stock.stacks().iter().map(|(_, n)| *n).sum();
+                notice.text = if moved > 0 {
+                    sound.write(SfxEvent::Rummage);
+                    format!(
+                        "{} {moved} · {} {left}",
+                        tr(*lang, "已拿取", "Taken"),
+                        tr(*lang, "留下", "Left")
+                    )
+                } else if left == 0 {
+                    tr(*lang, "這裡已經搜刮一空。", "This container is empty.").into()
+                } else {
+                    tr(
+                        *lang,
+                        "背包已達 15 kg 上限，物資留在原處。",
+                        "The bag cannot carry more (15 kg limit). Supplies stay here.",
+                    )
+                    .into()
+                };
+                println!(
+                    "DTLOOT take id={container} moved={moved} left={left} weight={:.3}",
+                    inventory.weight()
+                );
+            }
             WorldAction::FillWater => {
                 notice.text = match fill_water(
                     pos,
@@ -928,6 +1230,10 @@ fn apply_actions(
                     continue;
                 }
                 if let InteractionTarget::Door(target) = target {
+                    if obstacles.doors().is_barricaded(target.id) {
+                        notice.text = tr(*lang, "入口已用木板封住。打開背包選擇拆除封門，或按 B。", "The entrance is barricaded. Open Bag and remove the barricade, or press B.").into();
+                        continue;
+                    }
                     let door = world().blds[target.id as usize].door.unwrap();
                     let occupants = std::iter::once((pos, crate::player::PLAYER_RADIUS))
                         .chain(
@@ -989,22 +1295,22 @@ fn apply_actions(
                         continue;
                     }
                     if c.cabinet
-                        && id_hash(&c.id).is_multiple_of(5)
-                        && !progress.asked.contains(&c.id)
+                        && id_hash(&cabinet_owner(&c.id)).is_multiple_of(5)
+                        && !progress.asked.contains(&cabinet_owner(&c.id))
                     {
                         prompt.0 = Some(c.id);
                         continue;
                     }
-                    let total =
-                        loot_container(&c, &mut progress, &mut inventory, night, campaign.game_min);
-                    notice.text = if total > 0 {
-                        format!(
-                            "{} {total}",
-                            tr(*lang, "物資已放入背包：", "Supplies collected:")
-                        )
-                    } else {
-                        tr(*lang, "這裡已經沒有物資。", "No supplies left here.").into()
-                    };
+                    let index = search_container(&c, &mut progress, night, campaign.game_min);
+                    println!(
+                        "DTLOOT open id={} stacks={}",
+                        c.id,
+                        progress.loot[index].1.stacks().len()
+                    );
+                    session.target = Some(c.target());
+                    session.reachable = true;
+                    notice.text.clear();
+                    panels.write(OpenPanel(PanelKind::Scavenge));
                     sound.write(SfxEvent::Rummage);
                 } else if matches!(target, InteractionTarget::Shelter) {
                     panels.write(OpenPanel(PanelKind::Shelter));
@@ -1025,27 +1331,28 @@ fn apply_actions(
                     prompt.0 = None;
                     continue;
                 };
-                if c.pos.distance(pos) >= 2.2 {
+                if !container_reachable(pos, c, &obstacles) {
                     prompt.0 = None;
                     continue;
                 }
                 match shelter.moral(*choice, &mut inventory, *lang) {
                     Ok(message) => {
-                        if !progress.asked.contains(&c.id) {
-                            progress.asked.push(c.id.clone());
+                        let owner = cabinet_owner(&c.id);
+                        if !progress.asked.contains(&owner) {
+                            progress.asked.push(owner);
                         }
                         notice.text = message;
                         if *choice == MoralChoice::Take {
-                            if !progress.night_seen.contains(&c.id) {
-                                progress.night_seen.push(c.id.clone());
-                            }
-                            loot_container(
-                                c,
-                                &mut progress,
-                                &mut inventory,
-                                night,
-                                campaign.game_min,
+                            let index =
+                                search_container(c, &mut progress, night, campaign.game_min);
+                            println!(
+                                "DTLOOT open id={} stacks={}",
+                                c.id,
+                                progress.loot[index].1.stacks().len()
                             );
+                            session.target = Some(c.target());
+                            session.reachable = true;
+                            panels.write(OpenPanel(PanelKind::Scavenge));
                         }
                         prompt.0 = None;
                     }
@@ -1348,7 +1655,11 @@ fn stream_loot(
             commands.entity(entity).despawn();
         } else {
             visible.insert(marker.0.clone());
-            let empty = progress.searched.contains(&marker.0);
+            let empty = progress
+                .loot
+                .iter()
+                .find(|(id, _)| id == &marker.0)
+                .is_some_and(|(_, stock)| stock.stacks().iter().all(|(_, n)| *n == 0));
             commands
                 .entity(entity)
                 .insert(MeshMaterial3d(if marker.0 == HOME_TAP_ID {
@@ -1367,7 +1678,12 @@ fn stream_loot(
                 Mesh3d(art.mesh.clone()),
                 MeshMaterial3d(if id == HOME_TAP_ID {
                     art.water.clone()
-                } else if progress.searched.iter().any(|s| s == id) {
+                } else if progress
+                    .loot
+                    .iter()
+                    .find(|(key, _)| key == id)
+                    .is_some_and(|(_, stock)| stock.stacks().iter().all(|(_, n)| *n == 0))
+                {
                     art.empty.clone()
                 } else {
                     art.full.clone()
@@ -1378,7 +1694,9 @@ fn stream_loot(
         }
     };
     for c in &catalog.containers {
-        spawn(&c.id, c.pos);
+        if !c.furnished {
+            spawn(&c.id, c.pos);
+        }
     }
     for (id, p) in &progress.drops {
         spawn(id, Vec2::from_array(*p));
@@ -1414,6 +1732,9 @@ mod tests {
                 pos: fixture,
                 kind: "tap",
                 cabinet: false,
+                furnished: false,
+                label_zh: "飲水設備",
+                label_en: "Water fixture",
             }],
             patrols: vec![],
             home: fixture,
@@ -1533,6 +1854,9 @@ mod tests {
             pos: Vec2::ZERO,
             kind: "tap",
             cabinet: false,
+            furnished: false,
+            label_zh: "飲水設備",
+            label_en: "Water fixture",
         };
         let catalog = WorldCatalog {
             containers: vec![fixture],
@@ -1673,6 +1997,9 @@ mod tests {
             pos: Vec2::ZERO,
             kind: "home",
             cabinet: true,
+            furnished: false,
+            label_zh: "櫥櫃",
+            label_en: "Cabinet",
         };
         let mut state = ScavengeState::default();
         let mut bag = Inventory::default();
@@ -1698,5 +2025,316 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn selective_pickup_conserves_each_stack_at_capacity_and_after_reload() {
+        let mut stock = Stash::default();
+        stock.add("water", 8);
+        stock.add("bandage", 5);
+        let original = stock.clone();
+        let mut bag = Inventory::default();
+        bag.add("plank", 13);
+        assert_eq!(
+            transfer_loot(&mut stock, &mut bag, &LootTake::One("water".into())),
+            1
+        );
+        assert_eq!(stock.count("water"), 7);
+        assert_eq!(
+            transfer_loot(&mut stock, &mut bag, &LootTake::Stack("water".into())),
+            2
+        );
+        assert_eq!(stock.count("water"), 5);
+        assert_eq!(bag.count("water"), 3);
+        assert!(bag.weight() <= LOOT_CAPACITY_KG + 0.000_01);
+        // A take-all continues past an overweight stack to lighter useful items.
+        assert!(transfer_loot(&mut stock, &mut bag, &LootTake::All) > 0);
+        for (id, count) in original.stacks() {
+            assert_eq!(stock.count(id) + bag.count(id), *count);
+        }
+        let encoded = serde_json::to_vec(&(stock.clone(), bag.clone())).unwrap();
+        let (mut restored, mut restored_bag): (Stash, Inventory) =
+            serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(
+            transfer_loot(&mut restored, &mut restored_bag, &LootTake::All),
+            0
+        );
+        restored_bag.take("plank", 13);
+        transfer_loot(&mut restored, &mut restored_bag, &LootTake::All);
+        assert!(restored.stacks().is_empty());
+        for (id, count) in original.stacks() {
+            assert_eq!(restored_bag.count(id), *count);
+        }
+        assert_eq!(
+            transfer_loot(
+                &mut restored,
+                &mut restored_bag,
+                &LootTake::One("water".into())
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn repeated_search_keeps_partial_stock_and_never_reapplies_night_bonus() {
+        let c = Container {
+            id: "c97".into(),
+            pos: Vec2::ZERO,
+            kind: "store",
+            cabinet: false,
+            furnished: false,
+            label_zh: "貨架",
+            label_en: "Shelf",
+        };
+        let mut progress = ScavengeState::default();
+        let mut stock = Stash::default();
+        stock.add("water", 8);
+        progress.loot.push((c.id.clone(), stock));
+        let mut bag = Inventory::default();
+        bag.add("plank", 14);
+        let index = search_container(&c, &mut progress, true, 1320.0);
+        assert_eq!(
+            transfer_loot(&mut progress.loot[index].1, &mut bag, &LootTake::All),
+            1
+        );
+        let partial = progress.loot[index].1.clone();
+        for minute in [1321.0, 2900.0, (POWER_OFF + 1800) as f32] {
+            let index = search_container(&c, &mut progress, true, minute);
+            assert_eq!(progress.loot[index].1, partial);
+            assert_eq!(
+                preview_container_loot(&c.id, c.kind, minute, &progress),
+                partial
+            );
+        }
+        assert_eq!(
+            progress.searched.iter().filter(|id| *id == &c.id).count(),
+            1
+        );
+        assert_eq!(
+            progress.night_seen.iter().filter(|id| *id == &c.id).count(),
+            1
+        );
+    }
+
+    #[test]
+    fn legacy_furniture_migration_preserves_leftovers_and_does_not_restock_opened_homes() {
+        let map = world();
+        let fixture = map
+            .interiors
+            .iter()
+            .find(|f| f.loot.is_some() && f.id.starts_with('x'))
+            .expect("a room with more than one loot fixture");
+        let legacy_id = format!("c{}", fixture.building);
+        let mut stock = Stash::default();
+        stock.add("rice", 3);
+        let mut progress = ScavengeState::default();
+        progress.loot.push((legacy_id.clone(), stock.clone()));
+        progress.searched.push(legacy_id.clone());
+        migrate_fixture_loot(&mut progress);
+        assert_eq!(progress.fixtures_version, 1);
+        assert_eq!(
+            progress
+                .loot
+                .iter()
+                .find(|(id, _)| id == &legacy_id)
+                .unwrap()
+                .1,
+            stock
+        );
+        let extra: Vec<_> = map
+            .interiors
+            .iter()
+            .filter(|f| f.building == fixture.building && f.id.starts_with('x') && f.loot.is_some())
+            .collect();
+        assert!(!extra.is_empty());
+        for added in extra {
+            assert!(
+                progress
+                    .loot
+                    .iter()
+                    .find(|(id, _)| id == &added.id)
+                    .unwrap()
+                    .1
+                    .stacks()
+                    .is_empty()
+            );
+            assert!(
+                preview_container_loot(&added.id, added.loot.unwrap(), 1320.0, &progress)
+                    .stacks()
+                    .is_empty()
+            );
+        }
+        let before = serde_json::to_vec(&progress).unwrap();
+        migrate_fixture_loot(&mut progress);
+        assert_eq!(serde_json::to_vec(&progress).unwrap(), before);
+        assert_eq!(cabinet_owner(&fixture.id), legacy_id);
+    }
+
+    #[test]
+    fn water_capacity_rejection_does_not_spend_refill_cooldown() {
+        let fixture = Container {
+            id: HOME_TAP_ID.into(),
+            pos: Vec2::ZERO,
+            kind: "tap",
+            cabinet: false,
+            furnished: false,
+            label_zh: "飲水設備",
+            label_en: "Water fixture",
+        };
+        let catalog = WorldCatalog {
+            containers: vec![fixture],
+            patrols: Vec::new(),
+            home: Vec2::ZERO,
+        };
+        let mut progress = ScavengeState::default();
+        let mut inventory = Inventory::default();
+        inventory.add("plank", 15);
+        assert_eq!(
+            fill_water(
+                Vec2::ZERO,
+                &catalog,
+                &mut progress,
+                &mut inventory,
+                440.0,
+                true,
+                None
+            ),
+            Err(TapError::BagFull)
+        );
+        assert!(progress.taps.is_empty());
+        inventory.take("plank", 1);
+        assert_eq!(
+            fill_water(
+                Vec2::ZERO,
+                &catalog,
+                &mut progress,
+                &mut inventory,
+                440.0,
+                true,
+                None
+            ),
+            Ok(())
+        );
+        assert_eq!(inventory.count("water"), 1);
+    }
+
+    #[test]
+    fn loot_transfer_requires_the_selected_reachable_container_and_open_path() {
+        use bevy::state::app::StatesPlugin;
+        let map = world();
+        let obstacles = Obstacles::new(map.clone());
+        let (door_id, door) = map
+            .blds
+            .iter()
+            .filter(|b| b.arcade.is_some())
+            .filter_map(|b| b.door.map(|d| (b.id, d)))
+            .find(|(id, d)| {
+                let outside = d.p + d.n * 0.6;
+                let inside = d.p - d.n * 1.4;
+                map.bld_at(outside).is_some_and(|b| b.id == *id)
+                    && map.bld_at(inside).is_some_and(|b| b.id == *id)
+                    && obstacles.los(outside, inside)
+            })
+            .unwrap();
+        let c = Container {
+            id: "test-supplies".into(),
+            pos: door.p - door.n * 1.4,
+            kind: "store",
+            cabinet: false,
+            furnished: false,
+            label_zh: "貨架",
+            label_en: "Shelf",
+        };
+        let outside = door.p + door.n * 0.6;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin))
+            .insert_state(GameFlow::Playing)
+            .init_resource::<PauseOpen>()
+            .init_resource::<Campaign>()
+            .init_resource::<ScavengeState>()
+            .init_resource::<Inventory>()
+            .init_resource::<Shelter>()
+            .init_resource::<PlayerNeeds>()
+            .init_resource::<GameState>()
+            .init_resource::<MoralPrompt>()
+            .init_resource::<WorldNotice>()
+            .init_resource::<Language>()
+            .init_resource::<SelectedRole>()
+            .init_resource::<ShelterEnvironment>()
+            .init_resource::<ScavengeSession>()
+            .insert_resource(WorldCatalog {
+                containers: vec![c.clone()],
+                patrols: Vec::new(),
+                home: c.pos,
+            })
+            .insert_resource(obstacles.clone())
+            .add_message::<WorldAction>()
+            .add_message::<OpenPanel>()
+            .add_message::<SfxEvent>()
+            .add_systems(Update, apply_actions);
+        let player = app
+            .world_mut()
+            .spawn((Player, Transform::from_xyz(c.pos.x, 0.0, c.pos.y)))
+            .id();
+        let mut stock = Stash::default();
+        stock.add("water", 3);
+        app.world_mut()
+            .resource_mut::<ScavengeState>()
+            .loot
+            .push((c.id.clone(), stock));
+        app.world_mut().write_message(WorldAction::Interact);
+        app.update();
+        assert_eq!(
+            app.world().resource::<Inventory>().count("water"),
+            0,
+            "opening a shelf must not automatically empty it"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<ScavengeSession>()
+                .target
+                .as_ref()
+                .unwrap()
+                .id,
+            c.id
+        );
+        app.world_mut()
+            .get_mut::<Transform>(player)
+            .unwrap()
+            .translation = Vec3::new(outside.x, 0.0, outside.y);
+        let take = WorldAction::TakeLoot {
+            container: c.id.clone(),
+            take: LootTake::One("water".into()),
+        };
+        obstacles.doors().set_open(door_id, false);
+        app.world_mut().write_message(take.clone());
+        app.update();
+        assert_eq!(app.world().resource::<Inventory>().count("water"), 0);
+        obstacles.doors().set_open(door_id, true);
+        app.world_mut().write_message(take.clone());
+        app.update();
+        assert_eq!(app.world().resource::<Inventory>().count("water"), 1);
+        app.world_mut()
+            .get_mut::<Transform>(player)
+            .unwrap()
+            .translation
+            .x += 10.0;
+        app.world_mut().write_message(take.clone());
+        app.update();
+        assert_eq!(app.world().resource::<Inventory>().count("water"), 1);
+        app.world_mut()
+            .get_mut::<Transform>(player)
+            .unwrap()
+            .translation = Vec3::new(outside.x, 0.0, outside.y);
+        app.world_mut().resource_mut::<ScavengeSession>().target = None;
+        app.world_mut().write_message(take);
+        app.update();
+        assert_eq!(app.world().resource::<Inventory>().count("water"), 1);
+        assert_eq!(
+            app.world().resource::<ScavengeState>().loot[0]
+                .1
+                .count("water"),
+            2
+        );
     }
 }

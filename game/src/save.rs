@@ -202,8 +202,12 @@ impl SaveFile {
             return Err(SaveError::Invalid("Invalid survival needs"));
         }
         let world = &self.world;
+        if world.fixtures_version > 1 {
+            return Err(SaveError::Invalid("Unsupported indoor fixtures version"));
+        }
+        let closed_doors: HashSet<_> = world.closed_doors.iter().copied().collect();
         if world.closed_doors.len() > map.blds.len()
-            || world.closed_doors.iter().collect::<HashSet<_>>().len() != world.closed_doors.len()
+            || closed_doors.len() != world.closed_doors.len()
             || world.closed_doors.iter().any(|id| {
                 map.blds
                     .get(*id as usize)
@@ -211,6 +215,16 @@ impl SaveFile {
             })
         {
             return Err(SaveError::Invalid("Invalid saved doors"));
+        }
+        if world.barricaded_doors.len() > map.blds.len()
+            || world.barricaded_doors.iter().collect::<HashSet<_>>().len()
+                != world.barricaded_doors.len()
+            || world
+                .barricaded_doors
+                .iter()
+                .any(|id| !closed_doors.contains(id))
+        {
+            return Err(SaveError::Invalid("Invalid saved barricades"));
         }
         let loot_ids: HashSet<&str> = world.loot.iter().map(|(id, _)| id.as_str()).collect();
         if [&world.searched, &world.asked, &world.night_seen]
@@ -526,8 +540,12 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
         .iter(world)
         .next()
         .ok_or(SaveError::Invalid("Player is not ready"))?;
-    let transform = Transform::from_translation(Vec3::from_array(save.player.position))
+    let mut transform = Transform::from_translation(Vec3::from_array(save.player.position))
         .with_rotation(Quat::from_array(save.player.rotation).normalize());
+    let restored_floor =
+        crate::map::interiors::restore_position(crate::map::world(), transform.translation.xz());
+    transform.translation.x = restored_floor.x;
+    transform.translation.z = restored_floor.y;
     world.entity_mut(player_entity).insert(transform);
     let transients: Vec<Entity> = world
         .query_filtered::<Entity, Or<(With<Enemy>, With<Body>, With<Fx>)>>()
@@ -567,10 +585,21 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     world.insert_resource(save.shelter);
     world.insert_resource(save.environment);
     world.insert_resource(save.needs);
-    if let Some(obstacles) = world.get_resource::<crate::map::Obstacles>() {
-        obstacles.doors().replace_closed(&save.world.closed_doors);
-        crate::doors::protect_position(obstacles, transform.translation.xz());
+    let recovered_planks = if let Some(obstacles) = world.get_resource::<crate::map::Obstacles>() {
+        obstacles
+            .doors()
+            .replace_state(&save.world.closed_doors, &save.world.barricaded_doors);
+        let recovered = crate::doors::protect_position(obstacles, transform.translation.xz());
         save.world.closed_doors = obstacles.doors().closed_ids();
+        save.world.barricaded_doors = obstacles.doors().barricaded_ids();
+        recovered
+    } else {
+        0
+    };
+    if recovered_planks > 0 {
+        world
+            .resource_mut::<Inventory>()
+            .add("plank", recovered_planks);
     }
     world.insert_resource(save.world);
     world.insert_resource(save.map);
@@ -778,11 +807,69 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("closed_doors");
+        json["world"]
+            .as_object_mut()
+            .unwrap()
+            .remove("barricaded_doors");
+        json["world"]
+            .as_object_mut()
+            .unwrap()
+            .remove("fixtures_version");
         let saved = decode(&serde_json::to_vec(&json).unwrap()).unwrap();
         assert_eq!(saved.player.hp, 73.0);
         assert_eq!(saved.campaign.game_min, 1800.0);
         assert_eq!(saved.map, MapProgress::default());
         assert!(saved.world.closed_doors.is_empty());
+        assert!(saved.world.barricaded_doors.is_empty());
+        assert_eq!(saved.world.fixtures_version, 0);
+    }
+
+    #[test]
+    fn partial_fixture_loot_and_carried_items_survive_disk_continue_without_refill() {
+        let mut saved = sample();
+        saved.world.fixtures_version = 1;
+        saved.inventory.add("water", 2);
+        saved.inventory.add("bandage", 1);
+        let mut leftovers = crate::survival::Stash::default();
+        leftovers.add("water", 1);
+        leftovers.add("bandage", 3);
+        let fixture_ids: Vec<_> = crate::map::world()
+            .interiors
+            .iter()
+            .filter(|f| f.loot.is_some())
+            .take(2)
+            .map(|f| f.id.clone())
+            .collect();
+        assert_eq!(fixture_ids.len(), 2);
+        saved.world.searched = fixture_ids.clone();
+        saved.world.loot = vec![
+            (fixture_ids[0].clone(), leftovers.clone()),
+            (fixture_ids[1].clone(), crate::survival::Stash::default()),
+        ];
+        let slot = TempSlot::new();
+        write_slot(&slot.path(), &saved).unwrap();
+        let mut world = World::new();
+        world.spawn((Player, Transform::default()));
+        world.insert_resource(NextState::<GameFlow>::Unchanged);
+        world.init_resource::<Messages<LoadCompleted>>();
+        for _ in 0..2 {
+            restore(&mut world, read_slot(&slot.path()).unwrap()).unwrap();
+            let progress = world.resource::<ScavengeState>();
+            assert_eq!(progress.fixtures_version, 1);
+            assert_eq!(progress.loot[0].1, leftovers);
+            assert!(progress.loot[1].1.stacks().is_empty());
+            let bag = world.resource::<Inventory>();
+            assert_eq!(bag.count("water") + progress.loot[0].1.count("water"), 3);
+            assert_eq!(
+                bag.count("bandage") + progress.loot[0].1.count("bandage"),
+                4
+            );
+            let roundtrip = snapshot(&mut world).unwrap();
+            write_slot(&slot.path(), &roundtrip).unwrap();
+        }
+        let mut saved = sample();
+        saved.world.fixtures_version = 2;
+        assert!(saved.validate().is_err());
     }
 
     #[test]
@@ -822,6 +909,156 @@ mod tests {
         assert!(saved.validate().is_err());
         saved.world.closed_doors = vec![u32::MAX];
         assert!(saved.validate().is_err());
+    }
+
+    #[test]
+    fn barricade_save_rejects_duplicate_unknown_and_open_barricades() {
+        let id = crate::map::world()
+            .blds
+            .iter()
+            .find(|b| b.door.is_some())
+            .unwrap()
+            .id;
+        let mut saved = sample();
+        saved.world.closed_doors = vec![id];
+        saved.world.barricaded_doors = vec![id];
+        assert!(saved.validate().is_ok());
+        saved.world.barricaded_doors.push(id);
+        assert!(saved.validate().is_err());
+        saved.world.barricaded_doors = vec![u32::MAX];
+        assert!(saved.validate().is_err());
+        saved.world.barricaded_doors = vec![id];
+        saved.world.closed_doors.clear();
+        assert!(saved.validate().is_err());
+    }
+
+    #[test]
+    fn barricade_and_spent_plank_survive_disk_continue_and_unloaded_views() {
+        let map = crate::map::world().clone();
+        let (id, door) = map
+            .blds
+            .iter()
+            .find_map(|b| b.door.map(|d| (b.id, d)))
+            .unwrap();
+        let mut saved = sample();
+        saved.world.closed_doors = vec![id];
+        saved.world.barricaded_doors = vec![id];
+        saved.inventory = Inventory::default();
+        saved.inventory.add("hammer", 1);
+        saved.inventory.add("plank", 1);
+        saved.player.position = [door.p.x + door.n.x, 0.0, door.p.y + door.n.y];
+        let slot = TempSlot::new();
+        write_slot(&slot.path(), &saved).unwrap();
+        let mut world = World::new();
+        world.spawn((Player, Transform::default()));
+        world.insert_resource(NextState::<GameFlow>::Unchanged);
+        world.init_resource::<Messages<LoadCompleted>>();
+        world.insert_resource(crate::map::Obstacles::new(map));
+        for _ in 0..2 {
+            restore(&mut world, read_slot(&slot.path()).unwrap()).unwrap();
+            let obstacles = world.resource::<crate::map::Obstacles>();
+            assert!(obstacles.doors().is_barricaded(id));
+            assert!(!obstacles.doors().set_open(id, true));
+            assert!(!obstacles.los(door.p + door.n, door.p - door.n));
+            assert_eq!(world.resource::<Inventory>().count("plank"), 1);
+            assert_eq!(world.resource::<Inventory>().count("hammer"), 1);
+            assert_eq!(world.resource::<ScavengeState>().barricaded_doors, vec![id]);
+        }
+    }
+
+    #[test]
+    fn threshold_repair_refunds_removed_barricade_once_without_teleporting() {
+        let map = crate::map::world().clone();
+        let (id, door) = map
+            .blds
+            .iter()
+            .find_map(|b| b.door.map(|d| (b.id, d)))
+            .unwrap();
+        let mut saved = sample();
+        saved.world.closed_doors = vec![id];
+        saved.world.barricaded_doors = vec![id];
+        saved.inventory = Inventory::default();
+        saved.inventory.add("plank", 1);
+        saved.player.position = [door.p.x, 0.0, door.p.y];
+        let mut world = World::new();
+        world.spawn((Player, Transform::default()));
+        world.insert_resource(NextState::<GameFlow>::Unchanged);
+        world.init_resource::<Messages<LoadCompleted>>();
+        world.insert_resource(crate::map::Obstacles::new(map));
+        restore(&mut world, saved).unwrap();
+        assert_eq!(world.resource::<Inventory>().count("plank"), 2);
+        assert!(
+            world
+                .resource::<ScavengeState>()
+                .barricaded_doors
+                .is_empty()
+        );
+        assert!(world.resource::<ScavengeState>().closed_doors.is_empty());
+        assert_eq!(
+            world
+                .query_filtered::<&Transform, With<Player>>()
+                .single(&world)
+                .unwrap()
+                .translation
+                .xz(),
+            door.p
+        );
+        let repaired = snapshot(&mut world).unwrap();
+        restore(&mut world, repaired).unwrap();
+        assert_eq!(world.resource::<Inventory>().count("plank"), 2);
+    }
+
+    #[test]
+    fn legacy_continue_repairs_new_furniture_overlap_but_preserves_clear_floor() {
+        let map = crate::map::world().clone();
+        let fixture = map
+            .interiors
+            .iter()
+            .find(|f| f.loot.is_some())
+            .unwrap()
+            .clone();
+        let mut world = World::new();
+        world.spawn((Player, Transform::default()));
+        world.insert_resource(NextState::<GameFlow>::Unchanged);
+        world.init_resource::<Messages<LoadCompleted>>();
+        world.insert_resource(crate::map::Obstacles::new(map.clone()));
+        for original in [fixture.pos, fixture.approach] {
+            let mut saved = sample();
+            saved.player.position = [original.x, 0.0, original.y];
+            assert_eq!(saved.world.fixtures_version, 0);
+            restore(&mut world, saved).unwrap();
+            let restored = world
+                .query_filtered::<&Transform, With<Player>>()
+                .single(&world)
+                .unwrap()
+                .translation
+                .xz();
+            assert_eq!(map.bld_at(restored).map(|b| b.id), Some(fixture.building));
+            assert!(map.free(restored, crate::player::PLAYER_RADIUS));
+            if original == fixture.approach {
+                assert_eq!(
+                    restored, original,
+                    "already clear positions must remain bit-for-bit unchanged"
+                );
+            } else {
+                assert!(restored.distance(original) > crate::player::PLAYER_RADIUS);
+                assert!(
+                    restored.distance(original) < 4.0,
+                    "repair should stay on nearby room floor"
+                );
+            }
+            let repaired = snapshot(&mut world).unwrap();
+            restore(&mut world, repaired).unwrap();
+            assert_eq!(
+                world
+                    .query_filtered::<&Transform, With<Player>>()
+                    .single(&world)
+                    .unwrap()
+                    .translation
+                    .xz(),
+                restored
+            );
+        }
     }
 
     #[test]

@@ -3,18 +3,25 @@
 //! Door frames belong to the streamed building meshes. A bounded near layer adds
 //! hinged red home gates / green shop leaves and an interaction ring. The saved
 //! closed building IDs update the same collision snapshot used by movement and
-//! combat; unloading a mesh never opens its door. Locks and barricades are not
-//! part of this native subset.
+//! combat; unloading a mesh never opens its door. Barricades follow the Web's
+//! hammer + one plank rule, including removal refunds and patrol-attracting noise.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use bevy::prelude::*;
 
+use crate::audio::SfxEvent;
+use crate::combat::{CombatEnv, Enemy, GameState};
+use crate::game_flow::GameFlow;
 use crate::geom::{self, MeshBuf, hex};
+use crate::i18n::{Language, tr};
+use crate::inventory::Inventory;
 use crate::map::data::{CELL, DOOR_H, DOOR_W, Door, Seg, WorldData, seg_dist};
 use crate::map::{BldWalls, Obstacles};
 use crate::player::{PLAYER_RADIUS, Player};
+use crate::ui::PauseOpen;
+use crate::worldplay::{ScavengeState, WorldAction, WorldNotice};
 
 pub const INTERACT_RANGE: f32 = 3.0;
 const LEAF_WIDTH: f32 = DOOR_W / 2.0 - 0.08;
@@ -28,9 +35,15 @@ const MAX_LIVE: usize = 24;
 pub struct DoorRuntime(Arc<DoorCollision>);
 
 struct DoorCollision {
-    closed: RwLock<BTreeSet<u32>>,
+    state: RwLock<DoorState>,
     grid: HashMap<(i32, i32), Vec<Seg>>,
     ids: BTreeSet<u32>,
+}
+
+#[derive(Default)]
+struct DoorState {
+    closed: BTreeSet<u32>,
+    barricaded: BTreeSet<u32>,
 }
 
 impl DoorRuntime {
@@ -54,36 +67,91 @@ impl DoorRuntime {
             ids.insert(b.id);
         }
         Self(Arc::new(DoorCollision {
-            closed: RwLock::new(BTreeSet::new()),
+            state: RwLock::new(DoorState::default()),
             grid,
             ids,
         }))
     }
 
     pub fn is_open(&self, id: u32) -> bool {
-        !self.0.closed.read().unwrap().contains(&id)
+        !self.0.state.read().unwrap().closed.contains(&id)
+    }
+
+    pub fn is_barricaded(&self, id: u32) -> bool {
+        self.0.state.read().unwrap().barricaded.contains(&id)
     }
 
     pub fn set_open(&self, id: u32, open: bool) -> bool {
         if !self.0.ids.contains(&id) {
             return false;
         }
-        let mut closed = self.0.closed.write().unwrap();
+        let mut state = self.0.state.write().unwrap();
         if open {
-            closed.remove(&id)
+            if state.barricaded.contains(&id) {
+                return false;
+            }
+            state.closed.remove(&id)
         } else {
-            closed.insert(id)
+            state.closed.insert(id)
         }
     }
 
     pub fn replace_closed(&self, ids: &[u32]) {
-        let mut closed = self.0.closed.write().unwrap();
-        closed.clear();
-        closed.extend(ids.iter().copied().filter(|id| self.0.ids.contains(id)));
+        self.replace_state(ids, &[]);
+    }
+
+    /// Restore both sets atomically: a barricade always implies a closed door.
+    pub fn replace_state(&self, closed: &[u32], barricaded: &[u32]) {
+        let mut state = self.0.state.write().unwrap();
+        state.closed = closed
+            .iter()
+            .copied()
+            .filter(|id| self.0.ids.contains(id))
+            .collect();
+        state.barricaded = barricaded
+            .iter()
+            .copied()
+            .filter(|id| self.0.ids.contains(id))
+            .collect();
+        let barricaded = state.barricaded.clone();
+        state.closed.extend(barricaded);
+    }
+
+    /// Mutating physical state alone never grants or spends inventory. Gameplay
+    /// goes through `toggle_barricade`, which validates before changing either.
+    pub fn set_barricaded(&self, id: u32, barricaded: bool) -> bool {
+        if !self.0.ids.contains(&id) {
+            return false;
+        }
+        let mut state = self.0.state.write().unwrap();
+        if barricaded {
+            state.closed.insert(id);
+            state.barricaded.insert(id)
+        } else {
+            state.barricaded.remove(&id)
+        }
     }
 
     pub fn closed_ids(&self) -> Vec<u32> {
-        self.0.closed.read().unwrap().iter().copied().collect()
+        self.0
+            .state
+            .read()
+            .unwrap()
+            .closed
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    pub fn barricaded_ids(&self) -> Vec<u32> {
+        self.0
+            .state
+            .read()
+            .unwrap()
+            .barricaded
+            .iter()
+            .copied()
+            .collect()
     }
 
     pub fn all_ids(&self) -> Vec<u32> {
@@ -92,7 +160,8 @@ impl DoorRuntime {
 
     /// Indexed by the same 8 m cells as walls; no full-city per-ray door scan.
     pub(crate) fn along(&self, p: Vec2, q: Vec2, mut visit: impl FnMut(&Seg)) {
-        let closed = self.0.closed.read().unwrap();
+        let state = self.0.state.read().unwrap();
+        let closed = &state.closed;
         if closed.is_empty() {
             return;
         }
@@ -115,7 +184,8 @@ impl DoorRuntime {
     }
 
     pub(crate) fn near(&self, p: Vec2, radius: f32, mut visit: impl FnMut(&Seg)) {
-        let closed = self.0.closed.read().unwrap();
+        let state = self.0.state.read().unwrap();
+        let closed = &state.closed;
         if closed.is_empty() {
             return;
         }
@@ -202,15 +272,194 @@ pub fn can_close(door: Door, occupants: impl IntoIterator<Item = (Vec2, f32)>) -
 
 /// Legacy saves may have been made in the formerly open aperture. Preserve the
 /// restored position by opening just those overlapping doors, never teleporting.
-pub fn protect_position(obstacles: &Obstacles, pos: Vec2) {
+pub fn protect_position(obstacles: &Obstacles, pos: Vec2) -> u32 {
     let mut ids = Vec::new();
+    let barricaded: BTreeSet<_> = obstacles.doors().barricaded_ids().into_iter().collect();
     obstacles.doors().near(pos, PLAYER_RADIUS + 0.15, |seg| {
-        if seg_dist(pos, seg.a, seg.b) < PLAYER_RADIUS + 0.15 {
-            ids.push(seg.bld.unwrap());
+        let id = seg.bld.unwrap();
+        // Standing against paid boards is a valid saved position. Do not
+        // dismantle them just because the legacy leaf repair has extra slack.
+        let threshold = if barricaded.contains(&id) {
+            PLAYER_RADIUS - 0.001
+        } else {
+            PLAYER_RADIUS + 0.15
+        };
+        if seg_dist(pos, seg.a, seg.b) < threshold {
+            ids.push(id);
         }
     });
+    let mut recovered = 0;
     for id in ids {
+        // Only corrupt/old manually positioned snapshots can put a player in
+        // a new barricade. Keep the no-teleport guarantee and return its plank
+        // to the save adapter so this repair never destroys paid materials.
+        recovered += u32::from(obstacles.doors().set_barricaded(id, false));
         obstacles.doors().set_open(id, true);
+    }
+    recovered
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarricadeError {
+    NoDoor,
+    MissingMaterials,
+    Occupied,
+}
+
+impl BarricadeError {
+    pub fn message(self, lang: Language) -> &'static str {
+        match self {
+            Self::NoDoor => tr(
+                lang,
+                "走近可觸及的門口再封門。",
+                "Move within reach of an entrance.",
+            ),
+            Self::MissingMaterials => tr(
+                lang,
+                "封門需要鐵鎚和一塊木板。",
+                "Barricading requires a hammer and one plank.",
+            ),
+            Self::Occupied => tr(
+                lang,
+                "門口有人，先退開再封門。",
+                "The doorway is occupied. Step away before barricading it.",
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarricadeOutcome {
+    pub id: u32,
+    pub added: bool,
+    pub noise: f32,
+}
+
+impl BarricadeOutcome {
+    pub fn message(self, lang: Language) -> &'static str {
+        if self.added {
+            tr(
+                lang,
+                "門封好了；敲打聲可能引來巡邏。",
+                "Door barricaded; hammering may attract patrols.",
+            )
+        } else {
+            tr(
+                lang,
+                "拆下封門木板，已放回背包；門仍關著。",
+                "Recovered the barricade plank. The door is still closed.",
+            )
+        }
+    }
+}
+
+/// The same reachable 3 m target as the door prompt, rechecked when the action
+/// arrives. Validation happens before spending a plank or changing collision.
+pub fn toggle_barricade(
+    obstacles: &Obstacles,
+    pos: Vec2,
+    inventory: &mut Inventory,
+    occupants: impl IntoIterator<Item = (Vec2, f32)>,
+) -> Result<BarricadeOutcome, BarricadeError> {
+    let target = nearest_door(pos, obstacles).ok_or(BarricadeError::NoDoor)?;
+    let doors = obstacles.doors();
+    if doors.is_barricaded(target.id) {
+        doors.set_barricaded(target.id, false);
+        // Web addItem always returns the paid plank, including when the bag
+        // has since filled. We preserve it rather than silently discarding it.
+        inventory.add("plank", 1);
+        return Ok(BarricadeOutcome {
+            id: target.id,
+            added: false,
+            noise: 10.0,
+        });
+    }
+    let door = obstacles.world().blds[target.id as usize].door.unwrap();
+    if !can_close(door, occupants) {
+        return Err(BarricadeError::Occupied);
+    }
+    if inventory.count("hammer") == 0 || inventory.count("plank") == 0 {
+        return Err(BarricadeError::MissingMaterials);
+    }
+    inventory.take("plank", 1);
+    doors.set_barricaded(target.id, true);
+    Ok(BarricadeOutcome {
+        id: target.id,
+        added: true,
+        noise: 18.0,
+    })
+}
+
+struct DoorNoiseRng(crate::city::Lcg);
+
+impl Default for DoorNoiseRng {
+    fn default() -> Self {
+        Self(crate::city::Lcg(0x6261727269636164))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_barricades(
+    mut actions: MessageReader<WorldAction>,
+    flow: Res<State<GameFlow>>,
+    pause: Res<PauseOpen>,
+    game: Res<GameState>,
+    player: Query<&Transform, With<Player>>,
+    obstacles: Res<Obstacles>,
+    mut inventory: ResMut<Inventory>,
+    mut progress: ResMut<ScavengeState>,
+    mut notice: ResMut<WorldNotice>,
+    mut enemies: Query<&mut Enemy>,
+    civilians: Query<&Transform, With<crate::human::Civilian>>,
+    env: Res<CombatEnv>,
+    lang: Res<Language>,
+    mut sound: MessageWriter<SfxEvent>,
+    mut rng: Local<DoorNoiseRng>,
+) {
+    if actions
+        .read()
+        .filter(|a| matches!(a, WorldAction::Barricade))
+        .count()
+        == 0
+        || flow.get() != &GameFlow::Playing
+        || pause.0
+        || game.hp <= 0.0
+        || game.over
+    {
+        return;
+    }
+    let Ok(player) = player.single() else { return };
+    let pos = player.translation.xz();
+    let occupants = std::iter::once((pos, PLAYER_RADIUS))
+        .chain(
+            enemies
+                .iter()
+                .filter(|e| e.0.alive())
+                .map(|e| (e.0.pos, 0.4)),
+        )
+        .chain(civilians.iter().map(|c| (c.translation.xz(), 0.35)));
+    match toggle_barricade(&obstacles, pos, &mut inventory, occupants) {
+        Ok(result) => {
+            progress.closed_doors = obstacles.doors().closed_ids();
+            progress.barricaded_doors = obstacles.doors().barricaded_ids();
+            notice.text = result.message(*lang).into();
+            crate::combat::soldier::noise(
+                enemies.iter_mut().map(|e| &mut e.into_inner().0),
+                pos,
+                result.noise,
+                env.rain,
+                env.night,
+                &mut rng.0,
+            );
+            sound.write(SfxEvent::Clink { dist: 0.0 });
+            println!(
+                "DTDOOR barricaded={} id={} plank={}",
+                result.added,
+                result.id,
+                inventory.count("plank")
+            );
+        }
+        Err(error) => notice.text = error.message(*lang).into(),
     }
 }
 
@@ -224,10 +473,14 @@ pub struct DoorLeaf {
 #[derive(Component)]
 struct DoorRing;
 
+#[derive(Component)]
+struct BarricadeView(u32);
+
 #[derive(Resource)]
 struct DoorArt {
     // Home/shop × left/right, shared by every visible entrance.
     meshes: [[Handle<Mesh>; 2]; 2],
+    barricade: Handle<Mesh>,
     solid: Handle<StandardMaterial>,
     faded: Handle<StandardMaterial>,
 }
@@ -235,15 +488,50 @@ struct DoorArt {
 #[derive(Resource, Default)]
 struct DoorViews(HashMap<u32, [Entity; 2]>);
 
+#[derive(Resource, Default)]
+struct BarricadeViews(HashMap<u32, Entity>);
+
 pub struct DoorPlugin;
 
 impl Plugin for DoorPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DoorPrompt>()
             .init_resource::<DoorViews>()
+            .init_resource::<BarricadeViews>()
             .add_systems(Startup, setup)
-            .add_systems(Update, show_doors.after(crate::worldplay::WorldSet));
+            .add_systems(
+                Update,
+                (apply_barricades, show_doors, show_barricades)
+                    .chain()
+                    .after(crate::worldplay::WorldSet),
+            );
     }
+}
+
+fn barricade_mesh() -> MeshBuf {
+    let mut mesh = MeshBuf::default();
+    for i in 0..3 {
+        let local = Mat4::from_translation(Vec3::new(0.0, 0.6 + i as f32 * 0.6, 0.0))
+            * Mat4::from_rotation_z((i as f32 - 1.0) * 0.15);
+        mesh.add(
+            &geom::cuboid(DOOR_W + 0.3, 0.25, 0.08),
+            local,
+            hex(0x9a7040),
+        );
+        for x in [-0.65, 0.65] {
+            mesh.add(
+                &geom::cuboid(0.035, 0.035, 0.011),
+                local * Mat4::from_translation(Vec3::new(x, 0.0, 0.045)),
+                hex(0x403a33),
+            );
+            mesh.add(
+                &geom::cuboid(0.035, 0.035, 0.011),
+                local * Mat4::from_translation(Vec3::new(x, 0.0, -0.045)),
+                hex(0x403a33),
+            );
+        }
+    }
+    mesh
 }
 
 fn leaf_mesh(home: bool, side: f32) -> MeshBuf {
@@ -302,6 +590,7 @@ fn setup(
     };
     let art = DoorArt {
         meshes: [make(true, &mut meshes), make(false, &mut meshes)],
+        barricade: meshes.add(barricade_mesh().into_mesh()),
         solid: materials.add(StandardMaterial {
             perceptual_roughness: 0.72,
             metallic: 0.25,
@@ -354,6 +643,7 @@ fn show_doors(
             &mut DoorLeaf,
             &mut Transform,
             &mut MeshMaterial3d<StandardMaterial>,
+            &mut Visibility,
         ),
         (Without<Player>, Without<DoorRing>),
     >,
@@ -429,11 +719,16 @@ fn show_doors(
             })
         });
     }
-    for (mut leaf, mut tf, mut mat) in &mut leaves {
+    for (mut leaf, mut tf, mut mat, mut visibility) in &mut leaves {
         let d = world.blds[leaf.id as usize].door.unwrap();
         let open = obstacles.doors().is_open(leaf.id);
         let in_building = inside == Some(leaf.id);
         *tf = leaf_transform(d, &mut leaf, open, time.delta_secs(), in_building);
+        *visibility = if obstacles.doors().is_barricaded(leaf.id) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
         mat.0 = if visible.get(&leaf.id).copied().unwrap_or(false) {
             art.faded.clone()
         } else {
@@ -448,6 +743,76 @@ fn show_doors(
         tf.scale = Vec3::splat(pulse);
     } else {
         **visibility = Visibility::Hidden;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn show_barricades(
+    mut commands: Commands,
+    obstacles: Res<Obstacles>,
+    art: Res<DoorArt>,
+    doors: Res<DoorViews>,
+    mut views: ResMut<BarricadeViews>,
+    player: Single<&Transform, (With<Player>, Without<BarricadeView>)>,
+    walls: Query<&BldWalls>,
+    mut markers: Query<
+        (
+            &BarricadeView,
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        Without<Player>,
+    >,
+) {
+    let world = obstacles.world();
+    let inside = world.bld_at(player.translation.xz()).map(|b| b.id);
+    let faded: HashSet<_> = walls.iter().filter(|w| w.faded).map(|w| w.id).collect();
+    let wanted: HashSet<_> = doors
+        .0
+        .keys()
+        .copied()
+        .filter(|id| obstacles.doors().is_barricaded(*id))
+        .collect();
+    views.0.retain(|id, e| {
+        if wanted.contains(id) {
+            true
+        } else {
+            commands.entity(*e).despawn();
+            false
+        }
+    });
+    let transform = |id| {
+        let door = world.blds[id as usize].door.unwrap();
+        Transform::from_xyz(door.p.x, 0.0, door.p.y)
+            .with_rotation(Quat::from_rotation_y(door.n.x.atan2(door.n.y)))
+            .with_scale(Vec3::new(
+                1.0,
+                if inside == Some(id) { 0.32 } else { 1.0 },
+                1.0,
+            ))
+    };
+    let material = |id| {
+        if faded.contains(&id) {
+            art.faded.clone()
+        } else {
+            art.solid.clone()
+        }
+    };
+    for id in wanted {
+        views.0.entry(id).or_insert_with(|| {
+            commands
+                .spawn((
+                    BarricadeView(id),
+                    Mesh3d(art.barricade.clone()),
+                    MeshMaterial3d(material(id)),
+                    transform(id),
+                ))
+                .id()
+        });
+    }
+    for (marker, mut tf, mut mat) in &mut markers {
+        *tf = transform(marker.0);
+        mat.0 = material(marker.0);
     }
 }
 
@@ -584,5 +949,202 @@ mod tests {
         assert!(obstacles.doors().is_open(id));
         assert!(!obstacles.doors().set_open(u32::MAX, false));
         assert_eq!(obstacles.doors().closed_ids(), saved);
+    }
+
+    #[test]
+    fn barricade_spends_one_plank_keeps_hammer_blocks_all_clones_and_refunds_once() {
+        let (obstacles, id, door) = home();
+        let cloned = obstacles.clone();
+        let pos = door.p + door.n;
+        let mut bag = Inventory::default();
+        bag.add("hammer", 1);
+        bag.add("plank", 2);
+        let built = toggle_barricade(&obstacles, pos, &mut bag, [(pos, PLAYER_RADIUS)]).unwrap();
+        assert_eq!(
+            built,
+            BarricadeOutcome {
+                id,
+                added: true,
+                noise: 18.0
+            }
+        );
+        assert_eq!(bag.count("plank"), 1);
+        assert_eq!(bag.count("hammer"), 1);
+        assert!(cloned.doors().is_barricaded(id));
+        assert!(!cloned.doors().is_open(id));
+        assert!(
+            !cloned.doors().set_open(id, true),
+            "ordinary Interact must not bypass boards"
+        );
+        assert!(!cloned.los(pos, door.p - door.n));
+        let stopped = cloned.move_circle(pos, door.p - door.n, PLAYER_RADIUS);
+        assert!((stopped - door.p).dot(door.n) >= PLAYER_RADIUS - 0.001);
+        assert!(cloned.shot_ray(pos, door.p - door.n, 1.5, 1.5, 1.0) < 1.0);
+        // Removing has no hammer requirement, matching the Web's paid-plank refund.
+        bag.take("hammer", 1);
+        // A bag filled by subsequent scavenging must still recover its paid
+        // plank. The 15 kg ceiling governs pickups, not material refunds.
+        bag.add("water", 20);
+        bag.add("can", 5);
+        let full_weight = bag.weight();
+        assert!((full_weight - crate::worldplay::LOOT_CAPACITY_KG).abs() < 0.001);
+        let removed = toggle_barricade(&cloned, pos, &mut bag, []).unwrap();
+        assert_eq!(
+            removed,
+            BarricadeOutcome {
+                id,
+                added: false,
+                noise: 10.0
+            }
+        );
+        assert_eq!(bag.count("plank"), 2);
+        assert_eq!(bag.count("water"), 20);
+        assert_eq!(bag.count("can"), 5);
+        assert!((bag.weight() - full_weight - 1.0).abs() < 0.001);
+        assert!(!obstacles.doors().is_barricaded(id));
+        assert!(
+            !obstacles.doors().is_open(id),
+            "removal must preserve a closed normal leaf"
+        );
+        assert_eq!(
+            toggle_barricade(&obstacles, pos, &mut bag, []),
+            Err(BarricadeError::MissingMaterials)
+        );
+        assert_eq!(
+            bag.count("plank"),
+            2,
+            "repeated remove requests cannot mint planks"
+        );
+        assert!(obstacles.doors().set_open(id, true));
+        assert!(cloned.los(pos, door.p - door.n));
+    }
+
+    #[test]
+    fn barricade_validates_occupancy_materials_and_reach_before_spending() {
+        let (obstacles, id, door) = home();
+        let pos = door.p + door.n;
+        let mut bag = Inventory::default();
+        bag.add("plank", 2);
+        assert_eq!(
+            toggle_barricade(&obstacles, pos, &mut bag, []),
+            Err(BarricadeError::MissingMaterials)
+        );
+        bag.add("hammer", 1);
+        assert_eq!(
+            toggle_barricade(&obstacles, pos, &mut bag, [(door.p, 0.35)]),
+            Err(BarricadeError::Occupied)
+        );
+        assert_eq!(
+            toggle_barricade(&obstacles, Vec2::splat(1_000_000.0), &mut bag, []),
+            Err(BarricadeError::NoDoor)
+        );
+        assert_eq!(bag.count("plank"), 2);
+        assert_eq!(bag.count("hammer"), 1);
+        assert!(obstacles.doors().is_open(id));
+        assert!(obstacles.doors().barricaded_ids().is_empty());
+    }
+
+    #[test]
+    fn barricade_restore_normalizes_ids_and_threshold_repair_accounts_for_materials() {
+        let (obstacles, id, door) = home();
+        obstacles.doors().replace_state(&[], &[id, id, u32::MAX]);
+        assert_eq!(obstacles.doors().closed_ids(), vec![id]);
+        assert_eq!(obstacles.doors().barricaded_ids(), vec![id]);
+        assert_eq!(
+            protect_position(&obstacles, door.p + door.n * PLAYER_RADIUS),
+            0
+        );
+        assert!(
+            obstacles.doors().is_barricaded(id),
+            "Continue beside boards must not dismantle them"
+        );
+        assert_eq!(protect_position(&obstacles, door.p), 1);
+        assert_eq!(protect_position(&obstacles, door.p), 0);
+        assert!(obstacles.doors().is_open(id));
+        assert!(obstacles.doors().barricaded_ids().is_empty());
+        obstacles.doors().replace_state(&[id], &[id]);
+        obstacles.doors().replace_closed(&[id]);
+        assert!(!obstacles.doors().is_open(id));
+        assert!(
+            !obstacles.doors().is_barricaded(id),
+            "legacy restoration clears stale boards from the previous session"
+        );
+    }
+
+    #[test]
+    fn barricade_mesh_stays_within_shared_near_layer_budget() {
+        let mesh = barricade_mesh();
+        assert!(mesh.vcount() <= 360);
+        assert!(mesh.pos.iter().all(|p| p.iter().all(|v| v.is_finite())));
+        assert!(mesh.pos.iter().map(|p| p[0].abs()).fold(0.0, f32::max) <= DOOR_W / 2.0 + 0.2);
+    }
+
+    #[test]
+    fn barricade_message_updates_save_delta_and_alerts_patrol_without_duplicate_toggle() {
+        use crate::combat::{EnemyKind, SolState, Soldier};
+        use bevy::state::app::StatesPlugin;
+        let (obstacles, id, door) = home();
+        let pos = door.p + door.n;
+        let mut bag = Inventory::default();
+        bag.add("hammer", 1);
+        bag.add("plank", 2);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin))
+            .insert_state(GameFlow::Playing)
+            .insert_resource(obstacles)
+            .insert_resource(bag)
+            .init_resource::<PauseOpen>()
+            .init_resource::<GameState>()
+            .init_resource::<ScavengeState>()
+            .init_resource::<WorldNotice>()
+            .init_resource::<CombatEnv>()
+            .init_resource::<Language>()
+            .add_message::<WorldAction>()
+            .add_message::<SfxEvent>()
+            .add_systems(Update, apply_barricades);
+        app.world_mut()
+            .spawn((Player, Transform::from_xyz(pos.x, 0.0, pos.y)));
+        let soldier = app
+            .world_mut()
+            .spawn(Enemy(Soldier::new(
+                1234,
+                EnemyKind::Patrol,
+                pos + Vec2::X * 7.0,
+                vec![],
+            )))
+            .id();
+        app.world_mut().write_message(WorldAction::Barricade);
+        app.world_mut().write_message(WorldAction::Barricade);
+        app.update();
+        assert_eq!(app.world().resource::<Inventory>().count("plank"), 1);
+        assert_eq!(
+            app.world().resource::<ScavengeState>().barricaded_doors,
+            vec![id]
+        );
+        assert!(
+            app.world()
+                .resource::<ScavengeState>()
+                .closed_doors
+                .contains(&id)
+        );
+        assert_eq!(
+            app.world().get::<Enemy>(soldier).unwrap().0.state,
+            SolState::Investigate
+        );
+        app.update();
+        assert_eq!(
+            app.world().resource::<Inventory>().count("plank"),
+            1,
+            "a coalesced duplicate must not execute in the next frame"
+        );
+        app.world_mut().write_message(WorldAction::Barricade);
+        app.update();
+        assert_eq!(app.world().resource::<Inventory>().count("plank"), 2);
+        assert!(
+            app.world()
+                .resource::<ScavengeState>()
+                .barricaded_doors
+                .is_empty()
+        );
     }
 }

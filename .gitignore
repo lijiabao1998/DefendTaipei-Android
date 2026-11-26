@@ -1,6 +1,10 @@
 # Rust
 /target
 
+# Python helper bytecode
+__pycache__/
+*.pyc
+
 # Android build artifacts
 *.apk
 *.aab

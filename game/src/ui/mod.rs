@@ -9,6 +9,7 @@
 mod layout;
 mod pause;
 mod portrait;
+mod scavenge;
 mod screens;
 mod shelter;
 mod title;
@@ -53,6 +54,7 @@ impl Plugin for FlowUiPlugin {
             .init_resource::<ConsumedPresses>()
             .init_resource::<PauseOpen>()
             .init_resource::<UiModal>()
+            .init_resource::<crate::worldplay::ScavengeSession>()
             .init_resource::<shelter::PanelState>()
             .init_resource::<shelter::RenderCache>()
             .add_message::<TogglePause>()
