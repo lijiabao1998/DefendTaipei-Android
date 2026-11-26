@@ -31,6 +31,7 @@ mod player;
 mod qa;
 pub mod reclaim_street;
 pub mod remnant;
+pub mod rescue;
 pub mod roles;
 pub mod save;
 pub mod sectors;
@@ -39,6 +40,8 @@ mod story;
 pub mod survival;
 mod touch;
 pub mod ui;
+pub mod upstairs;
+pub mod war;
 pub mod worldmap;
 pub mod worldplay;
 
@@ -136,6 +139,9 @@ pub fn run() {
             japan::JapanPlugin,
             map::wreckage::WreckagePlugin,
             reclaim_street::ReclaimStreetPlugin,
+            upstairs::UpstairsPlugin,
+            rescue::RescuePlugin,
+            war::WarPlugin,
         ));
     #[cfg(not(target_os = "android"))]
     if qa_mode {

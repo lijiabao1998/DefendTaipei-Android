@@ -81,6 +81,12 @@ enum Action {
     Reclaim,
     /// v24.4 a C-2 airdrop called on the JSDF radio, after it lands.
     Airdrop,
+    /// v23.4 the second floor of the nearest walk-up, reached by its stairs.
+    Upstairs,
+    /// v24.8 the day's call for help answered on its floor.
+    Rescue,
+    /// v24.20 / v24.21 a thrown grenade, a mortar barrage and an incoming rocket.
+    War,
     Shelter,
     Inventory,
     Trade,
@@ -352,6 +358,24 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "04o-upstairs-portrait",
+        size: [390, 844],
+        action: Action::Upstairs,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04p-rescue-portrait",
+        size: [390, 844],
+        action: Action::Rescue,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04q-war-landscape",
+        size: [1280, 720],
+        action: Action::War,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "05-shelter-landscape",
         size: [1280, 720],
         action: Action::Shelter,
@@ -463,6 +487,8 @@ struct QaRun {
     loot_inventory: Option<Inventory>,
     /// The area the Reclaim stage takes back, and the bag before its gift.
     reclaim: Option<(usize, Inventory)>,
+    /// Grenades carried before the War stage's throw.
+    war_grenades: Option<u32>,
     waiting_capture: bool,
     captured: bool,
     checkpoint: Option<Checkpoint>,
@@ -510,6 +536,7 @@ impl Plugin for QaPlugin {
             loot_expected: None,
             loot_inventory: None,
             reclaim: None,
+            war_grenades: None,
             waiting_capture: false,
             captured: false,
             checkpoint: None,
@@ -1027,6 +1054,70 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             let p = player_position(world)?.xz();
             move_view(world, p, 1.0)?;
         }
+        Action::Upstairs => {
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            world.write_message(OpenPanel(PanelKind::Close));
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            // the nearest stairwell with furniture upstairs; stand on its landing
+            let p = player_position(world)?.xz();
+            let w = crate::map::world();
+            let stair = w
+                .stairs
+                .iter()
+                .filter(|s| {
+                    !crate::map::upstairs::plan_floor(w, &w.blds[s.building as usize], s, 2)
+                        .is_empty()
+                })
+                .min_by(|a, b| {
+                    a.landing
+                        .distance_squared(p)
+                        .total_cmp(&b.landing.distance_squared(p))
+                })
+                .copied()
+                .ok_or("No walk-up with a furnished second floor")?;
+            move_view(world, stair.landing, 1.4)?;
+            world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::StairsUp));
+        }
+        Action::Rescue => {
+            crate::upstairs::force_ground(world);
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            // today's call (the same pick the 09:00 message makes), then the real stairs
+            let p = player_position(world)?.xz();
+            let day = (world.resource::<Campaign>().game_min / 1440.0).floor() as u32;
+            let (karma, home) = {
+                let shelter = world.resource::<Shelter>();
+                (shelter.karma, shelter.home.map(Vec2::from_array))
+            };
+            let call = crate::rescue::pick_call(day, karma, p, home).ok_or("No rescue call")?;
+            let stair = *crate::map::upstairs::stair_of(crate::map::world(), call.building)
+                .ok_or("Rescue building has no stairs")?;
+            world.resource_mut::<crate::rescue::RescueState>().call = Some(call.clone());
+            move_view(world, stair.landing, 1.4)?;
+            for _ in 2..=call.floor {
+                world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::StairsUp));
+            }
+        }
+        Action::War => {
+            crate::upstairs::force_ground(world);
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            world.write_message(OpenPanel(PanelKind::Close));
+            let p = player_position(world)?.xz();
+            world.resource_mut::<Inventory>().add("grenade", 1);
+            run.war_grenades = Some(world.resource::<Inventory>().count("grenade"));
+            world.write_message(crate::worldplay::WorldAction::Use("grenade".into()));
+            world.write_message(crate::war::WarCall::Barrage {
+                n: 3,
+                at: p + Vec2::new(24.0, -10.0),
+            });
+            world.write_message(crate::war::WarCall::Strike {
+                w: crate::war::ROCKET,
+                at: p + Vec2::new(70.0, 40.0),
+            });
+            move_view(world, p, 0.7)?;
+        }
         Action::Airdrop => {
             // The liaison's first meeting hands over the radio and two batteries.
             world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Liaison));
@@ -1039,6 +1130,8 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world.write_message(crate::ui::TogglePause);
         }
         Action::Shelter => {
+            crate::upstairs::force_ground(world);
+            crate::war::clear_sky(world);
             world.resource_mut::<Campaign>().game_min = 1440.0 + 720.0;
             world
                 .resource_mut::<crate::survival::ShelterEnvironment>()
@@ -1279,7 +1372,7 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // Fifty-one captures include performance controls and scaled 3D rendering, with room for
+    // Fifty-four captures include performance controls and scaled 3D rendering, with room for
     // software Vulkan runner variance without removing any existing stage.
     // CI keeps the 25-minute bound; a slower local software renderer can extend it.
     let deadline = std::env::var("DEFEND_TAIPEI_QA_DEADLINE_SECS")
@@ -1529,6 +1622,88 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         run.report.assertions.push(format!(
             "Killing every soldier assigned to {name} reclaimed it: title '{}', gift {gift:?} added to the bag",
             title.title
+        ));
+    }
+    if matches!(stage.action, Action::Upstairs) {
+        let up = world.resource::<crate::upstairs::Upstairs>();
+        let Some((building, floor)) = up.floor() else {
+            run.ready_frames = 0;
+            return Ok(());
+        };
+        let fixtures = up.fixtures().len();
+        let height = up.height();
+        let y = player_position(world)?.y;
+        if floor != 2 || fixtures == 0 || (y - height).abs() > 0.01 || height < 2.5 {
+            return Err(format!(
+                "Stairs did not reach a furnished second floor: floor={floor} fixtures={fixtures} y={y} height={height}"
+            ));
+        }
+        if !world.resource::<crate::combat::PlayerStance>().upstairs {
+            return Err("Soldiers still track the player upstairs".into());
+        }
+        run.ready_frames += 1;
+        if run.ready_frames < 20 {
+            return Ok(());
+        }
+        let hint = world
+            .resource::<crate::worldplay::InteractionHint>()
+            .clone();
+        run.report.assertions.push(format!(
+            "Real Interact on the landing climbed building {building} to floor 2 at {height:.1} m with {fixtures} fixtures; hint '{} / {}'",
+            hint.label, hint.detail
+        ));
+    }
+    if matches!(stage.action, Action::Rescue) {
+        let state = world.resource::<crate::rescue::RescueState>().clone();
+        let call = state.call.clone().ok_or("Rescue call vanished")?;
+        if !call.done {
+            run.ready_frames = 0;
+            let on_floor = world.resource::<crate::upstairs::Upstairs>().floor()
+                == Some((call.building, call.floor));
+            // the family is published as someone to talk to only once she stands there
+            let family = world
+                .resource::<crate::dialogue::NpcSpots>()
+                .0
+                .iter()
+                .any(|s| s.key == crate::dialogue::NpcKey::Family);
+            if on_floor && family && world.resource::<crate::dialogue::Dialogue>().0.is_none() {
+                world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Family));
+            }
+            return Ok(());
+        }
+        let card = world
+            .resource::<crate::dialogue::Dialogue>()
+            .0
+            .clone()
+            .ok_or("Rescue answered without the family's card")?;
+        run.ready_frames += 1;
+        if run.ready_frames < 10 {
+            return Ok(());
+        }
+        run.report.assertions.push(format!(
+            "Rescue: climbed to floor {} of building {} near {}, found the family and answered ('{}')",
+            call.floor, call.building, call.street, card.title
+        ));
+    }
+    if matches!(stage.action, Action::War) {
+        let stats = *world.resource::<crate::war::WarStats>();
+        let pending = crate::war::shells_pending(world);
+        let before = run.war_grenades.ok_or("Missing grenade fixture")?;
+        // the grenade has gone off (3.5 s) while the rounds are still under their rings
+        if stats.thrown == 0 || run.frame < SETTLE_FRAMES + 170 {
+            return Ok(());
+        }
+        if world.resource::<Inventory>().count("grenade") + 1 != before {
+            return Err("Throwing did not spend the grenade".into());
+        }
+        if pending < 2 || stats.shells < 3 || stats.rockets < 1 {
+            return Err(format!(
+                "War rounds missing: pending={pending} stats={stats:?}"
+            ));
+        }
+        run.report.assertions.push(format!(
+            "War: a real Use threw a grenade from the bag; {} mortar rounds and a rocket fall under red rings ({pending} still in the air), war level {:.2}",
+            stats.shells, stats.level
         ));
     }
     if matches!(stage.action, Action::Airdrop) {

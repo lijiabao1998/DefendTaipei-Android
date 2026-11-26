@@ -745,6 +745,7 @@ fn publish_spots(state: Res<RemnantState>, lang: Res<Language>, mut spots: ResMu
                 reach: TALK_R,
                 label,
                 detail,
+                through: false,
             }
         })
         .collect();

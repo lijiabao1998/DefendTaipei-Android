@@ -21,6 +21,10 @@ pub enum NpcKey {
     Family,
     /// The player's own JSDF field radio (used from the bag).
     Radio,
+    /// v23.4 a stairwell: climb one floor.
+    StairsUp,
+    /// v23.4 a stairwell: go down one floor.
+    StairsDown,
 }
 
 /// What an option does; the owning system interprets it.
@@ -66,6 +70,9 @@ pub struct NpcSpot {
     pub reach: f32,
     pub label: String,
     pub detail: String,
+    /// Reachable without a clear line through the street-level walls and
+    /// furniture (stairs, and anything on an upper floor).
+    pub through: bool,
 }
 
 /// Every addressable person this frame, written by their owners.
@@ -87,7 +94,7 @@ impl NpcSpots {
     pub fn nearest(&self, pos: Vec2, visible: impl Fn(Vec2) -> bool) -> Option<&NpcSpot> {
         self.0
             .iter()
-            .filter(|s| s.pos.distance(pos) < s.reach && visible(s.pos))
+            .filter(|s| s.pos.distance(pos) < s.reach && (s.through || visible(s.pos)))
             .min_by(|a, b| {
                 a.pos
                     .distance_squared(pos)
@@ -130,6 +137,7 @@ mod tests {
             reach: 3.2,
             label: String::new(),
             detail: String::new(),
+            through: false,
         }
     }
 

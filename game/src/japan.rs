@@ -550,6 +550,7 @@ fn publish_spot(
                 "JSDF liaison, Captain Takahashi",
             )
             .into(),
+            through: false,
         }],
     );
 }

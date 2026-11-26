@@ -117,6 +117,7 @@ fn move_player(
     mut needs: Option<ResMut<crate::worldplay::PlayerNeeds>>,
     inventory: Option<Res<crate::inventory::Inventory>>,
     selected: Option<Res<crate::roles::SelectedRole>>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
     mut player: Single<&mut Transform, With<Player>>,
 ) {
     if state.over
@@ -162,7 +163,11 @@ fn move_player(
         needs.fatigue = (needs.fatigue + time.delta_secs() * 0.25).min(100.0);
     }
     let pos = player.translation.xz() + dir * speed * time.delta_secs();
-    let pos = resolve_collisions(player.translation.xz(), pos, PLAYER_RADIUS, &obstacles);
+    // v23.4 an upper floor has its own walls and furniture
+    let pos = match upstairs.as_deref().filter(|u| u.active()) {
+        Some(up) => up.move_circle(player.translation.xz(), pos, PLAYER_RADIUS),
+        None => resolve_collisions(player.translation.xz(), pos, PLAYER_RADIUS, &obstacles),
+    };
     player.translation.x = pos.x;
     player.translation.z = pos.y;
     // Face the movement direction (local -Z forward)

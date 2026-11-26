@@ -108,6 +108,8 @@ impl ItemDef {
             || self.mag > 0
             || self.id == "cstove"
             || self.id == "jpradio"
+            || self.id == "grenade"
+            || self.id == "oldgrenade"
     }
 }
 

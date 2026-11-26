@@ -242,6 +242,7 @@ impl Plugin for WorldPlayPlugin {
             .init_resource::<FrameProgress>()
             .init_resource::<crate::dialogue::NpcSpots>()
             .add_message::<crate::dialogue::TalkTo>()
+            .add_message::<crate::war::ThrowGrenade>()
             .add_message::<WorldAction>()
             .configure_sets(Update, WorldSet.after(ShelterSet).after(combat::CombatSet))
             .add_systems(Startup, (plan_world, setup_loot_art))
@@ -640,12 +641,45 @@ fn danger_speed(
     }
 }
 
+/// The upper floor the player is on, if any (`None` on the street).
+type Floor<'a> = Option<&'a crate::upstairs::Upstairs>;
+
+fn floor_active(up: Floor) -> bool {
+    up.is_some_and(|u| u.active())
+}
+
+fn floor_container(f: &crate::map::interiors::Fixture) -> Option<Container> {
+    Some(Container {
+        id: f.id.clone(),
+        pos: f.approach,
+        kind: f.loot?,
+        // (the occupied-home choice belongs to street-level homes)
+        cabinet: false,
+        furnished: true,
+        label_zh: f.label_zh,
+        label_en: f.label_en,
+    })
+}
+
 fn nearest_container(
     pos: Vec2,
     catalog: &WorldCatalog,
     progress: &ScavengeState,
     obstacles: Option<&Obstacles>,
+    up: Floor,
 ) -> Option<Container> {
+    if let Some(up) = up.filter(|u| u.active()) {
+        return up
+            .fixtures()
+            .iter()
+            .filter(|f| f.loot.is_some() && up.reaches(pos, f))
+            .min_by(|a, b| {
+                a.approach
+                    .distance_squared(pos)
+                    .total_cmp(&b.approach.distance_squared(pos))
+            })
+            .and_then(floor_container);
+    }
     let building = world().bld_at(pos).map(|b| b.id);
     let mut best = catalog
         .containers
@@ -700,7 +734,15 @@ fn container_by_id(
     id: &str,
     catalog: &WorldCatalog,
     progress: &ScavengeState,
+    up: Floor,
 ) -> Option<Container> {
+    if id.starts_with('u') {
+        return up?
+            .fixtures()
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(floor_container);
+    }
     catalog
         .containers
         .iter()
@@ -726,7 +768,17 @@ fn container_by_id(
         })
 }
 
-fn container_reachable(pos: Vec2, container: &Container, obstacles: &Obstacles) -> bool {
+fn container_reachable(pos: Vec2, container: &Container, obstacles: &Obstacles, up: Floor) -> bool {
+    if floor_active(up) || container.id.starts_with('u') {
+        // upper-floor furniture: only on its own floor, within reach
+        return floor_active(up)
+            && container.id.starts_with('u')
+            && up.is_some_and(|u| {
+                u.fixtures()
+                    .iter()
+                    .any(|f| f.id == container.id && u.reaches(pos, f))
+            });
+    }
     pos.distance(container.pos) < 2.2
         && world().bld_at(pos).map(|b| b.id) == world().bld_at(container.pos).map(|b| b.id)
         && obstacles.los(pos, container.pos)
@@ -739,16 +791,18 @@ fn update_scavenge_reach(
     progress: Res<ScavengeState>,
     obstacles: Res<Obstacles>,
     mut session: ResMut<ScavengeSession>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
 ) {
     if flow.get() != &GameFlow::Playing {
         *session = ScavengeSession::default();
         return;
     }
+    let up = upstairs.as_deref();
     session.reachable = session.target.as_ref().is_some_and(|target| {
-        container_by_id(&target.id, &catalog, &progress).is_some_and(|container| {
+        container_by_id(&target.id, &catalog, &progress, up).is_some_and(|container| {
             player
                 .single()
-                .is_ok_and(|p| container_reachable(p.translation.xz(), &container, &obstacles))
+                .is_ok_and(|p| container_reachable(p.translation.xz(), &container, &obstacles, up))
         })
     });
 }
@@ -798,12 +852,21 @@ fn interaction_target(
     shelter: &Shelter,
     obstacles: &Obstacles,
     npcs: &crate::dialogue::NpcSpots,
+    up: Floor,
 ) -> InteractionTarget {
+    if floor_active(up) {
+        // upstairs: only this floor's people, stairs and furniture
+        if let Some(npc) = npcs.nearest(pos, |_| false) {
+            return InteractionTarget::Npc(npc.clone());
+        }
+        return nearest_container(pos, catalog, progress, None, up)
+            .map_or(InteractionTarget::None, InteractionTarget::Container);
+    }
     if trade_at(pos.to_array()).is_some() {
         return InteractionTarget::Trade;
     }
     let door = crate::doors::nearest_door(pos, obstacles);
-    let container = nearest_container(pos, catalog, progress, Some(obstacles));
+    let container = nearest_container(pos, catalog, progress, Some(obstacles), None);
     // A person within reach answers before the door or a crate beside them,
     // unless that crate is right under the player's hand.
     if let Some(npc) = npcs.nearest(pos, |p| obstacles.los(pos, p))
@@ -841,6 +904,7 @@ fn update_interaction_hint(
     mut hint: ResMut<InteractionHint>,
     mut door_prompt: ResMut<DoorPrompt>,
     npcs: Res<crate::dialogue::NpcSpots>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
 ) {
     door_prompt.0 = None;
     let mut next = InteractionHint::default();
@@ -856,6 +920,7 @@ fn update_interaction_hint(
             &shelter,
             &obstacles,
             &npcs,
+            upstairs.as_deref(),
         );
         let (label, detail) =
             match target {
@@ -1027,7 +1092,7 @@ fn fill_water(
     water: bool,
     obstacles: Option<&Obstacles>,
 ) -> Result<(), TapError> {
-    let fixture = nearest_container(pos, catalog, progress, obstacles)
+    let fixture = nearest_container(pos, catalog, progress, obstacles, None)
         .filter(|container| container.id == HOME_TAP_ID)
         .ok_or(TapError::TooFar)?;
     if !water {
@@ -1199,6 +1264,8 @@ fn apply_actions(
         Query<&Transform, With<crate::human::Civilian>>,
         Res<crate::dialogue::NpcSpots>,
         MessageWriter<crate::dialogue::TalkTo>,
+        Option<Res<crate::upstairs::Upstairs>>,
+        MessageWriter<crate::war::ThrowGrenade>,
     ),
 ) {
     let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game, mut session) =
@@ -1225,10 +1292,11 @@ fn apply_actions(
                 {
                     continue;
                 }
-                let Some(c) = container_by_id(container, &catalog, &progress) else {
+                let up = npc.3.as_deref();
+                let Some(c) = container_by_id(container, &catalog, &progress, up) else {
                     continue;
                 };
-                if c.id == HOME_TAP_ID || !container_reachable(pos, &c, &obstacles) {
+                if c.id == HOME_TAP_ID || !container_reachable(pos, &c, &obstacles, up) {
                     session.reachable = false;
                     notice.text = tr(
                         *lang,
@@ -1292,8 +1360,15 @@ fn apply_actions(
                 if prompt.0.is_some() {
                     continue;
                 }
-                let target =
-                    interaction_target(pos, &catalog, &progress, &shelter, &obstacles, &npc.1);
+                let target = interaction_target(
+                    pos,
+                    &catalog,
+                    &progress,
+                    &shelter,
+                    &obstacles,
+                    &npc.1,
+                    npc.3.as_deref(),
+                );
                 if let InteractionTarget::Npc(spot) = &target {
                     npc.2.write(crate::dialogue::TalkTo(spot.key));
                     continue;
@@ -1408,7 +1483,7 @@ fn apply_actions(
                     prompt.0 = None;
                     continue;
                 };
-                if !container_reachable(pos, c, &obstacles) {
+                if !container_reachable(pos, c, &obstacles, None) {
                     prompt.0 = None;
                     continue;
                 }
@@ -1438,6 +1513,10 @@ fn apply_actions(
                     }
                     Err(error) => notice.text = error.message(*lang).into(),
                 }
+            }
+            WorldAction::Use(id) if id == "grenade" || id == "oldgrenade" => {
+                // v24.20 thrown the way the player faces
+                npc.4.write(crate::war::ThrowGrenade(id.clone()));
             }
             WorldAction::Use(id) if id == "jpradio" => {
                 // v24.4 the field radio opens its own card (three kinds of support)
@@ -1848,7 +1927,7 @@ mod tests {
         let shelter = Shelter::default();
         obstacles.doors().set_open(id, false);
         assert!(
-            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default()), InteractionTarget::Door(d) if d.id == id && !d.open)
+            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default(), None), InteractionTarget::Door(d) if d.id == id && !d.open)
         );
         assert_eq!(
             fill_water(
@@ -1866,7 +1945,7 @@ mod tests {
         obstacles.doors().set_open(id, true);
         let inside = door.p - door.n * 1.1;
         assert!(
-            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default()), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
+            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default(), None), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
         );
         fill_water(
             inside,
@@ -2378,6 +2457,7 @@ mod tests {
             .add_message::<SfxEvent>()
             .init_resource::<crate::dialogue::NpcSpots>()
             .add_message::<crate::dialogue::TalkTo>()
+            .add_message::<crate::war::ThrowGrenade>()
             .add_systems(Update, apply_actions);
         let player = app
             .world_mut()
@@ -2506,6 +2586,7 @@ mod tests {
             .add_message::<SfxEvent>()
             .init_resource::<crate::dialogue::NpcSpots>()
             .add_message::<crate::dialogue::TalkTo>()
+            .add_message::<crate::war::ThrowGrenade>()
             .add_systems(Update, apply_actions);
         app.world_mut().spawn((Player, Transform::default()));
         {

@@ -206,6 +206,8 @@ pub struct WorldData {
     pub checkpoints: Vec<super::fortify::Checkpoint>,
     /// v24.5 abandoned traffic, scooters, barriers and litter (cover already in `segs`).
     pub wrecks: Vec<super::wreckage::Wreck>,
+    /// v23.4 stairwells of multi-storey buildings, sorted by building id.
+    pub stairs: Vec<super::upstairs::Stair>,
 }
 
 const BG: f32 = 16.0;
@@ -278,6 +280,7 @@ impl WorldData {
             remnants: Vec::new(),
             checkpoints: Vec::new(),
             wrecks: Vec::new(),
+            stairs: Vec::new(),
         };
         for (ri, r) in w.roads.iter().enumerate() {
             let hw = r.w / 2.0;
@@ -333,6 +336,7 @@ impl WorldData {
         w.props = w.plan_props();
         super::wreckage::install(&mut w);
         super::interiors::install(&mut w);
+        super::upstairs::install(&mut w);
         w
     }
 

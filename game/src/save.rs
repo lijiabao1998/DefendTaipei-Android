@@ -98,6 +98,9 @@ struct SaveFile {
     /// v24.4 the JSDF liaison, radio cooldowns and airdrops.
     #[serde(default)]
     japan: crate::japan::JapanState,
+    /// v24.8 the day's call for help from upstairs.
+    #[serde(default)]
+    rescue: crate::rescue::RescueState,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -253,6 +256,9 @@ impl SaveFile {
         }
         if !self.japan.is_valid() {
             return Err(SaveError::Invalid("Invalid JSDF support state"));
+        }
+        if !self.rescue.is_valid() {
+            return Err(SaveError::Invalid("Invalid rescue state"));
         }
         let loot_ids: HashSet<&str> = world.loot.iter().map(|(id, _)| id.as_str()).collect();
         if [&world.searched, &world.asked, &world.night_seen]
@@ -540,6 +546,12 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
         position: transform.translation.to_array(),
         rotation: transform.rotation.to_array(),
     };
+    // v23.4 a save made upstairs records the ground-floor landing
+    let position = world
+        .get_resource::<crate::upstairs::Upstairs>()
+        .and_then(|u| u.landing())
+        .map_or(player.position, |p| [p.x, 0.0, p.y]);
+    let player = PlayerSnapshot { position, ..player };
     let selected = world.resource::<SelectedRole>();
     let save = SaveFile {
         version: SAVE_VERSION,
@@ -562,6 +574,10 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
             .unwrap_or_default(),
         japan: world
             .get_resource::<crate::japan::JapanState>()
+            .cloned()
+            .unwrap_or_default(),
+        rescue: world
+            .get_resource::<crate::rescue::RescueState>()
             .cloned()
             .unwrap_or_default(),
     };
@@ -641,6 +657,7 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     world.insert_resource(save.map);
     world.insert_resource(save.remnants);
     world.insert_resource(save.japan);
+    world.insert_resource(save.rescue);
     if let Some(mut input) = world.get_resource_mut::<MoveInput>() {
         *input = MoveInput::default();
     }
@@ -770,6 +787,7 @@ mod tests {
             map: MapProgress::default(),
             remnants: crate::remnant::RemnantState::default(),
             japan: crate::japan::JapanState::default(),
+            rescue: crate::rescue::RescueState::default(),
         }
     }
 
