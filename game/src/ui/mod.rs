@@ -117,7 +117,8 @@ impl Plugin for FlowUiPlugin {
         app.add_systems(
             PostUpdate,
             (shelter::render_panels, title::render, settings::render)
-                .before(bevy::ui::UiSystems::Prepare),
+                .before(bevy::ui::UiSystems::Prepare)
+                .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         );
     }
 }

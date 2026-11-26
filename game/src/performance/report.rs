@@ -151,6 +151,25 @@ impl Capture {
         }
         self.interrupted = true;
     }
+    /// Arming from a paused menu can precede gameplay by minutes. The report's
+    /// start observations must describe the first measured frame after warmup,
+    /// including any rotation/settings changes made before resuming.
+    pub fn begin_sampling(
+        &mut self,
+        device: &DeviceSnapshot,
+        dimensions: RenderDimensions,
+        effective: &EffectivePerformance,
+        preferences: PerformancePreferences,
+    ) {
+        if !self.frames.is_empty() {
+            return;
+        }
+        self.device = device.clone();
+        self.dimensions = dimensions;
+        self.effective = effective.clone();
+        self.last_effective = effective.clone();
+        self.preferences = preferences;
+    }
     pub fn observe(&mut self, sample: FrameSample, effective: &EffectivePerformance) {
         self.interrupted = false;
         if self.warmup_seconds < WARMUP_SECONDS {

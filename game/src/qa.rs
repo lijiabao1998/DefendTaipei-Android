@@ -443,6 +443,12 @@ struct CaptureTicket {
     name: String,
     path: PathBuf,
     size: [u32; 2],
+    settings_pixels: Option<SettingsPixels>,
+}
+
+struct SettingsPixels {
+    panel: Vec<[u32; 2]>,
+    selected_border: Vec<[u32; 2]>,
 }
 
 pub struct QaPlugin;
@@ -1630,6 +1636,10 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     if matches!(stage.action, Action::Continue) && !run.continuation_checked {
         check_continuation(world, run)?;
     }
+    // State alone is insufficient: a repeatedly rebuilt subtree can have
+    // open=true while its extracted UI is blank. Check real layout/visibility,
+    // then also verify opaque panel and selected-control pixels after readback.
+    let settings_pixels = settings_pixels(world, stage.size)?;
     let image = run.target.clone().ok_or("No render target")?;
     world
         .spawn((
@@ -1638,11 +1648,83 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 name: stage.name.into(),
                 path: run.output.join(format!("{}.png", stage.name)),
                 size: stage.size,
+                settings_pixels,
             },
         ))
         .observe(capture_finished);
     run.waiting_capture = true;
     Ok(())
+}
+
+fn settings_pixels(world: &mut World, size: [u32; 2]) -> Result<Option<SettingsPixels>, String> {
+    use crate::ui::settings::{PerformanceSection, SettingsPage, SettingsRoot, SettingsUi};
+    let settings = world.resource::<SettingsUi>();
+    if !settings.open {
+        return Ok(None);
+    }
+    let page = settings.page;
+    let section = settings.performance_section;
+    let profile = world
+        .resource::<crate::performance::PerformancePreferences>()
+        .profile;
+    let presentation = world
+        .query_filtered::<Entity, With<crate::performance::render::PresentationCamera>>()
+        .single(world)
+        .map_err(|_| "Missing unique UI presentation camera")?;
+    let mut roots = world.query_filtered::<(
+        &InheritedVisibility,
+        &ComputedNode,
+        &ComputedUiTargetCamera,
+        &Children,
+    ), With<SettingsRoot>>();
+    let (visibility, node, target, children) = roots
+        .single(world)
+        .map_err(|_| "Open settings did not have exactly one rendered root")?;
+    if !visibility.get()
+        || node
+            .size()
+            .distance(Vec2::new(size[0] as f32, size[1] as f32))
+            > 1.0
+        || target.get() != Some(presentation)
+        || children.len() < 6
+    {
+        return Err(format!(
+            "Open settings root was not visible, laid out at full viewport, or attached to presentation camera: visible={} size={:?} children={}",
+            visibility.get(),
+            node.size(),
+            children.len()
+        ));
+    }
+    let layout = crate::ui::settings::settings_layout(Vec2::new(size[0] as f32, size[1] as f32));
+    let selected = match page {
+        SettingsPage::Audio => layout.tabs[0],
+        SettingsPage::Game => layout.tabs[1],
+        SettingsPage::Performance if section == PerformanceSection::Diagnostics => {
+            layout.performance_sections[1]
+        }
+        SettingsPage::Performance => {
+            layout.profiles[match profile {
+                crate::performance::PerformanceProfile::Auto => 0,
+                crate::performance::PerformanceProfile::Battery => 1,
+                crate::performance::PerformanceProfile::Balanced => 2,
+                crate::performance::PerformanceProfile::Quality => 3,
+            }]
+        }
+    };
+    let mut panel = Vec::with_capacity(6);
+    let mut selected_border = Vec::with_capacity(6);
+    for fraction in [0.25, 0.5, 0.75] {
+        let y = (layout.frame.min.y + layout.frame.height() * fraction).round() as u32;
+        panel.push([(layout.frame.min.x + 4.0).round() as u32, y]);
+        panel.push([(layout.frame.max.x - 4.0).round() as u32, y]);
+        let x = (selected.min.x + selected.width() * fraction).round() as u32;
+        selected_border.push([x, selected.min.y.ceil() as u32]);
+        selected_border.push([x, selected.max.y.ceil() as u32 - 1]);
+    }
+    Ok(Some(SettingsPixels {
+        panel,
+        selected_border,
+    }))
 }
 
 fn capture_finished(
@@ -1662,6 +1744,29 @@ fn capture_finished(
             .to_rgba8();
         if image.width() != ticket.size[0] || image.height() != ticket.size[1] {
             return Err(format!("{} has unexpected dimensions", ticket.name));
+        }
+        if let Some(probes) = &ticket.settings_pixels {
+            let matches = |point: [u32; 2], expected: [u8; 3], tolerance: u8| {
+                let pixel = image.get_pixel(point[0], point[1]).0;
+                (0..3).all(|channel| pixel[channel].abs_diff(expected[channel]) <= tolerance)
+            };
+            // These clear interior margins and straight selected-button edges
+            // distinguish a real settings overlay from its underlying title.
+            // Merely counting colors accepted the wrong screen in this bug.
+            if !probes
+                .panel
+                .iter()
+                .all(|point| matches(*point, [15, 19, 18], 2))
+                || !probes
+                    .selected_border
+                    .iter()
+                    .all(|point| matches(*point, [209, 173, 102], 8))
+            {
+                return Err(format!(
+                    "{}: captured pixels do not contain the opaque settings panel and selected control border",
+                    ticket.name
+                ));
+            }
         }
         let colors: HashSet<_> = image
             .pixels()

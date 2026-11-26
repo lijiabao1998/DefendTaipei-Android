@@ -464,6 +464,9 @@ fn observe(
     }
     if let Some(capture) = telemetry.capture.as_mut() {
         let started = capture.warmup_seconds >= WARMUP_SECONDS;
+        if started && capture.frames.is_empty() {
+            capture.begin_sampling(&device, *dimensions, &effective, *preferences);
+        }
         capture.observe(sample, &effective);
         if !started && capture.warmup_seconds >= WARMUP_SECONDS {
             println!("DTPERFORMANCE capture=recording");

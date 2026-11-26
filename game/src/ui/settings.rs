@@ -68,15 +68,20 @@ pub(crate) enum SettingsAction {
     Reset,
 }
 #[derive(Component)]
-pub(super) struct SettingsRoot;
+pub(crate) struct SettingsRoot;
+#[derive(Component, Clone, Copy)]
+pub(super) enum PerformanceLiveText {
+    Summary,
+    Report,
+}
 #[derive(Clone, PartialEq)]
 struct RenderKey {
     viewport: Vec2,
     page: SettingsPage,
     performance_section: PerformanceSection,
     performance: PerformancePreferences,
-    performance_revision: u64,
-    capture_seconds: u16,
+    capture_active: bool,
+    report_available: bool,
     audio: AudioSettings,
     day_hours: u8,
     active_day_hours: Option<u8>,
@@ -707,6 +712,7 @@ pub(super) fn render(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cache: ResMut<SettingsCache>,
     roots: Query<Entity, With<SettingsRoot>>,
+    mut live_texts: Query<(&PerformanceLiveText, &mut Text)>,
 ) {
     if !state.open {
         for entity in &roots {
@@ -723,20 +729,16 @@ pub(super) fn render(
         page: state.page,
         performance_section: state.performance_section,
         performance: *performance,
-        performance_revision: if state.page == SettingsPage::Performance {
-            performance_status
+        capture_active: state.page == SettingsPage::Performance
+            && state.performance_section == PerformanceSection::Diagnostics
+            && performance_status
                 .as_ref()
-                .map_or(0, |status| status.revision)
-        } else {
-            0
-        },
-        capture_seconds: if state.page == SettingsPage::Performance {
-            performance_status
+                .is_some_and(|status| status.capture_active),
+        report_available: state.page == SettingsPage::Performance
+            && state.performance_section == PerformanceSection::Diagnostics
+            && performance_status
                 .as_ref()
-                .map_or(0, |status| status.capture_seconds.max(0.0) as u16)
-        } else {
-            0
-        },
+                .is_some_and(|status| status.report_available),
         audio: *audio,
         day_hours: preferences.day_hours,
         active_day_hours: if flow.get() == &GameFlow::Playing {
@@ -748,6 +750,28 @@ pub(super) fn render(
         error: status.error.clone(),
         saved: status.saved,
     };
+    // Telemetry can update every render interval on a slow GPU. Keep the
+    // visible subtree stable: replacing it for each revision can leave newly
+    // spawned nodes without a renderable layout/visibility for that frame.
+    if state.page == SettingsPage::Performance
+        && state.performance_section == PerformanceSection::Diagnostics
+    {
+        for (kind, mut text) in &mut live_texts {
+            let next = match kind {
+                PerformanceLiveText::Summary => {
+                    performance_summary(performance_status.as_deref(), *language).to_owned()
+                }
+                PerformanceLiveText::Report => performance_report_text(
+                    performance_status.as_deref(),
+                    flow.get() == &GameFlow::Playing,
+                    *language,
+                ),
+            };
+            if text.0 != next {
+                text.0 = next;
+            }
+        }
+    }
     if cache.0.as_ref() == Some(&key) && !roots.is_empty() {
         return;
     }
@@ -908,21 +932,14 @@ fn render_performance(
         );
         return;
     }
-    let summary = status
-        .map(|status| status.summary.as_str())
-        .filter(|text| !text.is_empty())
-        .unwrap_or(tr(
-            lang,
-            "正在讀取裝置與執行狀態…",
-            "Reading device and runtime status…",
-        ));
-    bounded_label(
+    bounded_live_label(
         root,
         layout.performance_summary,
-        summary,
+        performance_summary(status, lang),
         if short { 10.0 } else { 12.0 },
         PAPER,
         font,
+        PerformanceLiveText::Summary,
     );
     button_sized(
         root,
@@ -964,9 +981,39 @@ fn render_performance(
         layout.performance_overlay.width(),
         (layout.status.min.y - layout.capture.max.y - 10.0).max(14.0),
     );
-    let text = if active {
+    bounded_live_label(
+        root,
+        bottom,
+        &performance_report_text(status, playing, lang),
+        if short { 9.0 } else { 11.0 },
+        MUTED,
+        font,
+        PerformanceLiveText::Report,
+    );
+}
+
+fn performance_summary(status: Option<&PerformanceStatus>, lang: Language) -> &str {
+    status
+        .map(|status| status.summary.as_str())
+        .filter(|text| !text.is_empty())
+        .unwrap_or(tr(
+            lang,
+            "正在讀取裝置與執行狀態…",
+            "Reading device and runtime status…",
+        ))
+}
+
+fn performance_report_text(
+    status: Option<&PerformanceStatus>,
+    playing: bool,
+    lang: Language,
+) -> String {
+    if let Some(status) = status.filter(|status| !status.report_status.is_empty()) {
+        return status.report_status.clone();
+    }
+    if status.is_some_and(|status| status.capture_active) {
         let seconds = status.map_or(0.0, |status| status.capture_seconds).max(0.0);
-        format!(
+        return format!(
             "{} {:.0}/60 s. {}",
             tr(lang, "已採樣", "Captured"),
             seconds,
@@ -975,22 +1022,13 @@ fn render_performance(
                 "關閉設定並繼續遊戲。",
                 "Close settings and resume play."
             )
-        )
-    } else if let Some(status) = status.filter(|status| !status.report_status.is_empty()) {
-        status.report_status.clone()
-    } else if !playing {
+        );
+    }
+    if !playing {
         tr(lang, "進入遊戲後可記錄。暖機 5 秒，再採樣 60 秒；暫停、設定及背景不計時。", "Enter a game to record. Warm-up: 5 s, capture: 60 s. Pauses, settings and background time are excluded.").to_owned()
     } else {
         tr(lang, "暖機 5 秒，再記錄 60 秒實際遊玩；暫停及背景不計時。報告留在裝置內。", "5 s warm-up, then 60 s of actual play; pauses and background time are excluded. Reports stay on this device.").to_owned()
-    };
-    bounded_label(
-        root,
-        bottom,
-        &text,
-        if short { 9.0 } else { 11.0 },
-        MUTED,
-        font,
-    );
+    }
 }
 
 fn node(r: ScreenRect) -> Node {
@@ -1026,12 +1064,34 @@ fn bounded_label(
     color: Color,
     font: &UiFont,
 ) {
+    bounded_paragraph(root, r, text, size, color, font, None);
+}
+fn bounded_live_label(
+    root: &mut ChildSpawnerCommands,
+    r: ScreenRect,
+    text: &str,
+    size: f32,
+    color: Color,
+    font: &UiFont,
+    kind: PerformanceLiveText,
+) {
+    bounded_paragraph(root, r, text, size, color, font, Some(kind));
+}
+fn bounded_paragraph(
+    root: &mut ChildSpawnerCommands,
+    r: ScreenRect,
+    text: &str,
+    size: f32,
+    color: Color,
+    font: &UiFont,
+    live: Option<PerformanceLiveText>,
+) {
     root.spawn((Node {
         overflow: Overflow::clip(),
         ..node(r)
     },))
         .with_children(|parent| {
-            parent.spawn((
+            let mut text = parent.spawn((
                 Node {
                     width: percent(100.0),
                     ..default()
@@ -1041,6 +1101,9 @@ fn bounded_label(
                 TextFont::from_font_size(FontSize::Px(size)).with_font(font.0.clone()),
                 TextColor(color),
             ));
+            if let Some(kind) = live {
+                text.insert(kind);
+            }
         });
 }
 fn button(root: &mut ChildSpawnerCommands, r: ScreenRect, text: &str, color: Color, font: &UiFont) {
@@ -1391,6 +1454,64 @@ mod tests {
             Some(PerformanceAction::ExportReport)
         ));
         assert!(app.world().resource::<PauseOpen>().0);
+    }
+    #[test]
+    fn telemetry_refresh_keeps_performance_root_and_children_alive() {
+        let (mut app, window) = input_app();
+        app.init_resource::<UiFont>()
+            .init_resource::<SettingsStatus>()
+            .init_resource::<SettingsCache>()
+            .add_systems(PostUpdate, render);
+        for (section, size) in [
+            (PerformanceSection::Display, [800.0, 360.0]),
+            (PerformanceSection::Diagnostics, [390.0, 844.0]),
+        ] {
+            app.world_mut()
+                .get_mut::<Window>(window)
+                .unwrap()
+                .resolution
+                .set(size[0], size[1]);
+            app.world_mut().resource_mut::<SettingsUi>().page = SettingsPage::Performance;
+            app.world_mut()
+                .resource_mut::<SettingsUi>()
+                .performance_section = section;
+            app.update();
+            let root = app
+                .world_mut()
+                .query_filtered::<Entity, With<SettingsRoot>>()
+                .single(app.world())
+                .unwrap();
+            let child_count = app.world().get::<Children>(root).unwrap().len();
+            let entity_count = app.world().entities().len();
+            for revision in 1..=10 {
+                {
+                    let mut status = app.world_mut().resource_mut::<PerformanceStatus>();
+                    status.revision = revision;
+                    status.summary = format!("live summary {revision}");
+                    status.report_status = format!("live report {revision}");
+                    status.capture_seconds = revision as f32;
+                }
+                app.update();
+                assert!(
+                    app.world().get::<SettingsRoot>(root).is_some(),
+                    "{section:?}: telemetry replaced visible settings root"
+                );
+                assert_eq!(
+                    app.world().get::<Children>(root).unwrap().len(),
+                    child_count
+                );
+                assert_eq!(app.world().entities().len(), entity_count);
+            }
+            if section == PerformanceSection::Diagnostics {
+                let mut query = app.world_mut().query::<(&PerformanceLiveText, &Text)>();
+                let values: Vec<_> = query
+                    .iter(app.world())
+                    .map(|(_, text)| text.0.clone())
+                    .collect();
+                assert!(values.iter().any(|text| text == "live summary 10"));
+                assert!(values.iter().any(|text| text == "live report 10"));
+            }
+        }
     }
     #[test]
     fn controls_fit_both_orientations() {

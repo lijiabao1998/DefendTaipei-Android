@@ -489,6 +489,34 @@ mod tests {
     }
 
     #[test]
+    fn slow_observed_frames_recover_only_after_thirty_updates_since_the_last_gap() {
+        // 0 marks an explicit lifecycle interruption; >5 s is an unobserved
+        // long stall. Neither may reuse cooling credit from before that gap.
+        for gap in [0.0, 5.1] {
+            let mut latch = ThermalRecovery::default();
+            thermal_step(&mut latch, &thermal_device(3, 1.1), 0.0);
+            let cool = thermal_device(0, 0.5);
+            for _ in 0..14 {
+                assert_eq!(thermal_step(&mut latch, &cool, 1.2).target_fps, 30);
+            }
+            assert_eq!(thermal_step(&mut latch, &cool, gap).target_fps, 30);
+            for update in 1..=30 {
+                let next = thermal_step(&mut latch, &cool, 1.2);
+                let expected = match update {
+                    1..=14 => (30, 70),
+                    15..=29 => (60, 85),
+                    _ => (120, 100),
+                };
+                assert_eq!(
+                    (next.target_fps, next.render_scale),
+                    expected,
+                    "gap={gap}, observed update={update}",
+                );
+            }
+        }
+    }
+
+    #[test]
     fn first_android_auto_pressure_step_reduces_actual_resolution() {
         let device = DeviceSnapshot::default();
         let initial = resolve(PerformancePreferences::default(), &device, 0, true);
