@@ -929,8 +929,9 @@ fn render_briefing(
                 key.day_hours
             ),
             Language::En => format!(
-                "One day = {} real hour(s) at 1×.\nBring supplies back to your shelter.",
-                key.day_hours
+                "One day = {} real {} at 1×.\nBring supplies back to your shelter.",
+                key.day_hours,
+                if key.day_hours == 1 { "hour" } else { "hours" }
             ),
         },
         if short { 11.0 } else { 14.0 },

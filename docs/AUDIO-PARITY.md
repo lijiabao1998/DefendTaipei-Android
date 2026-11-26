@@ -37,6 +37,8 @@ The isolated PCM harness inserts AudioScheduleControl with automatic=false. This
 
 Recording starts only after at least half a second of actual PCM and a later advancing buffer are observed; a monitor that never streams fails a bounded startup wait. The native output fixtures record real scene-start, transition and finish timestamps. Live mute, pause and window-focus loss require audible PCM before the transition and silence afterward; resume requires the inverse. Analysis windows remain within the actual scene across the bounded monitor-clock uncertainty, independent of application teardown. These windows verify routing and lifecycle output, not hardware latency.
 
+The Android emulator uses an explicit authenticated local PulseAudio server and dedicated sink for both QEMU playback and capture. A host preflight checks the actual emulator process's playback stream and sink routing after launch; a missing or muted route fails before the longer gameplay checks. Nine later PCM captures still independently require the expected audible or silent output after real settings touches, including cold restart. Host connection metadata cannot satisfy those audio assertions.
+
 Pure/ECS regressions cover settings sanitization, distance limits, actual-motion steps, siren windows, lifecycle admission, blackout/evening boundaries, rain routing, sample/fallback selection, sinkless lifetime cleanup and duplicate-siren prevention. The release should cite the concrete PCM/Android results for its exact commit; this document does not predeclare those outcomes.
 
 ## Remaining differences

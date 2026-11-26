@@ -534,8 +534,8 @@ pub(super) fn render(
             label(root,ScreenRect::new(l.languages[0].min.x,l.languages[0].min.y-21.0,l.frame.width()-24.0,18.0),tr(lang,"介面語言","Interface language"),13.0,PAPER,&font);
             button(root,l.languages[0],"繁體中文",if lang==Language::ZhTw{GOLD}else{MUTED},&font);button(root,l.languages[1],"English",if lang==Language::En{GOLD}else{MUTED},&font);
             label(root,ScreenRect::new(l.durations[0].min.x,l.durations[0].min.y-22.0,l.frame.width()-24.0,20.0),tr(lang,"新遊戲：一天的現實時間（1×）","New run: real hours per day (1×)"),13.0,PAPER,&font);
-            for(i,hours)in [1,2,4].iter().enumerate(){button(root,l.durations[i],&format!("{} {}",hours,tr(lang,"小時","hours")),if preferences.day_hours==*hours{GOLD}else{MUTED},&font);}
-            let text=if let Some(hours)=key.active_day_hours {format!("{} {} {}。{}",tr(lang,"本局維持","This run keeps"),hours,tr(lang,"小時","hours"),tr(lang,"下次出發時套用新設定。","The new value applies on your next departure."))}else{tr(lang,"日長只在開始新局時套用，繼續遊戲保留原設定。","Day length applies when starting a new run. Continue keeps the saved value.").to_owned()};
+            for(i,hours)in [1,2,4].iter().enumerate(){button(root,l.durations[i],&format!("{} {}",hours,tr(lang,"小時",if *hours==1{"hour"}else{"hours"})),if preferences.day_hours==*hours{GOLD}else{MUTED},&font);}
+            let text=if let Some(hours)=key.active_day_hours {format!("{} {} {}。{}",tr(lang,"本局維持","This run keeps"),hours,tr(lang,"小時",if hours==1{"hour"}else{"hours"}),tr(lang,"下次出發時套用新設定。","The new value applies on your next departure."))}else{tr(lang,"日長只在開始新局時套用，繼續遊戲保留原設定。","Day length applies when starting a new run. Continue keeps the saved value.").to_owned()};
             label(root,l.detail,&text,if short{10.0}else{13.0},MUTED,&font);
         }
         label(root,l.status,if status.error.is_some(){tr(lang,"設定未能儲存，請稍後重試。","Preferences could not be saved. Please retry.")}else if status.saved{tr(lang,"設定已儲存。","Preferences saved.")}else{tr(lang,"音量即時套用，設定自動儲存。","Audio updates now. Changes save automatically.")},if short{10.0}else{11.0},if status.error.is_some(){Color::srgb(1.0,0.55,0.42)}else{MUTED},&font);
