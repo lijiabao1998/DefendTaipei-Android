@@ -149,10 +149,79 @@ class AudioCaptureTests(unittest.TestCase):
                 self.assertTrue(capture.raw_path.exists())
                 self.assertFalse(capture.raw_path.with_suffix(".wav").exists())
 
+    def fake_monitor(self, byte_count, dead_after=None):
+        capture = audio.AudioCapture(self.directory, existing_sink="unused-unit-test-sink")
+        elapsed = [0.0]
+        recorder = mock.Mock(spec=["poll", "send_signal", "wait", "kill"])
+        recorder.poll.side_effect = lambda: (
+            2 if dead_after is not None and elapsed[0] >= dead_after else None)
+        recorder.wait.return_value = 0
+
+        def advance(seconds):
+            self.assertLessEqual(seconds, 0.05)
+            elapsed[0] += seconds
+            capture.raw_file.truncate(byte_count(elapsed[0]))
+
+        spawn = self.enterContext(mock.patch.object(audio.subprocess, "Popen", return_value=recorder))
+        self.enterContext(mock.patch.object(audio.time, "monotonic", side_effect=lambda: 50.0 + elapsed[0]))
+        self.enterContext(mock.patch.object(audio.time, "time", side_effect=lambda: 1000.0 + elapsed[0]))
+        self.enterContext(mock.patch.object(audio.time, "sleep", side_effect=advance))
+        self.addCleanup(capture._close_files)
+        return capture, recorder, spawn
+
+    def test_start_waits_for_advancing_silence_and_calibrates_the_pcm_clock(self):
+        capture, recorder, _ = self.fake_monitor(
+            lambda elapsed: max(0, round((elapsed - 2.0) * 48_000)) * 4)
+        capture.start("delayed-stream")
+        self.assertGreater(capture.startup_seconds, 2.5)
+        self.assertLess(capture.startup_seconds, 2.7)
+        self.assertGreater(capture.warmup_pcm_seconds, 0.5)
+        self.assertAlmostEqual(capture.started_unix, 1002.0, places=5)
+        self.assertAlmostEqual(capture.started_monotonic, 52.0, places=5)
+        self.assertAlmostEqual(capture.warmup_unix - capture.started_unix,
+                               capture.warmup_pcm_seconds)
+        self.assertAlmostEqual(capture.warmup_monotonic - capture.started_monotonic,
+                               capture.warmup_pcm_seconds)
+        self.assertEqual(audio.measure_pcm(capture.raw_path)["nonzero_samples"], 0)
+        recorder.kill.assert_not_called()
+
+    def test_start_rejects_missing_frozen_and_incomplete_frame_only_growth(self):
+        for name, sizes in (
+            ("no-pcm", lambda _: 0),
+            ("frozen", lambda elapsed: 96_000 if elapsed >= 0.1 else 0),
+            ("partial-frame-growth", lambda elapsed: (
+                96_002 if elapsed >= 0.2 else 96_000 if elapsed >= 0.1 else 0)),
+        ):
+            with self.subTest(name=name):
+                capture, recorder, spawn = self.fake_monitor(sizes)
+                with self.assertRaisesRegex(RuntimeError, "advancing PCM within 10 seconds"):
+                    capture.start(name)
+                recorder.kill.assert_called_once()
+                recorder.wait.assert_called_once_with(timeout=5)
+                self.assertIsNone(capture.recorder)
+                self.assertIsNone(capture.started_unix)
+                self.assertIsNone(capture.warmup_unix)
+                self.assertTrue(spawn.call_args.kwargs["stdout"].closed)
+                self.assertTrue(spawn.call_args.kwargs["stderr"].closed)
+
+    def test_start_rejects_a_recorder_that_dies_during_warmup(self):
+        capture, recorder, spawn = self.fake_monitor(lambda _: 0, dead_after=0.2)
+        with self.assertRaisesRegex(RuntimeError, "monitor failed to start"):
+            capture.start("dead-during-warmup")
+        self.assertIsNone(capture.recorder)
+        self.assertIsNone(capture.started_unix)
+        self.assertIsNone(capture.warmup_unix)
+        self.assertTrue(spawn.call_args.kwargs["stdout"].closed)
+        self.assertTrue(spawn.call_args.kwargs["stderr"].closed)
+        recorder.kill.assert_not_called()
+
     def timed_scene(self):
         capture = audio.AudioCapture(self.directory, existing_sink="unused-unit-test-sink")
         capture.started_unix = 1000.0
         capture.started_monotonic = 50.0
+        capture.warmup_unix = 1000.5
+        capture.warmup_monotonic = 50.5
+        capture.warmup_pcm_seconds = 0.5
         scene = {"scenario": "resume", "started_unix_seconds": 1001.0,
                  "transition_unix_seconds": 1002.5, "finished_unix_seconds": 1005.5,
                  "runtime_seconds": 4.5}

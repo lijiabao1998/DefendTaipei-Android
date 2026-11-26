@@ -74,6 +74,10 @@ class AudioCapture:
         self.raw_path: Path | None = None
         self.started_unix: float | None = None
         self.started_monotonic: float | None = None
+        self.warmup_unix: float | None = None
+        self.warmup_monotonic: float | None = None
+        self.warmup_pcm_seconds: float | None = None
+        self.startup_seconds: float | None = None
         self.env = dict(os.environ)
 
     def __enter__(self):
@@ -105,19 +109,43 @@ class AudioCapture:
         if self.recorder is not None:
             raise RuntimeError('Capture already running')
         self.raw_path = self.output / (name + '.pcm')
+        self.started_unix = self.started_monotonic = None
+        self.warmup_unix = self.warmup_monotonic = self.warmup_pcm_seconds = None
+        self.startup_seconds = None
         try:
             self.raw_file = self.raw_path.open('wb')
             self.log_file = (self.output / (name + '-recorder.log')).open('wb')
-            self.started_unix = time.time()
-            self.started_monotonic = time.monotonic()
+            launched = time.monotonic()
+            deadline = launched + 10.0
             self.recorder = subprocess.Popen(
                 ['parec', '--raw', '--format=s16le', f'--rate={RATE}',
                  f'--channels={CHANNELS}', '--latency-msec=30',
                  '--device=' + self.sink + '.monitor'],
                 stdout=self.raw_file, stderr=self.log_file, env=self.env)
-            time.sleep(0.25)
-            if self.recorder.poll() is not None:
-                raise RuntimeError('PulseAudio monitor failed to start')
+            ready_frames = None
+            while True:
+                if self.recorder.poll() is not None:
+                    raise RuntimeError('PulseAudio monitor failed to start')
+                observed_monotonic = time.monotonic()
+                if observed_monotonic >= deadline:
+                    raise RuntimeError('PulseAudio monitor did not produce advancing PCM within 10 seconds')
+                frames = self.raw_path.stat().st_size // (CHANNELS * 2)
+                if ready_frames is not None and frames > ready_frames:
+                    # PulseAudio can take seconds to start streaming silence. Do
+                    # not launch the scene until at least half a second is on
+                    # disk and a later observation proves the stream advances.
+                    observed_unix = time.time()
+                    observed_monotonic = time.monotonic()
+                    self.warmup_pcm_seconds = frames / RATE
+                    self.warmup_unix = observed_unix
+                    self.warmup_monotonic = observed_monotonic
+                    self.started_unix = observed_unix - self.warmup_pcm_seconds
+                    self.started_monotonic = observed_monotonic - self.warmup_pcm_seconds
+                    self.startup_seconds = observed_monotonic - launched
+                    return
+                if frames >= RATE // 2 and ready_frames is None:
+                    ready_frames = frames
+                time.sleep(0.05)
         except BaseException:
             if self.recorder is not None and self.recorder.poll() is None:
                 self.recorder.kill()
@@ -196,25 +224,28 @@ class AudioCapture:
         These checks apply only to native timestamped scenes, not Android or
         unit-test callers of the ordinary stop(expect_audible=...) API.
         """
-        if self.started_unix is None or self.started_monotonic is None:
-            raise ValueError('Timestamped scene requires a timed capture start')
+        if any(value is None for value in (self.started_unix, self.started_monotonic,
+                                          self.warmup_unix, self.warmup_monotonic,
+                                          self.warmup_pcm_seconds)):
+            raise ValueError('Timestamped scene requires an advancing PCM warmup anchor')
         start = float(scene['started_unix_seconds'])
         transition = float(scene['transition_unix_seconds'])
         finish = float(scene['finished_unix_seconds'])
         runtime = float(scene['runtime_seconds'])
         if not all(math.isfinite(v) for v in (start, transition, finish, runtime, seconds)):
             raise ValueError('Nonfinite audio scene timing')
-        if not self.started_unix <= start < transition < finish <= stop_requested + 0.05:
+        if not self.warmup_unix <= start < transition < finish <= stop_requested + 0.05:
             raise ValueError('Scene markers are outside the actual recording')
         if abs((finish - start) - runtime) > 0.05:
             raise ValueError('Scene wall and monotonic clocks disagree')
         if not 0.0 <= stop_finished - stop_requested <= 0.20:
             raise ValueError('Recorder stop timing is too uncertain for phase proof')
-        wall_elapsed = stop_requested - self.started_unix
-        mono_elapsed = stop_monotonic - self.started_monotonic
+        wall_elapsed = stop_requested - self.warmup_unix
+        mono_elapsed = stop_monotonic - self.warmup_monotonic
         if abs(wall_elapsed - mono_elapsed) > 0.05:
             raise ValueError('Capture wall clock changed during the scene')
-        if not -0.20 <= wall_elapsed - seconds <= 1.0:
+        pcm_growth = seconds - self.warmup_pcm_seconds
+        if pcm_growth <= 0.0 or not -0.20 <= wall_elapsed - pcm_growth <= 1.0:
             raise ValueError('Recorded PCM duration disagrees with capture clock')
         origin_low = stop_requested - seconds - 0.10
         origin_high = stop_finished - seconds + 0.10
@@ -234,6 +265,11 @@ class AudioCapture:
                          'scene_finished_unix_seconds': finish,
                          'recorder_stop_requested_unix_seconds': stop_requested,
                          'recorder_stop_finished_unix_seconds': stop_finished,
+                         'recorder_warmup_unix_seconds': self.warmup_unix,
+                         'recorder_warmup_pcm_seconds': self.warmup_pcm_seconds,
+                         'recorder_startup_seconds': self.startup_seconds,
+                         'post_warmup_clock_seconds': wall_elapsed,
+                         'post_warmup_pcm_seconds': pcm_growth,
                          'pcm_origin_unix_bounds': [origin_low, origin_high],
                          'transport_margin_seconds': 0.10,
                          'method': 'Absolute scene markers with bounded PCM clock origin; phase windows trimmed to remain inside the scene'}
