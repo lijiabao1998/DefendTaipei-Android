@@ -145,6 +145,8 @@ pub struct Out {
     pub shot: Option<SolShot>,
     /// Rifle butt landed on the player for this much damage.
     pub melee_dmg: Option<f32>,
+    /// The wind-up reached its contact frame, but the player was out of reach.
+    pub melee_missed: bool,
     /// Just switched to combat: radio for support from here (and make noise).
     pub spotted: Option<Vec2>,
     /// Asked for a "split up and search" callout.
@@ -295,6 +297,8 @@ pub fn tick(s: &mut Soldier, c: &Ctx, rng: &mut Lcg) -> Out {
                         let f = s.dir.cos() * d.x + s.dir.sin() * d.y;
                         if dist < MELEE_REACH && f > 0.2 && c.player.alive {
                             out.melee_dmg = Some(MELEE_DMG_MIN + rnd(rng) * MELEE_DMG_RAND);
+                        } else {
+                            out.melee_missed = true;
                         }
                     } else {
                         s.m_hit = Some(mh);

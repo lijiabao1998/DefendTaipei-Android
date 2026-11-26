@@ -6,6 +6,7 @@
 
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 
+use crate::audio::SfxEvent;
 use crate::game_flow::{Campaign, GameFlow};
 use crate::i18n::{Language, UiFont, tr};
 use crate::input::{ScreenRect, safe_insets};
@@ -1041,6 +1042,7 @@ pub(super) fn drive_panels(
     mut saves: MessageWriter<SaveGame>,
     mut pauses: MessageWriter<TogglePause>,
     map: Option<Res<crate::worldmap::MapOpen>>,
+    mut sound: MessageWriter<SfxEvent>,
 ) {
     let PanelWorld {
         player,
@@ -1152,44 +1154,68 @@ pub(super) fn drive_panels(
         Some(Action::Open(view)) => {
             state.view = Some(view);
             state.page = 0;
+            sound.write(SfxEvent::Ui { confirm: false });
         }
         Some(Action::Close) => {
             if state.view == Some(View::Moral) {
                 world_actions.write(WorldAction::Moral(MoralChoice::Leave));
             }
             state.view = None;
+            sound.write(SfxEvent::Ui { confirm: false });
         }
-        Some(Action::Page(page)) => state.page = page,
+        Some(Action::Page(page)) => {
+            if state.page != page {
+                sound.write(SfxEvent::Ui { confirm: false });
+            }
+            state.page = page;
+        }
         Some(Action::Deposit) => {
             notice.text = match shelter.deposit(&mut inventory, pos) {
-                Ok(_) => tr(
-                    *lang,
-                    "物資放進了存糧。",
-                    "Supplies added to the stockpile.",
-                )
-                .to_owned(),
+                Ok(count) => {
+                    if count > 0 {
+                        sound.write(SfxEvent::Pickup);
+                    }
+                    tr(
+                        *lang,
+                        "物資放進了存糧。",
+                        "Supplies added to the stockpile.",
+                    )
+                    .to_owned()
+                }
                 Err(error) => error.message(*lang).to_owned(),
             }
         }
         Some(Action::Pray) => {
+            let before = shelter.pray_day;
             notice.text = match shelter.pray_at(pos, *lang) {
-                Ok(message) => message,
+                Ok(message) => {
+                    if shelter.pray_day != before {
+                        sound.write(SfxEvent::Ui { confirm: true });
+                    }
+                    message
+                }
                 Err(error) => error.message(*lang).to_owned(),
             }
         }
         Some(Action::Build(upgrade)) => {
             notice.text = match shelter.build(upgrade, &mut inventory, pos) {
-                Ok(()) => format!("{}: {}", upgrade.name(*lang), tr(*lang, "完成", "complete")),
+                Ok(()) => {
+                    sound.write(SfxEvent::Build);
+                    format!("{}: {}", upgrade.name(*lang), tr(*lang, "完成", "complete"))
+                }
                 Err(error) => error.message(*lang).to_owned(),
             }
         }
         Some(Action::Buy(id)) | Some(Action::Sell(id)) => {
             notice.text = match shelter.barter(&mut inventory, &id, buying, pos) {
-                Ok(()) => format!(
-                    "{} {}",
-                    tr(*lang, "交易完成：", "Traded:"),
-                    item_name(&id, *lang)
-                ),
+                Ok(()) => {
+                    sound.write(SfxEvent::Ui { confirm: true });
+                    format!(
+                        "{} {}",
+                        tr(*lang, "交易完成：", "Traded:"),
+                        item_name(&id, *lang)
+                    )
+                }
                 Err(error) => error.message(*lang).to_owned(),
             };
         }
@@ -1538,6 +1564,7 @@ mod tests {
 
     #[test]
     fn shelter_deposit_click_moves_supplies_and_keeps_world_unpaused() {
+        use bevy::ecs::message::{MessageCursor, Messages};
         use bevy::state::app::StatesPlugin;
 
         let mut app = App::new();
@@ -1570,6 +1597,7 @@ mod tests {
             .add_message::<WorldAction>()
             .add_message::<SaveGame>()
             .add_message::<TogglePause>()
+            .add_message::<SfxEvent>()
             .add_systems(Update, drive_panels);
         app.world_mut().spawn((Player, Transform::default()));
         app.world_mut().resource_mut::<Shelter>().home = Some([0.0, 0.0]);
@@ -1600,12 +1628,26 @@ mod tests {
             .resource_mut::<ConsumedPresses>()
             .points
             .push(point);
+        let mut sounds = MessageCursor::<SfxEvent>::default();
         app.update();
+        let emitted: Vec<_> = sounds
+            .read(app.world().resource::<Messages<SfxEvent>>())
+            .copied()
+            .collect();
+        assert!(matches!(emitted.as_slice(), [SfxEvent::Pickup]));
         assert_eq!(app.world().resource::<Inventory>().count("rice"), 0);
         assert_eq!(app.world().resource::<Inventory>().count("plank"), 2);
         assert_eq!(app.world().resource::<Shelter>().stash.count("rice"), 5);
         assert!(app.world().resource::<UiModal>().open);
         assert!(!app.world().resource::<PauseOpen>().0);
+        app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0,
+            "empty deposit cannot replay the success sound"
+        );
     }
     #[test]
     fn journal_only_shows_received_reports_and_survives_campaign_roundtrip() {

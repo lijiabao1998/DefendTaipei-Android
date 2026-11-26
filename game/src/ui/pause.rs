@@ -25,6 +25,9 @@ pub(super) struct ResumeButton;
 pub(super) struct MenuButton;
 
 #[derive(Component)]
+pub(super) struct SettingsButton;
+
+#[derive(Component)]
 pub(super) struct PauseHeading;
 
 #[derive(Component)]
@@ -46,10 +49,22 @@ pub(super) fn drive_pause(
     mut sfx: MessageWriter<SfxEvent>,
     mut save_menu: MessageWriter<SaveAndMenu>,
     existing: Query<Entity, With<PauseRoot>>,
+    mut settings: ResMut<super::settings::SettingsUi>,
+    mut flush: MessageWriter<crate::settings::FlushSettings>,
 ) {
     if !matches!(flow.get(), GameFlow::Playing) {
         toggles.clear();
         close(&mut commands, &mut pause, &existing);
+        return;
+    }
+    if settings.open || settings.captured {
+        if !toggles.is_empty() && settings.open {
+            settings.open = false;
+            settings.captured = true;
+            flush.write(crate::settings::FlushSettings);
+            println!("DTUI action=SettingsClose");
+        }
+        toggles.clear();
         return;
     }
     let viewport = windows
@@ -66,6 +81,10 @@ pub(super) fn drive_pause(
         .points
         .iter()
         .any(|point| layout.menu.contains(*point));
+    let on_settings = consumed
+        .points
+        .iter()
+        .any(|point| layout.settings.contains(*point));
     let mut open = pause.0;
     for _ in toggles.read() {
         open = !open;
@@ -76,11 +95,17 @@ pub(super) fn drive_pause(
         println!("DTUI action=SaveMenu");
         save_menu.write(SaveAndMenu);
     }
+    if open && on_settings {
+        settings.open = true;
+        settings.captured = true;
+        sfx.write(SfxEvent::Ui { confirm: false });
+        println!("DTUI action=SettingsOpen");
+    }
     let changed = open != pause.0;
     pause.0 = open;
     if changed {
         println!("DTUI pause={open}");
-        sfx.write(SfxEvent::Clink { dist: 0.0 });
+        sfx.write(SfxEvent::Ui { confirm: false });
     }
     if open && existing.is_empty() {
         spawn_pause(&mut commands, viewport, &font, *lang);
@@ -143,6 +168,18 @@ pub(super) fn place_pause(
             Without<ResumeButton>,
             Without<PauseSummary>,
             Without<PauseFrame>,
+        ),
+    >,
+    mut setting_buttons: Query<
+        (&mut Node, &mut Text),
+        (
+            With<SettingsButton>,
+            Without<PauseHeading>,
+            Without<ResumeButton>,
+            Without<MenuButton>,
+            Without<PauseSummary>,
+            Without<PauseFrame>,
+            Without<PauseStatus>,
         ),
     >,
     mut status: Query<
@@ -208,6 +245,10 @@ pub(super) fn place_pause(
         if text.0 != next {
             text.0 = next.to_string();
         }
+    }
+    for (mut node, mut text) in &mut setting_buttons {
+        place(&mut node, layout.settings);
+        text.0 = tr(*lang, "設定", "Settings").to_owned();
     }
     for (mut node, mut text) in &mut status {
         place(&mut node, layout.status);
@@ -295,6 +336,12 @@ fn spawn_pause(commands: &mut Commands, viewport: Vec2, font: &UiFont, lang: Lan
                 layout.menu,
                 font,
                 tr(lang, "儲存並返回主選單", "Save and return to menu"),
+            ));
+            parent.spawn(button(
+                SettingsButton,
+                layout.settings,
+                font,
+                tr(lang, "設定", "Settings"),
             ));
             parent.spawn(label(PauseStatus, layout.status, 14.0, font, ""));
         });

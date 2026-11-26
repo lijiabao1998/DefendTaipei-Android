@@ -172,6 +172,7 @@ fn apply_flow(
     mut skips: MessageReader<SkipPrologue>,
     mut deaths: MessageReader<PlayerDied>,
     mut evacs: MessageReader<EvacComplete>,
+    preferences: Option<Res<crate::settings::GamePreferences>>,
 ) {
     for _ in restarts.read() {
         *campaign = Campaign::default();
@@ -183,6 +184,13 @@ fn apply_flow(
     } else if !starts.is_empty() {
         starts.clear();
         *campaign = Campaign::default();
+        campaign.day_hours = preferences.as_ref().map_or(1, |p| {
+            if matches!(p.day_hours, 1 | 2 | 4) {
+                p.day_hours
+            } else {
+                1
+            }
+        });
         campaign.game_min = PROLOGUE_START_MIN;
         resets.write(ResetCombat);
         next.set(GameFlow::Prologue);
@@ -601,6 +609,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn day_length_preference_is_copied_only_when_departing() {
+        let mut app = App::new();
+        app.insert_resource(State::new(GameFlow::Title))
+            .init_resource::<NextState<GameFlow>>()
+            .init_resource::<Campaign>()
+            .insert_resource(crate::settings::GamePreferences { day_hours: 4 })
+            .add_message::<ResetCombat>()
+            .add_message::<StoryAlert>()
+            .add_message::<StartGame>()
+            .add_message::<RestartGame>()
+            .add_message::<SkipPrologue>()
+            .add_message::<PlayerDied>()
+            .add_message::<EvacComplete>()
+            .add_systems(Update, apply_flow);
+        app.world_mut().write_message(StartGame);
+        app.update();
+        assert_eq!(app.world().resource::<Campaign>().day_hours, 4);
+        app.insert_resource(State::new(GameFlow::Playing));
+        app.world_mut()
+            .resource_mut::<crate::settings::GamePreferences>()
+            .day_hours = 1;
+        app.update();
+        assert_eq!(app.world().resource::<Campaign>().day_hours, 4);
+    }
     #[test]
     fn fatal_hit_wins_over_an_evacuation_in_the_same_frame() {
         let mut app = App::new();

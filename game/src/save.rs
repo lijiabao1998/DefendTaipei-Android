@@ -202,6 +202,17 @@ impl SaveFile {
             return Err(SaveError::Invalid("Invalid survival needs"));
         }
         let world = &self.world;
+        let aging = &world.container_aging;
+        if !aging.elapsed_hours.is_finite()
+            || aging.elapsed_hours < 0.0
+            || aging.elapsed_hours > f64::from(campaign.game_min) / 60.0 + 0.001
+            || aging
+                .minute
+                .is_some_and(|minute| !finite_range(minute, 0.0, campaign.game_min))
+            || (aging.minute.is_none() && aging.elapsed_hours != 0.0)
+        {
+            return Err(SaveError::Invalid("Invalid container aging progress"));
+        }
         if world.fixtures_version > 1 {
             return Err(SaveError::Invalid("Unsupported indoor fixtures version"));
         }
@@ -731,6 +742,52 @@ mod tests {
             world: ScavengeState::default(),
             map: MapProgress::default(),
         }
+    }
+
+    #[test]
+    fn container_aging_roundtrip_preserves_clock_backlog_and_rng() {
+        let mut saved = sample();
+        saved.world.container_aging.minute = Some(1800.0);
+        saved.world.container_aging.elapsed_hours = 12.5;
+        saved.world.container_aging.seed = 1234567;
+        saved.validate().unwrap();
+        let decoded: SaveFile =
+            serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded.world.container_aging.minute, Some(1800.0));
+        assert_eq!(decoded.world.container_aging.elapsed_hours, 12.5);
+        assert_eq!(decoded.world.container_aging.seed, 1234567);
+    }
+
+    #[test]
+    fn legacy_save_has_no_retroactive_container_aging() {
+        let mut json = serde_json::to_value(sample()).unwrap();
+        json["world"]
+            .as_object_mut()
+            .unwrap()
+            .remove("container_aging");
+        let decoded: SaveFile = serde_json::from_value(json).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded.world.container_aging.minute, None);
+        assert_eq!(decoded.world.container_aging.elapsed_hours, 0.0);
+    }
+
+    #[test]
+    fn save_rejects_invalid_container_aging_without_touching_live_world() {
+        for minute in [f32::NAN, f32::INFINITY, -1.0, 1800.5] {
+            let mut saved = sample();
+            saved.world.container_aging.minute = Some(minute);
+            assert!(saved.validate().is_err());
+        }
+        for hours in [f64::NAN, f64::INFINITY, -0.01, 31.0] {
+            let mut saved = sample();
+            saved.world.container_aging.minute = Some(1800.0);
+            saved.world.container_aging.elapsed_hours = hours;
+            assert!(saved.validate().is_err());
+        }
+        let mut saved = sample();
+        saved.world.container_aging.elapsed_hours = 1.0;
+        assert!(saved.validate().is_err());
     }
 
     struct TempSlot(PathBuf);

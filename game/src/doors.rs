@@ -451,7 +451,10 @@ fn apply_barricades(
                 env.night,
                 &mut rng.0,
             );
-            sound.write(SfxEvent::Clink { dist: 0.0 });
+            sound.write(SfxEvent::Barricade {
+                remove: !result.added,
+                dist: 0.0,
+            });
             println!(
                 "DTDOOR barricaded={} id={} plank={}",
                 result.added,
@@ -1082,6 +1085,7 @@ mod tests {
     #[test]
     fn barricade_message_updates_save_delta_and_alerts_patrol_without_duplicate_toggle() {
         use crate::combat::{EnemyKind, SolState, Soldier};
+        use bevy::ecs::message::Messages;
         use bevy::state::app::StatesPlugin;
         let (obstacles, id, door) = home();
         let pos = door.p + door.n;
@@ -1113,9 +1117,18 @@ mod tests {
                 vec![],
             )))
             .id();
+        let mut sounds = bevy::ecs::message::MessageCursor::<SfxEvent>::default();
         app.world_mut().write_message(WorldAction::Barricade);
         app.world_mut().write_message(WorldAction::Barricade);
         app.update();
+        let emitted: Vec<_> = sounds
+            .read(app.world().resource::<Messages<SfxEvent>>())
+            .copied()
+            .collect();
+        assert!(matches!(
+            emitted.as_slice(),
+            [SfxEvent::Barricade { remove: false, .. }]
+        ));
         assert_eq!(app.world().resource::<Inventory>().count("plank"), 1);
         assert_eq!(
             app.world().resource::<ScavengeState>().barricaded_doors,
@@ -1133,12 +1146,26 @@ mod tests {
         );
         app.update();
         assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0
+        );
+        assert_eq!(
             app.world().resource::<Inventory>().count("plank"),
             1,
             "a coalesced duplicate must not execute in the next frame"
         );
         app.world_mut().write_message(WorldAction::Barricade);
         app.update();
+        let emitted: Vec<_> = sounds
+            .read(app.world().resource::<Messages<SfxEvent>>())
+            .copied()
+            .collect();
+        assert!(matches!(
+            emitted.as_slice(),
+            [SfxEvent::Barricade { remove: true, .. }]
+        ));
         assert_eq!(app.world().resource::<Inventory>().count("plank"), 2);
         assert!(
             app.world()
@@ -1146,5 +1173,18 @@ mod tests {
                 .barricaded_doors
                 .is_empty()
         );
+        app.world_mut()
+            .resource_mut::<Inventory>()
+            .take("hammer", 1);
+        app.world_mut().write_message(WorldAction::Barricade);
+        app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0,
+            "missing-tool denial must not sound like successful construction"
+        );
+        assert_eq!(app.world().resource::<Inventory>().count("plank"), 2);
     }
 }

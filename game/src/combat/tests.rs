@@ -25,6 +25,7 @@ fn test_app() -> App {
         .add_message::<PlayerHit>()
         .add_message::<Gunshot>()
         .add_message::<Callout>()
+        .add_message::<crate::audio::SfxEvent>()
         .add_message::<ResetCombat>();
     app.world_mut()
         .spawn((Player, Transform::default(), Visibility::default()));
@@ -499,12 +500,19 @@ fn actual_run_consumes_only_the_equipped_guns_carried_ammunition() {
     app.insert_resource(bag).add_systems(Update, player_fire);
     app.world_mut().resource_mut::<WeaponInput>().fire = true;
     let mut shots = MessageCursor::<Gunshot>::default();
+    let mut sounds = MessageCursor::<crate::audio::SfxEvent>::default();
     let mut count = 0;
+    let mut dry = 0;
     for _ in 0..3 {
         step(&mut app, 0.5);
         count += drain(&app, &mut shots).len();
+        dry += drain(&app, &mut sounds)
+            .iter()
+            .filter(|s| matches!(s, crate::audio::SfxEvent::DryFire))
+            .count();
     }
     assert_eq!(count, 2);
+    assert_eq!(dry, 1, "only the actual empty trigger emits the dry click");
     let bag = app.world().resource::<Inventory>();
     assert_eq!(bag.count("a556n"), 0);
     assert_eq!(bag.count("a556"), 9);
@@ -519,17 +527,132 @@ fn empty_pack_is_unarmed_and_melee_lands_at_contact_without_ammo() {
         .add_systems(Update, player_fire);
     let target = hostile(&mut app, Vec2::new(1.0, 0.0));
     app.world_mut().resource_mut::<WeaponInput>().fire = true;
+    let mut sounds = MessageCursor::<crate::audio::SfxEvent>::default();
     step(&mut app, 0.01);
+    assert!(
+        drain(&app, &mut sounds).is_empty(),
+        "no impact at button-down"
+    );
     assert_eq!(app.world().get::<Enemy>(target).unwrap().0.hp, SOLDIER_HP);
     let hud = app.world().resource::<PlayerWeaponState>();
     assert_eq!((hud.weapon, hud.rounds), ("", 0));
     app.world_mut().resource_mut::<WeaponInput>().fire = false;
     step(&mut app, 0.2);
+    let emitted = drain(&app, &mut sounds);
+    assert!(matches!(
+        emitted.as_slice(),
+        [
+            crate::audio::SfxEvent::Swish { heavy: false, .. },
+            crate::audio::SfxEvent::MeleeHit { blunt: true, .. }
+        ]
+    ));
     assert_eq!(
         app.world().get::<Enemy>(target).unwrap().0.hp,
         SOLDIER_HP - 8.0
     );
     assert!(app.world().resource::<Inventory>().stacks().is_empty());
+    step(&mut app, 0.1);
+    assert!(
+        drain(&app, &mut sounds).is_empty(),
+        "contact must not replay"
+    );
+}
+
+#[test]
+fn missed_melee_swishes_without_impact_and_paused_attacks_are_silent() {
+    let mut app = test_app();
+    let mut bag = Inventory::default();
+    bag.add("bat", 1);
+    bag.equipped = "bat".into();
+    app.insert_resource(bag)
+        .init_resource::<crate::ui::PauseOpen>()
+        .add_systems(Update, player_fire);
+    app.world_mut().resource_mut::<WeaponInput>().fire = true;
+    app.world_mut().resource_mut::<crate::ui::PauseOpen>().0 = true;
+    let mut sounds = MessageCursor::<crate::audio::SfxEvent>::default();
+    step(&mut app, 0.2);
+    assert!(drain(&app, &mut sounds).is_empty());
+    app.world_mut().resource_mut::<crate::ui::PauseOpen>().0 = false;
+    step(&mut app, 0.01);
+    assert!(drain(&app, &mut sounds).is_empty());
+    app.world_mut().resource_mut::<WeaponInput>().fire = false;
+    step(&mut app, 0.5);
+    assert!(matches!(
+        drain(&app, &mut sounds).as_slice(),
+        [crate::audio::SfxEvent::Swish { heavy: true, .. }]
+    ));
+}
+
+#[test]
+fn gun_roof_acoustics_check_both_ends_and_player_captions_are_not_radio() {
+    use super::world::Aabb2;
+    use crate::audio::SfxEvent;
+    let mut app = test_app();
+    app.world_mut()
+        .resource_mut::<CombatWorldRes>()
+        .set(ObstacleWorld(vec![Aabb2 {
+            min: Vec2::new(29.0, 39.0),
+            max: Vec2::new(31.0, 41.0),
+            height: 3.0,
+        }]));
+    app.add_systems(Update, super::sfx::combat_sfx);
+    let mut sounds = MessageCursor::<SfxEvent>::default();
+    app.world_mut().write_message(Gunshot {
+        pos: Vec3::new(30.0, 1.4, 40.0),
+        by_player: false,
+        fam: super::tuning::GunFam::Rifle,
+    });
+    app.world_mut().write_message(Callout {
+        pos: Vec3::ZERO,
+        text: "Out of ammunition",
+        audible: false,
+    });
+    step(&mut app, 0.016);
+    assert!(matches!(
+        drain(&app, &mut sounds).as_slice(),
+        [SfxEvent::Gunshot { indoor: true, .. }]
+    ));
+    app.world_mut()
+        .resource_mut::<CombatWorldRes>()
+        .set(ObstacleWorld(vec![Aabb2 {
+            min: Vec2::splat(-1.0),
+            max: Vec2::splat(1.0),
+            height: 3.0,
+        }]));
+    app.world_mut().write_message(Gunshot {
+        pos: Vec3::new(30.0, 1.4, 40.0),
+        by_player: false,
+        fam: super::tuning::GunFam::Rifle,
+    });
+    step(&mut app, 0.016);
+    assert!(matches!(
+        drain(&app, &mut sounds).as_slice(),
+        [SfxEvent::Gunshot { indoor: true, .. }]
+    ));
+}
+
+#[test]
+fn dodged_soldier_rifle_butt_emits_one_miss_swing() {
+    use crate::audio::SfxEvent;
+    let mut app = test_app();
+    app.add_systems(Update, soldiers_think);
+    let soldier = soldier_at(&mut app, 9, Vec2::new(2.2, 0.0));
+    {
+        let mut enemy = app.world_mut().get_mut::<Enemy>(soldier).unwrap();
+        enemy.0.state = SolState::Combat;
+        enemy.0.last_seen = Some(Vec2::ZERO);
+        enemy.0.m_hit = Some(0.01);
+        enemy.0.cd = 10.0;
+    }
+    let mut sounds = MessageCursor::<SfxEvent>::default();
+    step(&mut app, 0.02);
+    assert!(matches!(
+        drain(&app, &mut sounds).as_slice(),
+        [SfxEvent::Swish { heavy: true, .. }]
+    ));
+    assert_eq!(app.world().resource::<GameState>().hp, PLAYER_MAX_HP);
+    step(&mut app, 0.02);
+    assert!(drain(&app, &mut sounds).is_empty());
 }
 
 #[test]

@@ -40,6 +40,10 @@ const MAX_STAGE_FRAMES: u32 = 1800;
 #[derive(Clone, Copy)]
 enum Action {
     None,
+    SettingsAudio,
+    SettingsGame,
+    SettingsClose,
+    SettingsPause,
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -102,9 +106,27 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Title,
     },
     Stage {
+        name: "02-settings-audio-portrait",
+        size: [390, 844],
+        action: Action::SettingsAudio,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
+        name: "02-settings-audio-small-landscape",
+        size: [800, 360],
+        action: Action::None,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
+        name: "02-settings-game-portrait",
+        size: [390, 844],
+        action: Action::SettingsGame,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
         name: "02a-title-small-portrait",
         size: [320, 640],
-        action: Action::None,
+        action: Action::SettingsClose,
         flow: ExpectedFlow::Title,
     },
     Stage {
@@ -306,6 +328,12 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "08c-settings-paused-small-landscape",
+        size: [800, 360],
+        action: Action::SettingsPause,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "09-barter-portrait",
         size: [720, 1280],
         action: Action::Trade,
@@ -489,6 +517,15 @@ fn player_position(world: &mut World) -> Result<Vec3, String> {
         .ok_or_else(|| "Player did not spawn".into())
 }
 
+fn reset_and_close_settings(world: &mut World) {
+    use crate::ui::settings::{SettingsAction as A, SettingsPage};
+    world.write_message(A::Page(SettingsPage::Game));
+    world.write_message(A::Reset);
+    world.write_message(A::Page(SettingsPage::Audio));
+    world.write_message(A::Reset);
+    world.write_message(A::Close);
+}
+
 fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), String> {
     set_target(world, run, stage.size)?;
     run.ready_frames = 0;
@@ -498,6 +535,28 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     println!("DTQA entering {}", stage.name);
     match stage.action {
         Action::None => {}
+        Action::SettingsAudio => {
+            use crate::ui::settings::SettingsAction as A;
+            world.write_message(A::Open);
+            for (index, value) in [0.65, 0.6, 0.5, 0.4].into_iter().enumerate() {
+                world.write_message(A::Volume(index, value));
+            }
+        }
+        Action::SettingsGame => {
+            use crate::ui::settings::{SettingsAction as A, SettingsPage};
+            world.write_message(A::Page(SettingsPage::Game));
+            world.write_message(A::DayHours(2));
+            world.write_message(A::Language(crate::i18n::Language::En));
+        }
+        Action::SettingsClose => {
+            reset_and_close_settings(world);
+        }
+        Action::SettingsPause => {
+            use crate::ui::settings::{SettingsAction as A, SettingsPage};
+            world.write_message(A::Open);
+            world.write_message(A::Page(SettingsPage::Game));
+            world.write_message(A::DayHours(4));
+        }
         Action::ChooseSurvivor => {
             world.write_message(TitleAction::NewGame);
         }
@@ -808,7 +867,10 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world.write_message(OpenPanel(PanelKind::Inventory));
         }
         Action::Trade => {
-            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+            reset_and_close_settings(world);
+            // Keep the game paused until the queued settings resets and close
+            // have run. Unpausing here would invalidate the open overlay before
+            // its action handler can apply either reset.
             // Known authored barter location. This fixture avoids turning a UI
             // regression run into several minutes of walking across the map.
             let pos = TRADE_SPOTS[0].pos;
@@ -816,7 +878,7 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             let mut player = query.iter_mut(world).next().ok_or("Player did not spawn")?;
             player.translation.x = pos[0];
             player.translation.z = pos[1];
-            world.write_message(OpenPanel(PanelKind::Trade));
+            // Open after the settings close pointer has cleared modal capture.
         }
         Action::SaveMenu => {
             let position = player_position(world)?;
@@ -1030,10 +1092,10 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // The expanded 39-capture run took 861 seconds on CI's software Vulkan
-    // renderer. Keep every stage and assertion, with room for runner variance.
-    if run.started.elapsed() > Duration::from_secs(1200) {
-        return Err("Visual QA exceeded its 20-minute deadline".into());
+    // Forty-three captures include the new settings views, with room for
+    // software Vulkan runner variance without removing any existing stage.
+    if run.started.elapsed() > Duration::from_secs(1500) {
+        return Err("Visual QA exceeded its 25-minute deadline".into());
     }
     if run.report.renderer.is_empty() {
         fs::create_dir_all(&run.output).map_err(|err| err.to_string())?;
@@ -1062,6 +1124,34 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         enter_stage(world, run, stage)?;
     }
     run.frame += 1;
+    if run.frame == SETTLE_FRAMES / 2 && matches!(stage.action, Action::Trade) {
+        let settings = world.resource::<crate::ui::settings::SettingsUi>();
+        if settings.open
+            || settings.captured
+            || !world.resource::<crate::ui::PauseOpen>().0
+            || world
+                .resource::<crate::settings::GamePreferences>()
+                .day_hours
+                != 1
+            || *world.resource::<crate::audio::AudioSettings>()
+                != crate::audio::AudioSettings::default()
+            || *world.resource::<crate::i18n::Language>() != crate::i18n::Language::ZhTw
+            || world.resource::<Campaign>().day_hours != 1
+            || world
+                .resource::<crate::settings::SettingsStatus>()
+                .error
+                .is_some()
+        {
+            return Err(
+                "Paused settings did not reset both pages and release capture before trade".into(),
+            );
+        }
+        run.report.assertions.push(
+            "Paused settings reset audio, next-run day length and language; closing released capture while preserving pause and the current run".into(),
+        );
+        world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+        world.write_message(OpenPanel(PanelKind::Trade));
+    }
     if run.frame == SETTLE_FRAMES / 2
         && matches!(
             stage.action,
@@ -1247,6 +1337,74 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         }
         run.report.assertions.push(
             "Survivor map opens with real exploration, two annotations and modal input capture"
+                .into(),
+        );
+    }
+    if matches!(
+        stage.action,
+        Action::SettingsAudio
+            | Action::SettingsGame
+            | Action::SettingsClose
+            | Action::SettingsPause
+    ) {
+        use crate::ui::settings::{SettingsPage, SettingsUi};
+        let settings = world.resource::<SettingsUi>();
+        let preferences = world.resource::<crate::settings::GamePreferences>();
+        let audio = world.resource::<crate::audio::AudioSettings>();
+        let correct = match stage.action {
+            Action::SettingsAudio => {
+                settings.open
+                    && settings.page == SettingsPage::Audio
+                    && (audio.master - 0.65).abs() < 0.001
+                    && (audio.effects - 0.6).abs() < 0.001
+                    && (audio.ambience - 0.5).abs() < 0.001
+                    && (audio.radio - 0.4).abs() < 0.001
+            }
+            Action::SettingsGame => {
+                settings.open
+                    && settings.page == SettingsPage::Game
+                    && preferences.day_hours == 2
+                    && *world.resource::<crate::i18n::Language>() == crate::i18n::Language::En
+            }
+            Action::SettingsClose => {
+                !settings.open
+                    && !settings.captured
+                    && preferences.day_hours == 1
+                    && *audio == crate::audio::AudioSettings::default()
+                    && *world.resource::<crate::i18n::Language>() == crate::i18n::Language::ZhTw
+            }
+            Action::SettingsPause => {
+                settings.open
+                    && preferences.day_hours == 4
+                    && world.resource::<Campaign>().day_hours == 1
+                    && world.resource::<crate::ui::PauseOpen>().0
+            }
+            _ => false,
+        };
+        if !correct
+            || world
+                .resource::<crate::settings::SettingsStatus>()
+                .error
+                .is_some()
+        {
+            return Err(format!(
+                "Settings actions, persistence or current-run isolation failed in {}",
+                stage.name
+            ));
+        }
+        run.report.assertions.push(format!("{}: settings actions, independent preferences, modal state and current-run day length verified", stage.name));
+    }
+    if matches!(stage.action, Action::Trade) {
+        let settings = world.resource::<crate::ui::settings::SettingsUi>();
+        if world.resource::<crate::ui::PauseOpen>().0
+            || settings.open
+            || settings.captured
+            || !world.resource::<crate::ui::UiModal>().open
+        {
+            return Err("Deferred trade panel did not open after closing paused settings".into());
+        }
+        run.report.assertions.push(
+            "Deferred trade panel acquired modal input after settings closed and pause was released"
                 .into(),
         );
     }
