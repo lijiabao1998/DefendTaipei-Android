@@ -10,6 +10,7 @@ if [[ $# -ne 1 || ! -f "$1" ]]; then
 fi
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 HELPER="$SCRIPT_DIR/update-android-test-build.py"
+SIGNER_PARSER="$SCRIPT_DIR/../android/test-signing/apksigner_output.py"
 APK=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$1")
 OUT_DIR=$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "${UPDATE_SMOKE_OUT:-emulator-update-smoke}")
 PACKAGE=tw.lijiabao.defendtaipei
@@ -83,24 +84,23 @@ if private == output or output in private.parents:
     raise SystemExit("Private signing directory must be outside UPDATE_SMOKE_OUT.")
 PY_PRIVATE
 
-"$APKSIGNER_BIN" verify --verbose --print-certs "$APK" >"$RUN_DIR/fixed-signer.log" 2>&1
-python3 - "$APK" "$RUN_DIR/fixed-signer.log" "$SCRIPT_DIR/../android/test-signing/certificate.sha256" "$RUN_DIR/evidence.json" "$DEVICE_SERIAL" <<'PY_BASE'
+"$APKSIGNER_BIN" verify --verbose --print-certs-pem "$APK" >"$RUN_DIR/fixed-signer.log" 2>&1
+EXPECTED_SIGNER=$(tr -d '[:space:]' < "$SCRIPT_DIR/../android/test-signing/certificate.sha256")
+FIXED_SIGNER=$(python3 "$SIGNER_PARSER" --expected "$EXPECTED_SIGNER" <"$RUN_DIR/fixed-signer.log")
+python3 - "$APK" "$RUN_DIR/evidence.json" "$DEVICE_SERIAL" "$FIXED_SIGNER" <<'PY_BASE'
 import hashlib
 import json
 from pathlib import Path
-import re
 import sys
 import zipfile
-apk, log, expected_file, output = map(Path, sys.argv[1:5])
-signers = re.findall(r"^Signer #[0-9]+ certificate SHA-256 digest: ([A-Fa-f0-9]{64})\s*$", log.read_text(), re.M)
-expected = expected_file.read_text().strip().lower()
-assert len(signers) == 1 and signers[0].lower() == expected, "Supplied APK does not use the fixed development signer"
+apk, output = map(Path, sys.argv[1:3])
+expected = sys.argv[4]
 with zipfile.ZipFile(apk) as archive:
     assert any(name.startswith("lib/x86_64/") and name.endswith(".so") for name in archive.namelist()), "Expected the x86_64 debug APK"
 output.write_text(json.dumps({
     "test": "Actual disposable-emulator execution of the user-facing ADB update helper",
     "result": "in_progress",
-    "serial": sys.argv[5],
+    "serial": sys.argv[3],
     "package": "tw.lijiabao.defendtaipei",
     "apk_file": apk.name,
     "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
@@ -184,17 +184,17 @@ cp -- "$APK" "$PRIVATE_DIR/alternate-source.apk"
 "$APKSIGNER_BIN" sign --ks "$PRIVATE_DIR/alternate.p12" --ks-key-alias update-smoke \
   --ks-pass "file:$PRIVATE_DIR/password.txt" --out "$PRIVATE_DIR/alternate.apk" \
   "$PRIVATE_DIR/alternate-source.apk" >"$RUN_DIR/alternate-signing.log" 2>&1
-"$APKSIGNER_BIN" verify --verbose --print-certs "$PRIVATE_DIR/alternate.apk" >"$RUN_DIR/alternate-signer.log" 2>&1
-python3 - "$RUN_DIR/alternate-signer.log" "$RUN_DIR/evidence.json" <<'PY_ALTERNATE'
+"$APKSIGNER_BIN" verify --verbose --print-certs-pem "$PRIVATE_DIR/alternate.apk" >"$RUN_DIR/alternate-signer.log" 2>&1
+ALTERNATE_SIGNER=$(python3 "$SIGNER_PARSER" <"$RUN_DIR/alternate-signer.log")
+python3 - "$RUN_DIR/evidence.json" "$ALTERNATE_SIGNER" <<'PY_ALTERNATE'
 import json
 from pathlib import Path
-import re
 import sys
-log, evidence = map(Path, sys.argv[1:])
-signers = re.findall(r"^Signer #[0-9]+ certificate SHA-256 digest: ([A-Fa-f0-9]{64})\s*$", log.read_text(), re.M)
+evidence = Path(sys.argv[1])
+alternate = sys.argv[2]
 record = json.loads(evidence.read_text())
-assert len(signers) == 1 and signers[0].lower() != record["fixed_signer_sha256"], "Alternate signer did not change"
-record["alternate_signer_sha256"] = signers[0].lower()
+assert alternate != record["fixed_signer_sha256"], "Alternate signer did not change"
+record["alternate_signer_sha256"] = alternate
 evidence.write_text(json.dumps(record, indent=2) + "\n")
 PY_ALTERNATE
 

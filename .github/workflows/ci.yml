@@ -46,8 +46,8 @@ jobs:
       - name: Gradle retry behavior
         run: bash scripts/test-gradle-assemble.sh
 
-      - name: Android save-preserving update helper
-        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_android_update.py' -v
+      - name: Android update and signature helpers
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

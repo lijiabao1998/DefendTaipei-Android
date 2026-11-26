@@ -89,7 +89,7 @@ The shared Rust library is packaged with Android GameActivity. The activity foll
 ```sh
 cargo fmt --all -- --check
 bash scripts/test-gradle-assemble.sh
-python3 -m unittest discover -s scripts/tests -p 'test_android_update.py' -v
+python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 CARGO_PROFILE_DEV_DEBUG=0 cargo clippy --workspace --all-targets -- -D warnings
 CARGO_PROFILE_DEV_DEBUG=0 cargo test -p defend_taipei --lib
 ```

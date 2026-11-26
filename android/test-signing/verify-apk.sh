@@ -24,14 +24,10 @@ if [[ -z "$apksigner_bin" || ! -x "$apksigner_bin" ]]; then
   printf 'apksigner is required; set APKSIGNER or ANDROID_SDK_ROOT.\n' >&2
   exit 2
 fi
-verification=$("$apksigner_bin" verify --verbose --print-certs "$apk")
-python3 -c '
-import re, sys
-expected, output = sys.argv[1:]
-if not re.fullmatch(r"[a-f0-9]{64}", expected):
-    raise SystemExit("Invalid checked-in development certificate fingerprint")
-actual = re.findall(r"^Signer #[0-9]+ certificate SHA-256 digest: ([A-Fa-f0-9]{64})\s*$", output, re.M)
-if len(actual) != 1 or actual[0].lower() != expected:
-    raise SystemExit("APK does not have the single expected public development signer: " + str(actual))
-print("APK development signer verified: " + expected)
-' "$expected" "$verification"
+if ! verification=$("$apksigner_bin" verify --verbose --print-certs-pem "$apk" 2>&1); then
+  printf 'apksigner verification failed; public verification output:\n%s\n' "$verification" >&2
+  exit 1
+fi
+actual=$(printf '%s\n' "$verification" |
+  python3 "$fixture_dir/apksigner_output.py" --expected "$expected")
+printf 'APK development signer verified: %s\n' "$actual"

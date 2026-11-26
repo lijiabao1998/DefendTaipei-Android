@@ -61,12 +61,23 @@ the x86_64 emulator artifact:
 bash android/test-signing/verify-apk.sh path/to/app-debug.apk
 ```
 
-The gate runs Android SDK `apksigner verify --verbose --print-certs`, requires
-verification success and exactly one signer with the committed certificate
-fingerprint. It examines the actual artifact, so an accidental return to a
-runner's generated debug keystore fails the gate. It does not sign or modify the
-APK. `APKSIGNER`, `PATH`, `ANDROID_SDK_ROOT` and `ANDROID_HOME` are supported lookup
-locations.
+The gate runs Android SDK `apksigner verify --verbose --print-certs-pem`, requires
+verification success and hashes the actual X.509 DER certificate with SHA-256.
+The shared `apksigner_output.py` parser requires the committed certificate
+identity; repeated copies across signature schemes are allowed, while different
+certificates or multiple reported signers fail. Distinct source-stamp certificates
+also fail closed because these development APKs do not use source stamps or key
+rotation. Failed checks print the public verification output for diagnosis.
+
+This deliberately avoids matching human-readable signer labels. AOSP's
+[Android 17 `ApkSignerTool`](https://android.googlesource.com/platform/tools/apksig/+/179f60df00d242f6bb22acf828b0884eac2d5f72/src/apksigner/java/com/android/apksigner/ApkSignerTool.java)
+uses scheme labels such as `V2 Signer:` where older tools printed `Signer #1`;
+both implement the standard certificate PEM output. The gate examines the actual
+artifact, so an accidental return to a runner's generated debug keystore fails.
+It does not sign or modify the APK. `APKSIGNER`, `PATH`, `ANDROID_SDK_ROOT` and
+`ANDROID_HOME` are supported lookup locations. The update smoke test consumes
+the same parser, and `scripts/tests/test_apksigner_output.py` covers both output
+families, malformed/truncated blocks, distinct identities and failed verification.
 
 To inspect the checked-in fixture with Java:
 
