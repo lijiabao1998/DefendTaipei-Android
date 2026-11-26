@@ -58,7 +58,9 @@ impl Plugin for FlowUiPlugin {
             .init_resource::<settings::SettingsCache>()
             .init_resource::<crate::audio::AudioSettings>()
             .init_resource::<crate::settings::GamePreferences>()
+            .init_resource::<crate::performance::PerformancePreferences>()
             .init_resource::<crate::settings::SettingsStatus>()
+            .add_message::<crate::performance::PerformanceAction>()
             .add_message::<settings::SettingsAction>()
             .add_message::<crate::settings::FlushSettings>()
             .add_message::<bevy::input::touch::TouchInput>()
@@ -115,7 +117,8 @@ impl Plugin for FlowUiPlugin {
         app.add_systems(
             PostUpdate,
             (shelter::render_panels, title::render, settings::render)
-                .before(bevy::ui::UiSystems::Prepare),
+                .before(bevy::ui::UiSystems::Prepare)
+                .before(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
         );
     }
 }

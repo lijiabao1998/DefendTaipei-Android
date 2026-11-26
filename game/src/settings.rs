@@ -1,7 +1,7 @@
 //! Device preferences are independent of the permadeath game slot.
 //! Web reference: `src/ui/settings.ts`; day duration applies only to a new run.
 
-use crate::{audio::AudioSettings, i18n::Language};
+use crate::{audio::AudioSettings, i18n::Language, performance::PerformancePreferences};
 use bevy::{
     prelude::*,
     window::{AppLifecycle, WindowFocused},
@@ -40,6 +40,7 @@ struct StoredSettings {
     audio: AudioSettings,
     day_hours: u8,
     language: String,
+    performance: PerformancePreferences,
 }
 impl Default for StoredSettings {
     fn default() -> Self {
@@ -48,13 +49,20 @@ impl Default for StoredSettings {
             audio: AudioSettings::default(),
             day_hours: 1,
             language: "zh-TW".into(),
+            performance: PerformancePreferences::default(),
         }
     }
 }
 impl StoredSettings {
-    fn current(audio: &AudioSettings, preferences: &GamePreferences, language: Language) -> Self {
+    fn current(
+        audio: &AudioSettings,
+        preferences: &GamePreferences,
+        language: Language,
+        performance: &PerformancePreferences,
+    ) -> Self {
         Self {
             audio: (*audio).sanitize(),
+            performance: (*performance).sanitize(),
             day_hours: if matches!(preferences.day_hours, 1 | 2 | 4) {
                 preferences.day_hours
             } else {
@@ -71,6 +79,7 @@ impl StoredSettings {
     }
     fn normalize(mut self) -> Self {
         self.audio = self.audio.sanitize();
+        self.performance = self.performance.sanitize();
         if !matches!(self.day_hours, 1 | 2 | 4) {
             self.day_hours = 1;
         }
@@ -95,6 +104,7 @@ impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AudioSettings>()
             .init_resource::<GamePreferences>()
+            .init_resource::<PerformancePreferences>()
             .init_resource::<Language>()
             .init_resource::<SettingsStatus>()
             .init_resource::<SaveState>()
@@ -111,6 +121,7 @@ fn load_settings(
     location: Res<SettingsLocation>,
     mut audio: ResMut<AudioSettings>,
     mut preferences: ResMut<GamePreferences>,
+    mut performance: ResMut<PerformancePreferences>,
     mut language: ResMut<Language>,
     mut status: ResMut<SettingsStatus>,
     mut state: ResMut<SaveState>,
@@ -119,6 +130,7 @@ fn load_settings(
         Some(Ok(Some(value))) => {
             *audio = value.audio;
             preferences.day_hours = value.day_hours;
+            *performance = value.performance;
             *language = if value.language == "en" {
                 Language::En
             } else {
@@ -129,7 +141,7 @@ fn load_settings(
         Some(Err(error)) => status.error = Some(format!("Settings could not be read: {error}")),
         None => status.error = Some("Settings directory is unavailable".into()),
     }
-    let value = StoredSettings::current(&audio, &preferences, *language);
+    let value = StoredSettings::current(&audio, &preferences, *language, &performance);
     state.observed = Some(value.clone());
     state.written = Some(value);
 }
@@ -139,6 +151,7 @@ fn persist_settings(
     location: Res<SettingsLocation>,
     audio: Res<AudioSettings>,
     preferences: Res<GamePreferences>,
+    performance: Res<PerformancePreferences>,
     language: Res<Language>,
     mut status: ResMut<SettingsStatus>,
     mut state: ResMut<SaveState>,
@@ -157,7 +170,7 @@ fn persist_settings(
     focus.clear();
     exits.clear();
     lifecycle.clear();
-    let current = StoredSettings::current(&audio, &preferences, *language);
+    let current = StoredSettings::current(&audio, &preferences, *language, &performance);
     if state.observed.as_ref() != Some(&current) {
         state.observed = Some(current.clone());
         state.settled = 0.0;
@@ -247,14 +260,14 @@ fn write_settings(path: &Path, value: &StoredSettings) -> io::Result<()> {
 }
 
 #[cfg(target_os = "android")]
-fn settings_path() -> Option<PathBuf> {
+pub(crate) fn settings_path() -> Option<PathBuf> {
     bevy::android::ANDROID_APP
         .get()
         .and_then(|app| app.internal_data_path())
         .map(|path| path.join("settings.json"))
 }
 #[cfg(not(target_os = "android"))]
-fn settings_path() -> Option<PathBuf> {
+pub(crate) fn settings_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("DEFEND_TAIPEI_SETTINGS_DIR")
         .or_else(|| std::env::var_os("DEFEND_TAIPEI_SAVE_DIR"))
         .filter(|path| !path.is_empty())
@@ -317,11 +330,20 @@ mod tests {
         app.world_mut().resource_mut::<AudioSettings>().muted = true;
         app.world_mut().resource_mut::<GamePreferences>().day_hours = 4;
         *app.world_mut().resource_mut::<Language>() = Language::En;
+        *app.world_mut().resource_mut::<PerformancePreferences>() = PerformancePreferences {
+            profile: crate::performance::PerformanceProfile::Quality,
+            frame_cap: 90,
+            render_scale: 85,
+            overlay: true,
+        };
         app.world_mut().write_message(AppLifecycle::WillSuspend);
         app.update();
         let stored = read_settings(&dir.path()).unwrap().unwrap();
         assert_eq!(stored.audio.master, 0.23);
         assert_eq!(stored.day_hours, 4);
+        assert_eq!(stored.performance.frame_cap, 90);
+        assert_eq!(stored.performance.render_scale, 85);
+        assert!(stored.performance.overlay);
         drop(app);
         let mut restored = App::new();
         restored
@@ -333,6 +355,10 @@ mod tests {
         assert!(restored.world().resource::<AudioSettings>().muted);
         assert_eq!(restored.world().resource::<GamePreferences>().day_hours, 4);
         assert_eq!(*restored.world().resource::<Language>(), Language::En);
+        assert_eq!(
+            *restored.world().resource::<PerformancePreferences>(),
+            stored.performance
+        );
     }
     #[test]
     fn old_install_defaults_and_bad_preferences_are_bounded() {
@@ -365,6 +391,62 @@ mod tests {
         assert_eq!(read_settings(&dir.path()).unwrap(), Some(value));
         assert_eq!(fs::read(game).unwrap(), b"existing run untouched");
         assert_eq!(fs::read_dir(&dir.0).unwrap().count(), 2);
+    }
+    #[test]
+    fn version_one_without_performance_loads_defaults_without_rewriting_other_preferences() {
+        let dir = Temp::new();
+        fs::create_dir_all(&dir.0).unwrap();
+        let legacy = r#"{"version":1,"audio":{"master":0.8,"effects":0.65,"ambience":0.4,"radio":0.5,"muted":true},"day_hours":4,"language":"en"}"#;
+        fs::write(dir.path(), legacy).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(SettingsPlugin)
+            .insert_resource(SettingsLocation(Some(dir.path())));
+        app.update();
+        assert_eq!(
+            *app.world().resource::<PerformancePreferences>(),
+            PerformancePreferences::default()
+        );
+        app.world_mut().write_message(FlushSettings);
+        app.update();
+        assert_eq!(fs::read_to_string(dir.path()).unwrap(), legacy);
+        app.world_mut()
+            .resource_mut::<PerformancePreferences>()
+            .frame_cap = 30;
+        app.world_mut().write_message(FlushSettings);
+        app.update();
+        let stored = read_settings(&dir.path()).unwrap().unwrap();
+        assert_eq!(stored.performance.frame_cap, 30);
+        assert_eq!(stored.audio.effects, 0.65);
+        assert_eq!(stored.audio.ambience, 0.4);
+        assert_eq!(stored.audio.radio, 0.5);
+        assert!(stored.audio.muted);
+        assert_eq!(stored.day_hours, 4);
+        assert_eq!(stored.language, "en");
+        assert_eq!(stored.version, 1);
+    }
+    #[test]
+    fn invalid_performance_values_are_normalized_before_persisting() {
+        let dir = Temp::new();
+        let raw = PerformancePreferences {
+            frame_cap: 144,
+            render_scale: 255,
+            ..default()
+        };
+        let value = StoredSettings::current(
+            &AudioSettings::default(),
+            &GamePreferences::default(),
+            Language::ZhTw,
+            &raw,
+        );
+        write_settings(&dir.path(), &value).unwrap();
+        let restored = read_settings(&dir.path()).unwrap().unwrap();
+        assert_eq!(restored.performance, raw.sanitize());
+        assert!(matches!(restored.performance.frame_cap, 30 | 60 | 90 | 120));
+        assert!(matches!(
+            restored.performance.render_scale,
+            0 | 70 | 85 | 100
+        ));
     }
     #[test]
     fn corrupt_and_future_preferences_do_not_silently_load() {

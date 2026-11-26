@@ -92,6 +92,72 @@ def preferences(predicate=lambda _: True) -> dict:
     raise TimeoutError('Actual private preferences did not reach the expected state')
 
 
+def volume_matches(actual: float, expected: float) -> bool:
+    # Endpoint cases prove an exact zero/full setting, not merely a nearby
+    # slider sample that would legitimately produce quiet audio.
+    return actual == expected if expected in (0.0, 1.0) else abs(actual - expected) < 0.012
+
+
+def parse_media_volume(output: str) -> dict:
+    match = re.search(r'volume is (\d+) in range \[(\d+)\.\.(\d+)\]', output)
+    if match is None:
+        raise AssertionError('Android did not report the effective media volume and range')
+    current, minimum, maximum = map(int, match.groups())
+    if not 0 <= minimum <= current <= maximum or maximum <= minimum:
+        raise AssertionError('Android reported an invalid media volume range')
+    return {'current': current, 'minimum': minimum, 'maximum': maximum}
+
+
+def media_volume() -> dict:
+    return parse_media_volume(adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--get'))
+
+
+def configure_media_volume(report: dict, timeout: float = 20.0) -> None:
+    initial = media_volume()
+    report['initial_media_volume'] = initial
+    report['configured_media_volume'] = initial
+    setup = {'method': 'input_keyevent_VOLUME_UP', 'key_presses': 0, 'readbacks': [initial]}
+    report['media_volume_setup'] = setup
+    minimum, maximum = initial['minimum'], initial['maximum']
+    if initial['current'] == maximum:
+        return
+    # API 34's media_session --set attributes shell UID 2000 to
+    # com.android.server.media; AppOps rejects it even when cmd exits zero.
+    # Use normal volume keys on the idle launcher, whose default is MUSIC:
+    # https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/services/core/java/com/android/server/audio/AudioService.java
+    # main() has already required a disposable emulator and stopped the game.
+    deadline = time.monotonic() + timeout
+    adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+    time.sleep(0.5)
+    # The first press can just open the system volume panel. Permit a small
+    # number of ignored/delayed presses, but never accept command success in
+    # place of an actual maximum-volume readback or retry without a bound.
+    for _ in range(min(maximum - minimum + 4, 64)):
+        if time.monotonic() >= deadline:
+            break
+        setup['key_presses'] += 1
+        adb('shell', 'input', 'keyevent', 'KEYCODE_VOLUME_UP')
+        time.sleep(0.35)
+        current = media_volume()
+        setup['readbacks'].append(current)
+        report['configured_media_volume'] = current
+        if (current['minimum'], current['maximum']) != (minimum, maximum):
+            raise AssertionError(f'Media volume range changed during setup: {initial} -> {current}')
+        if current['current'] == maximum:
+            return
+    current = report['configured_media_volume']['current']
+    raise AssertionError(f'Media volume did not reach its reported maximum: '
+                         f'{current}/{maximum} after {setup["key_presses"]} volume-up keys')
+
+
+def assert_audition_settings(prefs: dict, category: int, audible: bool) -> None:
+    audio = prefs['audio']
+    field = ['effects', 'ambience', 'radio'][category - 1]
+    effective = 0.0 if audio['muted'] else audio['master'] * audio[field]
+    if audible != (effective > 0.0):
+        raise AssertionError(f'{field} preview audibility does not match actual saved settings: {audio}')
+
+
 def slider(layout: dict, index: int, value: float) -> None:
     rect = layout['sliders'][index]
     x0, y = round((rect[0] + rect[2]) / 2), round((rect[1] + rect[3]) / 2)
@@ -99,7 +165,7 @@ def slider(layout: dict, index: int, value: float) -> None:
     # Capture persists while dragging beyond the slider boundary, clamping to0.
     adb('shell', 'input', 'swipe', str(x0), str(y), str(x1), str(y), '600')
     field = ['master', 'effects', 'ambience', 'radio'][index]
-    preferences(lambda p: abs(p['audio'][field] - value) < 0.012)
+    preferences(lambda p: volume_matches(p['audio'][field], value))
 
 
 def open_settings() -> dict:
@@ -136,6 +202,13 @@ def screenshot(out: Path, name: str, viewport: tuple[int, int]) -> None:
 
 def audition(capture: AudioCapture, layout: dict, name: str, category: int,
              audible: bool, report: dict) -> None:
+    prefs = preferences()
+    assert_audition_settings(prefs, category, audible)
+    # Keep the effective controls even on a PCM failure. The captured stream
+    # also includes Android/QEMU/Pulse; do not infer an app gain defect from it.
+    evidence = {'name': name, 'category': ['Effects', 'Ambience', 'Radio'][category - 1],
+                'expect_audible': audible, 'preferences': prefs, 'media_volume': media_volume()}
+    report.setdefault('case_setup', []).append(evidence)
     time.sleep(1.5)  # Allow any preceding click/preview tail to finish.
     capture.start(name)
     category_name = ['Effects', 'Ambience', 'Radio'][category - 1]
@@ -173,7 +246,7 @@ def main() -> None:
         adb('shell', 'settings', 'put', 'system', 'user_rotation', '0')
         adb('emu', 'sensor', 'set', 'acceleration', '0:9.8:0')
         adb('shell', 'settings', 'put', 'system', 'sound_effects_enabled', '0')
-        adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--set', '15')
+        configure_media_volume(report)
         launch()
         layout = open_settings()
         tap(layout['tabs'][0], r'DTSETTINGS action=page value=Audio')
@@ -248,6 +321,18 @@ def main() -> None:
         try:
             (out / 'logcat.txt').write_text(adb('logcat', '-d'))
             (out / 'final.png').write_bytes(adb('exec-out', 'screencap', '-p', binary=True))
+            # Retain diagnostics after an early launch/control failure without
+            # replacing that original exception if a private file is absent.
+            for name, read in (
+                ('final-preferences.json', lambda: raw_private(PREFS)),
+                ('audio-service.txt', lambda: adb('shell', 'dumpsys', 'audio', binary=True)),
+                ('audio-flinger.txt', lambda: adb('shell', 'dumpsys', 'media.audio_flinger', binary=True)),
+            ):
+                try:
+                    (out / name).write_bytes(read())
+                except (OSError, subprocess.SubprocessError) as error:
+                    report.setdefault('diagnostic_errors', {})[name] = str(error)
+            (out / 'audio-settings-report.json').write_text(json.dumps(report, indent=2) + '\n')
         finally:
             adb('shell', 'wm', 'size', 'reset')
             adb('shell', 'wm', 'density', 'reset')

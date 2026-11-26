@@ -22,7 +22,8 @@ pub mod textures;
 
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
-use std::collections::{HashMap, HashSet};
+use serde::Serialize;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, OnceLock};
 
 pub use build::Lod;
@@ -45,6 +46,9 @@ const DETAIL_OUT: f32 = 95.0;
 const NEAR_R: f32 = 60.0;
 /// …this close Mid, else Far.
 const MID_R: f32 = 260.0;
+/// Reuse spatial work while standing still without changing any LOD boundary.
+const CHUNK_ORDER_REFRESH_METRES: f32 = 4.0;
+const DETAIL_QUERY_REFRESH_METRES: f32 = 1.0;
 
 static WORLD: OnceLock<Arc<WorldData>> = OnceLock::new();
 
@@ -262,16 +266,45 @@ pub struct MapReady {
     frames: u32,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 struct Streamer {
     loaded: HashMap<ChunkKey, (Lod, Entity)>,
     pending: HashMap<ChunkKey, Task<ChunkMeshes>>,
+    /// Map extent is immutable. Reuse this allocation and near-first ordering.
+    keys: Vec<ChunkKey>,
+    order_anchor: Option<Vec2>,
+}
+
+impl Default for Streamer {
+    fn default() -> Self {
+        Self {
+            loaded: HashMap::new(),
+            pending: HashMap::new(),
+            keys: ChunkKey::all(world()),
+            order_anchor: None,
+        }
+    }
 }
 
 #[derive(Resource, Default)]
 struct DetailState {
     kit: Option<Arc<WindowKit>>,
     live: HashMap<u32, Entity>,
+    candidates: VecDeque<u32>,
+    query_anchor: Option<Vec2>,
+    last_position: Option<Vec2>,
+}
+
+/// Local renderer workload counts, not GPU time or memory estimates.
+#[derive(Resource, Clone, Debug, Default, Serialize)]
+pub struct MapRenderStats {
+    pub resident_chunks: usize,
+    pub pending_chunks: usize,
+    pub detail_buildings: usize,
+    pub chunk_uploads: usize,
+    pub detail_uploads: usize,
+    pub chunk_order_rebuilds: u64,
+    pub detail_candidate_queries: u64,
 }
 
 pub struct MapPlugin;
@@ -285,6 +318,7 @@ impl Plugin for MapPlugin {
             .init_resource::<MapReady>()
             .init_resource::<Streamer>()
             .init_resource::<DetailState>()
+            .init_resource::<MapRenderStats>()
             .add_systems(
                 Startup,
                 (
@@ -345,6 +379,45 @@ fn want_lod(k: ChunkKey, p: Vec2) -> Lod {
     }
 }
 
+fn spatial_refresh_due(anchor: Option<Vec2>, position: Vec2, distance: f32) -> bool {
+    anchor.is_none_or(|old| old.distance_squared(position) >= distance * distance)
+}
+
+/// The extra metre discovers candidates that can cross the original 70 m
+/// boundary before the next spatial query. Admission still checks exactly
+/// DETAIL_IN; pending candidates outside it remain available for small moves.
+fn detail_candidates(w: &WorldData, p: Vec2, live: &HashMap<u32, Entity>) -> VecDeque<u32> {
+    let discovery_radius = DETAIL_IN + DETAIL_QUERY_REFRESH_METRES;
+    let mut candidates: Vec<_> = w
+        .blds_in(p - discovery_radius, p + discovery_radius)
+        .into_iter()
+        .filter(|id| {
+            !live.contains_key(id)
+                && w.blds[*id as usize].c.distance_squared(p) <= discovery_radius * discovery_radius
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        w.blds[*a as usize]
+            .c
+            .distance_squared(p)
+            .total_cmp(&w.blds[*b as usize].c.distance_squared(p))
+            .then_with(|| a.cmp(b))
+    });
+    candidates.into()
+}
+
+fn next_detail_candidate(candidates: &mut VecDeque<u32>, w: &WorldData, p: Vec2) -> Option<u32> {
+    // A fixed traversal bound prevents an outside-only backlog from spinning.
+    for _ in 0..candidates.len() {
+        let id = candidates.pop_front()?;
+        if w.blds[id as usize].c.distance_squared(p) < DETAIL_IN * DETAIL_IN {
+            return Some(id);
+        }
+        candidates.push_back(id);
+    }
+    None
+}
+
 /// Keep every chunk at the LOD its distance asks for; build off-thread, swap in when done.
 fn stream_chunks(
     mut commands: Commands,
@@ -353,15 +426,24 @@ fn stream_chunks(
     mut meshes: ResMut<Assets<Mesh>>,
     mats: Option<Res<MapMaterials>>,
     player: Option<Single<&Transform, With<Player>>>,
+    mut stats: ResMut<MapRenderStats>,
 ) {
+    stats.chunk_uploads = 0;
+    stats.resident_chunks = st.loaded.len();
+    stats.pending_chunks = st.pending.len();
     let Some(mats) = mats else { return };
     if !cfg.enabled {
         return;
     }
     let p = player.map_or(world().spawn, |t| t.translation.xz());
     // finished builds
-    let done: Vec<ChunkKey> = st.pending.keys().copied().collect();
+    let mut done: Vec<ChunkKey> = st.pending.keys().copied().collect();
+    done.sort_by(|a, b| a.dist(p).total_cmp(&b.dist(p)).then_with(|| a.cmp(b)));
+    let upload_budget = if cfg!(target_os = "android") { 1 } else { 2 };
     for k in done {
+        if stats.chunk_uploads >= upload_budget {
+            break;
+        }
         let task = st.pending.get_mut(&k).unwrap();
         if let Some(c) = check_ready(task) {
             st.pending.remove(&k);
@@ -370,15 +452,23 @@ fn stream_chunks(
             if let Some((_, old)) = st.loaded.insert(k, (lod, e)) {
                 commands.entity(old).despawn();
             }
+            stats.chunk_uploads += 1;
         }
     }
     // nearest first, a couple of builds in flight at a time
-    let mut keys = ChunkKey::all(world());
-    keys.sort_by(|a, b| a.dist(p).total_cmp(&b.dist(p)));
-    for k in keys {
+    if spatial_refresh_due(st.order_anchor, p, CHUNK_ORDER_REFRESH_METRES) {
+        st.keys
+            .sort_by(|a, b| a.dist(p).total_cmp(&b.dist(p)).then_with(|| a.cmp(b)));
+        st.order_anchor = Some(p);
+        stats.chunk_order_rebuilds += 1;
+    }
+    for index in 0..st.keys.len() {
         if st.pending.len() >= 2 {
             break;
         }
+        let k = st.keys[index];
+        // Cached priority does not cache LOD: crossing a boundary still starts
+        // the right build immediately, including a movement smaller than 4 m.
         let lod = want_lod(k, p);
         if st.loaded.get(&k).is_some_and(|(l, _)| *l == lod) || st.pending.contains_key(&k) {
             continue;
@@ -387,6 +477,8 @@ fn stream_chunks(
         let task = AsyncComputeTaskPool::get().spawn(async move { build_chunk(&w, k, lod) });
         st.pending.insert(k, task);
     }
+    stats.resident_chunks = st.loaded.len();
+    stats.pending_chunks = st.pending.len();
 }
 
 /// Lazy near layer: window units, wall clutter and rooftop shacks for buildings within ~70 m.
@@ -396,7 +488,11 @@ fn near_detail(
     mut meshes: ResMut<Assets<Mesh>>,
     mats: Option<Res<MapMaterials>>,
     player: Option<Single<&Transform, With<Player>>>,
+    mut stats: ResMut<MapRenderStats>,
+    performance: Option<Res<crate::performance::EffectivePerformance>>,
 ) {
+    stats.detail_uploads = 0;
+    stats.detail_buildings = ds.live.len();
     let (Some(mats), Some(player)) = (mats, player) else {
         return;
     };
@@ -406,29 +502,34 @@ fn near_detail(
         .kit
         .get_or_insert_with(|| Arc::new(WindowKit::new()))
         .clone();
-    let drop: Vec<u32> = ds
-        .live
-        .keys()
-        .copied()
-        .filter(|&id| w.blds[id as usize].c.distance(p) > DETAIL_OUT)
-        .collect();
-    for id in drop {
-        if let Some(e) = ds.live.remove(&id) {
-            commands.entity(e).despawn();
+    if ds.last_position != Some(p) {
+        let drop: Vec<u32> = ds
+            .live
+            .keys()
+            .copied()
+            .filter(|&id| w.blds[id as usize].c.distance_squared(p) > DETAIL_OUT * DETAIL_OUT)
+            .collect();
+        for id in drop {
+            if let Some(e) = ds.live.remove(&id) {
+                commands.entity(e).despawn();
+            }
         }
+        ds.last_position = Some(p);
     }
-    let mut cand: Vec<u32> = w
-        .blds_in(p - DETAIL_IN, p + DETAIL_IN)
-        .into_iter()
-        .filter(|id| !ds.live.contains_key(id) && w.blds[*id as usize].c.distance(p) < DETAIL_IN)
-        .collect();
-    cand.sort_by(|a, b| {
-        w.blds[*a as usize]
-            .c
-            .distance(p)
-            .total_cmp(&w.blds[*b as usize].c.distance(p))
-    });
-    for id in cand.into_iter().take(4) {
+    if spatial_refresh_due(ds.query_anchor, p, DETAIL_QUERY_REFRESH_METRES) {
+        ds.candidates = detail_candidates(w, p, &ds.live);
+        ds.query_anchor = Some(p);
+        stats.detail_candidate_queries += 1;
+    }
+    // Use the controller's effective app cadence. Keep
+    // uploads bounded while still draining the queue when the player stands
+    // still; the final street/facade detail is identical at either budget.
+    let target_fps = performance.as_deref().map_or(60, |value| value.target_fps);
+    let budget = if (1..=30).contains(&target_fps) { 1 } else { 2 };
+    for _ in 0..budget {
+        let Some(id) = next_detail_candidate(&mut ds.candidates, w, p) else {
+            break;
+        };
         let b = &w.blds[id as usize];
         let det = detail::near_detail(b, &kit);
         let roof = detail::near_roof(b);
@@ -452,6 +553,79 @@ fn near_detail(
             })
             .id();
         ds.live.insert(id, e);
+        stats.detail_uploads += 1;
+    }
+    stats.detail_buildings = ds.live.len();
+}
+
+#[cfg(test)]
+mod streaming_work_tests {
+    use super::*;
+
+    #[test]
+    fn priority_cache_does_not_delay_a_lod_boundary_crossing() {
+        let key = ChunkKey(0, 0);
+        let before = Vec2::new(CHUNK + NEAR_R + 0.4, CHUNK * 0.5);
+        let after = before - Vec2::X;
+        assert!(!spatial_refresh_due(
+            Some(before),
+            after,
+            CHUNK_ORDER_REFRESH_METRES,
+        ));
+        assert_eq!(want_lod(key, before), Lod::Mid);
+        assert_eq!(want_lod(key, after), Lod::Near);
+        assert!(spatial_refresh_due(
+            Some(before),
+            before + Vec2::X * 4.0,
+            CHUNK_ORDER_REFRESH_METRES,
+        ));
+    }
+
+    #[test]
+    fn sub_metre_move_keeps_boundary_buildings_available_without_requery() {
+        let w = world();
+        let building = &w.blds[0];
+        let before = building.c + Vec2::X * (DETAIL_IN + 0.6);
+        let after = before - Vec2::X * 0.7;
+        let candidates = detail_candidates(w, before, &HashMap::new());
+        assert!(candidates.contains(&building.id));
+        assert!(!spatial_refresh_due(
+            Some(before),
+            after,
+            DETAIL_QUERY_REFRESH_METRES,
+        ));
+        let mut pending = VecDeque::from([building.id]);
+        assert_eq!(next_detail_candidate(&mut pending, w, before), None);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            next_detail_candidate(&mut pending, w, after),
+            Some(building.id)
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn stationary_backlog_drains_once_without_recreating_live_details() {
+        let w = world();
+        let p = w.spawn;
+        let mut pending = detail_candidates(w, p, &HashMap::new());
+        let expected: HashSet<_> = pending
+            .iter()
+            .copied()
+            .filter(|id| w.blds[*id as usize].c.distance(p) < DETAIL_IN)
+            .collect();
+        assert!(!expected.is_empty());
+        let mut admitted = HashSet::new();
+        while let Some(id) = next_detail_candidate(&mut pending, w, p) {
+            assert!(admitted.insert(id), "a detail was uploaded twice");
+        }
+        assert_eq!(admitted, expected);
+        assert!(!spatial_refresh_due(
+            Some(p),
+            p,
+            DETAIL_QUERY_REFRESH_METRES
+        ));
+        assert_eq!(next_detail_candidate(&mut pending, w, p), None);
     }
 }
 

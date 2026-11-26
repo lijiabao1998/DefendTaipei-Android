@@ -113,6 +113,11 @@ pub(super) fn desktop_mouse_aim(
     let Some(cursor) = window.cursor_position() else {
         return;
     };
+    let cursor = crate::performance::render::scene_pointer(
+        cursor,
+        window.size(),
+        cam.logical_viewport_size().unwrap_or(window.size()),
+    );
     let Ok(ray) = cam.viewport_to_world(cam_gt, cursor) else {
         return;
     };

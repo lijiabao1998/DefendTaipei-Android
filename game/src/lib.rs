@@ -12,6 +12,7 @@ mod camera;
 pub mod chunk;
 mod city;
 pub mod combat;
+pub mod device;
 pub mod doors;
 pub mod game_flow;
 mod geom;
@@ -22,6 +23,7 @@ pub mod input;
 pub mod inventory;
 pub mod map;
 mod perf;
+pub mod performance;
 mod player;
 #[cfg(not(target_os = "android"))]
 mod qa;
@@ -107,6 +109,8 @@ pub fn run() {
         ))
         .add_plugins((
             settings::SettingsPlugin,
+            device::DevicePlugin,
+            performance::PerformancePlugin,
             game_flow::GameFlowPlugin,
             audio::AudioPlugin,
             hud::HudPlugin,

@@ -17,6 +17,17 @@ import time
 
 
 SINK = 'defendtaipei_android'
+PCM_SPEC = 's16le 2ch 48000Hz'
+
+
+def expected_environment(server: str) -> dict[str, str]:
+    # AOSP audio/audio.c reads QEMU_AUDIO_DAC_FIXED_* before opening the
+    # hardware voice. Avoid its default 44.1 kHz -> 48 kHz host conversion:
+    # https://android.googlesource.com/platform/external/qemu/+/ae9d18d2b6261179fbd57fffec720a04f7bfb053/audio/audio.c
+    return {'PULSE_SERVER': server, 'QEMU_PA_SERVER': server,
+            'QEMU_AUDIO_DRV': 'pa', 'PULSE_SINK': SINK, 'QEMU_PA_SINK': SINK,
+            'QEMU_AUDIO_DAC_FIXED_SETTINGS': '1', 'QEMU_AUDIO_DAC_FIXED_FREQ': '48000',
+            'QEMU_AUDIO_DAC_FIXED_FMT': 's16', 'QEMU_AUDIO_DAC_FIXED_CHANNELS': '2'}
 
 
 def pulse_library_version() -> str:
@@ -53,8 +64,7 @@ def configure(output: Path) -> dict:
     library_version = pulse_library_version()
     server = local_server()
     # AOSP audio_process_options("pa", ...) prefixes SERVER/SINK with QEMU_PA_.
-    environment = {'PULSE_SERVER': server, 'QEMU_PA_SERVER': server,
-                   'QEMU_AUDIO_DRV': 'pa', 'PULSE_SINK': SINK, 'QEMU_PA_SINK': SINK}
+    environment = expected_environment(server)
     environment_file = os.environ.get('GITHUB_ENV')
     if not environment_file:
         raise RuntimeError('--configure requires the workflow GITHUB_ENV file')
@@ -110,8 +120,7 @@ def preflight(output: Path, timeout: float = 15.0) -> dict:
               'scope': 'Connection and sink routing; actual audibility is checked by emulator-audio-smoke.py'}
     try:
         server = local_server()
-        expected = {'PULSE_SERVER': server, 'QEMU_PA_SERVER': server,
-                    'QEMU_AUDIO_DRV': 'pa', 'PULSE_SINK': SINK, 'QEMU_PA_SINK': SINK}
+        expected = expected_environment(server)
         report['environment'] = {key: os.environ.get(key) for key in expected}
         if report['environment'] != expected:
             raise RuntimeError('Emulator and capture must inherit the configured explicit Pulse server and sink')
@@ -129,8 +138,12 @@ def preflight(output: Path, timeout: float = 15.0) -> dict:
             if routed:
                 if sink.get('mute') or any(stream.get('mute') for stream in routed):
                     raise RuntimeError('Emulator host playback is muted')
+                if sink.get('sample_specification') != PCM_SPEC or any(
+                        stream.get('sample_specification') != PCM_SPEC for stream in routed):
+                    raise RuntimeError('Emulator playback and capture sink must both use s16le stereo 48 kHz')
                 report['matched_sink_index'] = sink['index']
                 report['matched_stream_ids'] = [stream['index'] for stream in routed]
+                report['pcm_sample_specification'] = PCM_SPEC
                 report['success'] = True
                 return report
             if time.monotonic() >= deadline:

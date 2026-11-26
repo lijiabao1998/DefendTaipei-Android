@@ -23,14 +23,18 @@ class EmulatorAudioPreflightTests(unittest.TestCase):
         self.server = 'unix:/run/user/1001/pulse/native'
         self.environment = {'PULSE_SERVER': self.server, 'QEMU_PA_SERVER': self.server,
                             'QEMU_AUDIO_DRV': 'pa', 'PULSE_SINK': preflight.SINK,
-                            'QEMU_PA_SINK': preflight.SINK}
+                            'QEMU_PA_SINK': preflight.SINK,
+                            'QEMU_AUDIO_DAC_FIXED_SETTINGS': '1', 'QEMU_AUDIO_DAC_FIXED_FREQ': '48000',
+                            'QEMU_AUDIO_DAC_FIXED_FMT': 's16', 'QEMU_AUDIO_DAC_FIXED_CHANNELS': '2'}
 
     def snapshot(self):
-        return {'sinks': [{'index': 17, 'name': preflight.SINK, 'mute': False}],
+        return {'sinks': [{'index': 17, 'name': preflight.SINK, 'mute': False,
+                           'sample_specification': preflight.PCM_SPEC}],
                 'clients': [{'index': 9, 'properties': {
                     'application.name': self.server,
                     'application.process.binary': 'qemu-system-x86_64'}}],
-                'sink-inputs': [{'index': 23, 'client': 9, 'sink': 17, 'mute': False}]}
+                'sink-inputs': [{'index': 23, 'client': 9, 'sink': 17, 'mute': False,
+                                 'sample_specification': preflight.PCM_SPEC}]}
 
     def test_setup_exports_the_existing_unix_server_to_pulse_and_qemu(self):
         environment_file = self.output / 'github-env'
@@ -94,6 +98,19 @@ class EmulatorAudioPreflightTests(unittest.TestCase):
         self.assertTrue(report['success'])
         self.assertEqual(report['matched_sink_index'], 17)
         self.assertEqual(report['matched_stream_ids'], [23])
+        self.assertEqual(report['pcm_sample_specification'], 's16le 2ch 48000Hz')
+
+    def test_different_or_unknown_pcm_format_is_rejected_even_with_correct_routing(self):
+        for kind in ('sinks', 'sink-inputs'):
+            for specification in ('s16le 2ch 44100Hz', 's16le 1ch 48000Hz', None):
+                snapshot = self.snapshot()
+                snapshot[kind][0]['sample_specification'] = specification
+                with self.subTest(kind=kind, specification=specification), \
+                        mock.patch.dict(os.environ, self.environment), \
+                        mock.patch.object(preflight, 'local_server', return_value=self.server), \
+                        mock.patch.object(preflight, 'routing_snapshot', return_value=snapshot), \
+                        self.assertRaisesRegex(RuntimeError, 'both use s16le stereo 48 kHz'):
+                    preflight.preflight(self.output, timeout=0)
 
     def test_wrong_sink_unrelated_muted_or_missing_streams_fail_with_diagnostics(self):
         for name, stream in (
