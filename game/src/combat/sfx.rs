@@ -6,6 +6,7 @@
 
 use bevy::prelude::*;
 
+use super::CombatWorldRes;
 use super::tuning::GunFam;
 use super::{Callout, EnemyDied, Gunshot, HitCause, PlayerDied, PlayerHit};
 use crate::audio::{GunKind, SfxEvent};
@@ -28,6 +29,7 @@ const RADIO_HEAR: f32 = 40.0;
 
 pub(super) fn combat_sfx(
     player: Query<&Transform, With<Player>>,
+    world: Res<CombatWorldRes>,
     mut shots: MessageReader<Gunshot>,
     mut hits: MessageReader<PlayerHit>,
     mut kills: MessageReader<EnemyDied>,
@@ -38,7 +40,12 @@ pub(super) fn combat_sfx(
     let pp = player.single().map_or(Vec3::ZERO, |t| t.translation);
     let dist = |p: Vec3| p.xz().distance(pp.xz());
     for s in shots.read() {
-        play_gunshot_sfx(&mut sfx, s.fam, if s.by_player { 0.0 } else { dist(s.pos) });
+        play_gunshot_sfx(
+            &mut sfx,
+            s.fam,
+            if s.by_player { 0.0 } else { dist(s.pos) },
+            world.0.building_at(pp.xz()).is_some() || world.0.building_at(s.pos.xz()).is_some(),
+        );
     }
     for h in hits.read() {
         sfx.write(match h.cause {
@@ -57,17 +64,17 @@ pub(super) fn combat_sfx(
     }
     for c in calls.read() {
         let d = dist(c.pos);
-        if d < RADIO_HEAR {
+        if c.audible && d < RADIO_HEAR {
             sfx.write(SfxEvent::Radio { dist: d });
         }
     }
 }
 
-/// One gunshot (`AU.gunshot`). `indoor` is false until the map can answer it.
-pub fn play_gunshot_sfx(sfx: &mut MessageWriter<SfxEvent>, fam: GunFam, dist: f32) {
+/// One gunshot (`AU.gunshot`), with the original source-or-listener roof rule.
+pub fn play_gunshot_sfx(sfx: &mut MessageWriter<SfxEvent>, fam: GunFam, dist: f32, indoor: bool) {
     sfx.write(SfxEvent::Gunshot {
         kind: gun_kind(fam),
         dist,
-        indoor: false,
+        indoor,
     });
 }

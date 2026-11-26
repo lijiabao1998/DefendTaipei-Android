@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "container": {
+    "id": "x814_1",
+    "building": 814,
+    "approach": [156.6199493408203, -166.2105255126953]
+  },
+  "control_id": "x814_3",
+  "game_min": 4381,
+  "power_off": 4020
+}

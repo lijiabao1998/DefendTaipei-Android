@@ -175,6 +175,9 @@ pub struct Gunshot {
 pub struct Callout {
     pub pos: Vec3,
     pub text: &'static str,
+    /// Enemy radio/shout feedback only. Player captions already have their own
+    /// impact or dry-fire cue and must not acquire a second radio sound.
+    pub audible: bool,
 }
 
 /// Request: despawn all enemies, bodies, tracers and grenades, restore the player's HP
@@ -197,6 +200,10 @@ pub struct PlayerGun {
 #[derive(Clone, Copy)]
 struct PendingMelee {
     delay: f32,
+    swish_delay: f32,
+    swished: bool,
+    heavy: bool,
+    blunt: bool,
     dir: Vec2,
     damage: f32,
     range: f32,
@@ -258,6 +265,7 @@ pub(super) struct PlayerContext<'w> {
     pause: Option<Res<'w, crate::ui::PauseOpen>>,
     campaign: Option<Res<'w, crate::game_flow::Campaign>>,
     language: Option<Res<'w, crate::i18n::Language>>,
+    sound: MessageWriter<'w, crate::audio::SfxEvent>,
 }
 
 impl PlayerContext<'_> {
@@ -582,6 +590,7 @@ fn assign_squads(
                 s.flank_t = Some(FLANK_T);
                 callouts.write(Callout {
                     pos: Vec3::new(s.pos.x, 1.8, s.pos.y),
+                    audible: true,
                     text: if role == squad::Role::FlankL {
                         "左翼包抄！"
                     } else {
@@ -630,6 +639,7 @@ fn soldiers_think(
     mut hits: MessageWriter<PlayerHit>,
     mut shots: MessageWriter<Gunshot>,
     mut callouts: MessageWriter<Callout>,
+    mut sound: MessageWriter<crate::audio::SfxEvent>,
 ) {
     let dt = time.delta_secs();
     timers.radio_cd -= dt;
@@ -698,7 +708,14 @@ fn soldiers_think(
             });
             callouts.write(Callout {
                 pos: at3(pp, 1.8),
+                audible: false,
                 text: "你被槍托擊中！",
+            });
+        }
+        if out.melee_missed {
+            sound.write(crate::audio::SfxEvent::Swish {
+                dist: s.pos.distance(pp),
+                heavy: true,
             });
         }
         if let Some(p) = out.spotted {
@@ -708,12 +725,14 @@ fn soldiers_think(
         if out.search_callout {
             callouts.write(Callout {
                 pos: at3(s.pos, 1.8),
+                audible: true,
                 text: "分散搜索！",
             });
         }
         if out.retreat_callout {
             callouts.write(Callout {
                 pos: at3(s.pos, 1.8),
+                audible: true,
                 text: "我中彈了，掩護我！",
             });
         }
@@ -730,6 +749,7 @@ fn soldiers_think(
             );
             callouts.write(Callout {
                 pos: Vec3::new(from.x, 1.8, from.y),
+                audible: true,
                 text: if n > 0 {
                     "（無線電）「發現目標，請求支援！」——附近士兵正趕來"
                 } else {
@@ -851,6 +871,7 @@ fn grenades(
         }
         callouts.write(Callout {
             pos: Vec3::new(s.pos.x, 1.8, s.pos.y),
+            audible: true,
             text: "手榴彈！",
         });
     }
@@ -886,7 +907,7 @@ fn grenades(
         let p = g.to;
         sfx.write(crate::audio::SfxEvent::ShellBoom {
             dist: pp.distance(p),
-            indoor: false,
+            indoor: world.0.building_at(p).is_some() || world.0.building_at(pp).is_some(),
         });
         for (ent, mut e, tf) in &mut enemies {
             let s = &mut e.0;
@@ -995,6 +1016,14 @@ fn player_fire(
 
     // A melee blow lands at the contact frame (44% of the original swing duration).
     if let Some(mut swing) = gun.pending_melee.take() {
+        swing.swish_delay -= dt;
+        if !swing.swished && swing.swish_delay <= 0.0 {
+            context.sound.write(crate::audio::SfxEvent::Swish {
+                dist: 0.0,
+                heavy: swing.heavy,
+            });
+            swing.swished = true;
+        }
         swing.delay -= dt;
         if swing.delay > 0.0 {
             gun.pending_melee = Some(swing);
@@ -1012,6 +1041,10 @@ fn player_fire(
                 }
                 let stealth = s.state != SolState::Combat && s.alert < 0.5;
                 let killed = soldier::damage(s, swing.damage * if stealth { 3.2 } else { 1.0 }, p0);
+                context.sound.write(crate::audio::SfxEvent::MeleeHit {
+                    dist: 0.0,
+                    blunt: swing.blunt,
+                });
                 let next = s.pos + swing.dir * if killed { 0.25 } else { 0.45 };
                 if w.shot_ray(s.pos, next, 1.0, 1.0, 0.0) >= 1.0 {
                     s.pos = next;
@@ -1081,8 +1114,10 @@ fn player_fire(
         };
         if !has_round {
             gun.cd = 0.5;
+            context.sound.write(crate::audio::SfxEvent::DryFire);
             callouts.write(Callout {
                 pos: ptf.translation + Vec3::Y * 1.8,
+                audible: false,
                 text: crate::i18n::tr(lang, "沒有子彈了", "Out of ammunition"),
             });
             return;
@@ -1146,6 +1181,10 @@ fn player_fire(
         gun.swing_remaining = duration;
         gun.pending_melee = Some(PendingMelee {
             delay: duration * 0.44,
+            swish_delay: duration * 0.32,
+            swished: false,
+            heavy: matches!(attack.id, "bat" | "pipe"),
+            blunt: attack.id != "knife",
             dir,
             damage: attack.damage,
             range: attack.range,

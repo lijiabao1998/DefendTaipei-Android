@@ -27,6 +27,9 @@ use crate::survival::{
 };
 use crate::ui::{OpenPanel, PanelKind, PauseOpen, UiModal};
 
+mod aging;
+pub use aging::ContainerAging;
+
 #[derive(Resource, Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlayerNeeds {
@@ -87,6 +90,9 @@ pub struct ScavengeState {
     pub barricaded_doors: Vec<u32>,
     /// Zero denotes a save from before individual indoor fixtures existed.
     pub fixtures_version: u8,
+    /// Opened cold-storage/counter stock has a saved blackout-aging clock and
+    /// random stream, independent of weather and the daily carried-food rule.
+    pub container_aging: ContainerAging,
     pub weather: WeatherState,
 }
 
@@ -257,6 +263,7 @@ impl Plugin for WorldPlayPlugin {
             .add_systems(
                 Update,
                 (
+                    aging::tick_container_aging,
                     apply_actions,
                     tick_needs_weather,
                     remember_deaths,
@@ -1180,7 +1187,7 @@ fn apply_actions(
                 let moved = transfer_loot(stock, &mut inventory, take);
                 let left: u32 = stock.stacks().iter().map(|(_, n)| *n).sum();
                 notice.text = if moved > 0 {
-                    sound.write(SfxEvent::Rummage);
+                    sound.write(SfxEvent::Pickup);
                     format!(
                         "{} {moved} · {} {left}",
                         tr(*lang, "已拿取", "Taken"),
@@ -1211,12 +1218,15 @@ fn apply_actions(
                     env.water,
                     Some(&obstacles),
                 ) {
-                    Ok(()) => tr(
-                        *lang,
-                        "裝滿了一瓶飲用水。",
-                        "Filled a bottle of drinking water.",
-                    )
-                    .into(),
+                    Ok(()) => {
+                        sound.write(SfxEvent::Water);
+                        tr(
+                            *lang,
+                            "裝滿了一瓶飲用水。",
+                            "Filled a bottle of drinking water.",
+                        )
+                        .into()
+                    }
                     Err(error) => error.message(*lang).into(),
                 };
             }
@@ -1267,7 +1277,8 @@ fn apply_actions(
                             },
                         )
                         .into();
-                        sound.write(SfxEvent::Clink {
+                        sound.write(SfxEvent::Door {
+                            open: !target.open,
                             dist: target.distance,
                         });
                     }
@@ -1284,12 +1295,15 @@ fn apply_actions(
                             env.water,
                             Some(&obstacles),
                         ) {
-                            Ok(()) => tr(
-                                *lang,
-                                "裝滿了一瓶飲用水。",
-                                "Filled a bottle of drinking water.",
-                            )
-                            .into(),
+                            Ok(()) => {
+                                sound.write(SfxEvent::Water);
+                                tr(
+                                    *lang,
+                                    "裝滿了一瓶飲用水。",
+                                    "Filled a bottle of drinking water.",
+                                )
+                                .into()
+                            }
                             Err(error) => error.message(*lang).into(),
                         };
                         continue;
@@ -1353,6 +1367,9 @@ fn apply_actions(
                             session.target = Some(c.target());
                             session.reachable = true;
                             panels.write(OpenPanel(PanelKind::Scavenge));
+                            sound.write(SfxEvent::Rummage);
+                        } else {
+                            sound.write(SfxEvent::Ui { confirm: true });
                         }
                         prompt.0 = None;
                     }
@@ -1375,6 +1392,7 @@ fn apply_actions(
                 };
                 match inventory.use_item(id, &mut vitals, medic, risk) {
                     Ok(result) => {
+                        sound.write(use_sound(id, &result));
                         game.hp = vitals.hp;
                         game.bleed = vitals.bleeding;
                         needs.hunger = vitals.hunger;
@@ -1446,6 +1464,22 @@ fn apply_actions(
                 }
             }
         }
+    }
+}
+
+/// Called only after inventory mutation succeeds. Empty/invalid uses remain
+/// silent, and ammunition handling does not pretend the game has magazines.
+fn use_sound(id: &str, result: &UseResult) -> SfxEvent {
+    match result {
+        UseResult::Cooked(_) => SfxEvent::Cook,
+        UseResult::Equipped(_) => SfxEvent::Equip,
+        UseResult::Unloaded { .. } => SfxEvent::Reload,
+        UseResult::Consumed { .. } => match item(id).map(|d| d.kind) {
+            Some(crate::inventory::ItemKind::Med) => SfxEvent::Heal,
+            kind => SfxEvent::Consume {
+                drink: kind == Some(crate::inventory::ItemKind::Drink),
+            },
+        },
     }
 }
 
@@ -2220,6 +2254,7 @@ mod tests {
 
     #[test]
     fn loot_transfer_requires_the_selected_reachable_container_and_open_path() {
+        use bevy::ecs::message::{MessageCursor, Messages};
         use bevy::state::app::StatesPlugin;
         let map = world();
         let obstacles = Obstacles::new(map.clone());
@@ -2282,8 +2317,14 @@ mod tests {
             .resource_mut::<ScavengeState>()
             .loot
             .push((c.id.clone(), stock));
+        let mut sounds = MessageCursor::<SfxEvent>::default();
         app.world_mut().write_message(WorldAction::Interact);
         app.update();
+        let emitted: Vec<_> = sounds
+            .read(app.world().resource::<Messages<SfxEvent>>())
+            .copied()
+            .collect();
+        assert!(matches!(emitted.as_slice(), [SfxEvent::Rummage]));
         assert_eq!(
             app.world().resource::<Inventory>().count("water"),
             0,
@@ -2309,10 +2350,22 @@ mod tests {
         obstacles.doors().set_open(door_id, false);
         app.world_mut().write_message(take.clone());
         app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0,
+            "blocked transfer must be silent"
+        );
         assert_eq!(app.world().resource::<Inventory>().count("water"), 0);
         obstacles.doors().set_open(door_id, true);
         app.world_mut().write_message(take.clone());
         app.update();
+        let emitted: Vec<_> = sounds
+            .read(app.world().resource::<Messages<SfxEvent>>())
+            .copied()
+            .collect();
+        assert!(matches!(emitted.as_slice(), [SfxEvent::Pickup]));
         assert_eq!(app.world().resource::<Inventory>().count("water"), 1);
         app.world_mut()
             .get_mut::<Transform>(player)
@@ -2321,6 +2374,12 @@ mod tests {
             .x += 10.0;
         app.world_mut().write_message(take.clone());
         app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0
+        );
         assert_eq!(app.world().resource::<Inventory>().count("water"), 1);
         app.world_mut()
             .get_mut::<Transform>(player)
@@ -2329,6 +2388,12 @@ mod tests {
         app.world_mut().resource_mut::<ScavengeSession>().target = None;
         app.world_mut().write_message(take);
         app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0
+        );
         assert_eq!(app.world().resource::<Inventory>().count("water"), 1);
         assert_eq!(
             app.world().resource::<ScavengeState>().loot[0]
@@ -2336,5 +2401,95 @@ mod tests {
                 .count("water"),
             2
         );
+    }
+
+    #[test]
+    fn item_audio_follows_actual_successful_mutations_only() {
+        use bevy::ecs::message::{MessageCursor, Messages};
+        use bevy::state::app::StatesPlugin;
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin))
+            .insert_state(GameFlow::Playing)
+            .init_resource::<PauseOpen>()
+            .init_resource::<Campaign>()
+            .init_resource::<ScavengeState>()
+            .init_resource::<Inventory>()
+            .init_resource::<Shelter>()
+            .init_resource::<PlayerNeeds>()
+            .init_resource::<GameState>()
+            .init_resource::<MoralPrompt>()
+            .init_resource::<WorldNotice>()
+            .init_resource::<Language>()
+            .init_resource::<SelectedRole>()
+            .init_resource::<ShelterEnvironment>()
+            .init_resource::<ScavengeSession>()
+            .insert_resource(WorldCatalog {
+                containers: vec![],
+                patrols: vec![],
+                home: world().spawn,
+            })
+            .insert_resource(Obstacles::new(world().clone()))
+            .add_message::<WorldAction>()
+            .add_message::<OpenPanel>()
+            .add_message::<SfxEvent>()
+            .add_systems(Update, apply_actions);
+        app.world_mut().spawn((Player, Transform::default()));
+        {
+            let mut bag = app.world_mut().resource_mut::<Inventory>();
+            for id in [
+                "water", "can", "bandage", "knife", "mag191", "rawrice", "cstove", "butane",
+            ] {
+                bag.add(id, 1);
+            }
+        }
+        for id in ["water", "can", "bandage", "knife", "mag191", "rawrice"] {
+            app.world_mut().write_message(WorldAction::Use(id.into()));
+        }
+        let mut sounds = MessageCursor::<SfxEvent>::default();
+        app.update();
+        let emitted: Vec<_> = sounds
+            .read(app.world().resource::<Messages<SfxEvent>>())
+            .copied()
+            .collect();
+        assert!(matches!(
+            emitted.as_slice(),
+            [
+                SfxEvent::Consume { drink: true },
+                SfxEvent::Consume { drink: false },
+                SfxEvent::Heal,
+                SfxEvent::Equip,
+                SfxEvent::Reload,
+                SfxEvent::Cook,
+            ]
+        ));
+        let bag = app.world().resource::<Inventory>();
+        assert_eq!(bag.equipped, "knife");
+        assert_eq!(bag.count("water"), 0);
+        assert_eq!(bag.count("rawrice"), 0);
+        assert_eq!(bag.count("cookedrice"), 1);
+        for id in [
+            "water", "can", "bandage", "mag191", "rawrice", "cstove", "unknown",
+        ] {
+            app.world_mut().write_message(WorldAction::Use(id.into()));
+        }
+        app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0,
+            "missing items and failed cooking cannot play success cues"
+        );
+        app.world_mut().resource_mut::<PauseOpen>().0 = true;
+        app.world_mut()
+            .write_message(WorldAction::Use("knife".into()));
+        app.update();
+        assert_eq!(
+            sounds
+                .read(app.world().resource::<Messages<SfxEvent>>())
+                .count(),
+            0
+        );
+        assert_eq!(app.world().resource::<Inventory>().equipped, "knife");
     }
 }

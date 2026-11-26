@@ -38,10 +38,12 @@ fixture names and loot tables in `src/map/interiors.ts`.
 `ScavengeState.loot` is the authoritative stock record. First search freezes the
 initial deterministic roll (including the one-time night bonus); later searches
 never reroll, apply another night bonus, or turn an empty record into new goods.
-Opened fixture leftovers currently remain fixed after their first search. Web
-also ages refrigerator/counter/stall contents periodically after a power cut;
-that periodic fixture-stock decay is not implemented in this wave. Initial late
-search spoilage and carried/shelter stock spoilage remain active.
+The audio/settings follow-up adds periodic aging of opened refrigerator, counter
+and stall contents after power loss. Its persisted interval progress and separate
+random stream prevent reload rerolls; ordinary shelves and dry goods remain
+unaffected. See [CONTAINER-AGING-PARITY.md](CONTAINER-AGING-PARITY.md) for the
+exact rule and controlled Android verification. Initial late-search spoilage and
+carried/shelter stock spoilage remain active.
 
 Partial counts and empty records are included in the existing atomic native save,
 20-real-second autosave, background save, and manual Save / Continue path.

@@ -237,4 +237,126 @@ refresh_log
 [[ $(log_count 'DTLOOT open id=x814_3 ') -eq $((indoor_open_start + 2)) ]]
 [[ $(log_count 'DTDOOR barricaded=true id=97 ') -eq $((indoor_board_start + 1)) ]]
 [[ $(log_count 'DTDOOR barricaded=false id=97 ') -eq $((indoor_remove_start + 1)) ]]
-printf '%s\n' 'Indoor Android smoke passed: fixture-based touch pickups, exact saved stock, barricade spend/refund, cold Continue and door opening.'
+
+# One further controlled scenario: already-opened cold storage reaches the Web
+# six-game-hour blackout boundary, then survives an unmodified cold Continue.
+# Preserve all seven checkpoints above and their original runtime assertions.
+AGING_FIXTURE_FILE="$(dirname "${BASH_SOURCE[0]}")/../game/tests/fixtures/android-aging-smoke.json"
+python3 - "$AGING_FIXTURE_FILE" "$OUT_DIR/after-continue.json" "$OUT_DIR" <<'PY_AGING_PREPARE'
+import copy
+import hashlib
+import json
+import math
+import sys
+from pathlib import Path
+
+descriptor_path, baseline_path, output = map(Path, sys.argv[1:])
+fixture = json.loads(descriptor_path.read_text())
+baseline_bytes = baseline_path.read_bytes()
+save = copy.deepcopy(json.loads(baseline_bytes))
+cold = fixture["container"]
+assert fixture["version"] == 1 and cold["id"] == "x814_1" and cold["building"] == 814
+assert fixture["control_id"] == "x814_3"
+assert fixture["power_off"] == 4020 and fixture["game_min"] == fixture["power_off"] + 361
+assert len(cold["approach"]) == 2 and all(math.isfinite(v) for v in cold["approach"])
+minute = float(fixture["game_min"])
+world = save["world"]
+world["fixtures_version"] = 1
+world["dead"] = sorted(set(world["dead"]) | set(range(64)))
+# Only these two authoritative stock records participate. The ordinary shelf
+# contains the same fresh food as a negative control, plus unchanged dry goods.
+world["loot"] = [[key, [["bento", 2], ["can", 4], ["water", 2]]]
+                 for key in (cold["id"], fixture["control_id"])]
+world["drops"] = []
+for field in ("searched", "asked", "night_seen"):
+    world[field] = list(dict.fromkeys([*world[field], cold["id"], fixture["control_id"]]))
+world["asked"] = list(dict.fromkeys([*world["asked"], f'c{cold["building"]}']))
+world["closed_doors"] = [i for i in world["closed_doors"] if i != cold["building"]]
+world["barricaded_doors"] = [i for i in world.get("barricaded_doors", []) if i != cold["building"]]
+world["container_aging"] = {"minute": minute - 1.0, "elapsed_hours": 6.0, "seed": 1972}
+world["weather"].update(next=minute + 1440.0, until=0.0, amount=0.0, wet=0.0)
+save["campaign"].update(game_min=minute, clock_remainder=0.0, day_hours=1,
+                         speed=1, sleeping=False, notice="", notice_t=0.0)
+save["shelter"]["day"] = 1 + int((minute - 360.0) // 1440.0)
+save["environment"].update(power=False, water=True, raining=False)
+save["needs"].update(hunger=100.0, thirst=100.0, fatigue=0.0)
+save["inventory"] = {"items": [], "equipped": ""}
+save["player"].update(hp=100.0, bleed=False, stun=0.0,
+                       position=[cold["approach"][0], 0.0, cold["approach"][1]])
+path = output / "indoor-aging-fixture.json"
+path.write_text(json.dumps(save, ensure_ascii=False, separators=(",", ":")) + "\n")
+(output / "indoor-aging-provenance.json").write_text(json.dumps({
+    "test": "Actual Android opened-container aging followed by cold Continue",
+    "baseline_file": baseline_path.name,
+    "baseline_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+    "geometry_descriptor": fixture,
+    "prepared_save": {"file": path.name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
+    "controlled_state": ["checked refrigerator approach", "game minute and power flag",
+                         "six elapsed blackout hours", "deterministic seed 1972",
+                         "opened cold storage and ordinary-shelf control", "empty carried bag",
+                         "native patrol IDs 0..63 suppressed"],
+    "expected_runtime_mutation": "one bento becomes one rotten item only in cold storage; seed advances to 1380227",
+    "continue_check": "The first actual Android saved file is reinstalled byte-for-byte; no clock or stock edit",
+    "not_tested": ["waiting six real/game hours", "walking to the refrigerator", "combat", "physical-device performance"],
+}, ensure_ascii=False, indent=2) + "\n")
+PY_AGING_PREPARE
+
+aging_assert_save() {
+  python3 - "$AGING_FIXTURE_FILE" "$OUT_DIR/$1.json" "$OUT_DIR/after-continue.json" "$2" <<'PY_AGING_VERIFY'
+import json
+import math
+import sys
+
+fixture, save, baseline = [json.load(open(path, encoding="utf-8")) for path in sys.argv[1:4]]
+mode = sys.argv[4]
+world = save["world"]
+def counts(stock):
+    assert len(stock) == len({key for key, _ in stock}), "Duplicate stock IDs"
+    assert all(isinstance(n, int) and n >= 0 for _, n in stock)
+    return {key: n for key, n in stock if n}
+records = world["loot"]
+assert len(records) == 2 and len({key for key, _ in records}) == 2
+stocks = {key: counts(items) for key, items in records}
+assert stocks[fixture["container"]["id"]] == {"bento": 1, "rotten": 1, "can": 4, "water": 2}, stocks
+assert stocks[fixture["control_id"]] == {"bento": 2, "can": 4, "water": 2}, stocks
+assert counts(save["inventory"]["items"]) == {} and save["inventory"]["equipped"] == ""
+assert world["fixtures_version"] == 1 and set(range(64)) <= set(world["dead"])
+assert save["role_id"] == baseline["role_id"] and save["female"] == baseline["female"]
+assert save["map"]["notes"] == baseline["map"]["notes"]
+assert save["player"]["hp"] > 0 and not save["environment"]["power"]
+position = save["player"]["position"]
+assert math.dist([position[0], position[2]], fixture["container"]["approach"]) < 0.0001
+clock = world["container_aging"]
+minute = save["campaign"]["game_min"]
+assert fixture["game_min"] <= minute < fixture["game_min"] + 350, "A second six-hour interval must not be forced"
+assert clock["seed"] == 1380227, "Continue rerolled or skipped the first real RNG draw"
+assert abs(clock["minute"] - minute) < 0.02
+assert abs(clock["elapsed_hours"] - (minute - fixture["game_min"] + 1.0) / 60.0) < 0.02
+assert 0 < clock["elapsed_hours"] < 6.0
+if mode == "continued":
+    print("Verified actual Android checkpoint: indoor-food-aged-continued; exact stock, controls and saved RNG preserved")
+else:
+    assert mode == "initial"
+    print("Verified initial Android aging snapshot before cold Continue")
+PY_AGING_VERIFY
+}
+
+refresh_log
+aging_start=$(log_count 'DTLOOT aging converted=1 intervals=1$')
+indoor_restart_from "$OUT_DIR/indoor-aging-fixture.json" 25-aging-fixture
+wait_log 'DTLOOT aging converted=1 intervals=1$' "$((aging_start + 1))" 90
+tap_wait 268 787 'DTLOOT open id=x814_1 stacks=4$' 'DTUI panel=Some\(Scavenge\)$'
+indoor_save_checkpoint indoor-food-aged 324 731
+aging_assert_save indoor-food-aged initial
+capture 26-aged-fridge-portrait 390 844
+
+indoor_restart_from "$OUT_DIR/indoor-food-aged.json" 27-aging-continue
+tap_wait 268 787 'DTLOOT open id=x814_1 stacks=4$' 'DTUI panel=Some\(Scavenge\)$'
+indoor_save_checkpoint indoor-food-aged-continued 324 731
+aging_assert_save indoor-food-aged-continued continued
+capture 28-aged-fridge-continued 390 844
+tap_wait 332 77 'DTUI panel=None$'
+alive
+refresh_log
+[[ $(log_count 'DTLOOT aging converted=1 intervals=1$') -eq $((aging_start + 1)) ]]
+printf '%s\n' 'Indoor Android smoke passed: fixture-based touch pickups, exact saved stock, barricade spend/refund, cold Continue, door opening and persisted blackout aging.'

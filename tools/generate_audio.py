@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""CC0 stand-ins for Defend Taipei's procedural WebAudio cues.
+"""Offline WebAudio synthesis and pinned CC0 recording import for Defend Taipei.
 
 The original `src/audio/audio.ts` and `src/story/broadcasts/broadcast.ts` synthesize
 these at runtime (noise bursts, oscillators, siren rotors, radio hiss). This script
-renders the same cues to small mono OGG files so Bevy can play them. No third-party
-samples. Public domain under CC0 1.0.
+renders procedural motifs to mono OGG and imports the pinned Web CC0 recordings.
+See assets/audio/CREDITS.md for the original recording authors and source links.
 
     python3 tools/generate_audio.py
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import math
 import subprocess
@@ -70,22 +72,37 @@ def noise_burst(rng: np.random.Generator, n: int, hz_coef: float, decay: float, 
     return band * env_burst(n, 0.003, decay, delay)
 
 
-def write_ogg(path: Path, samples: np.ndarray, bitrate: str, title: str) -> None:
+def write_ogg(path: Path, samples: np.ndarray, bitrate: str, title: str, *, artist: str = "DefendTaipei", recorded: bool = False) -> None:
     if sys.byteorder != "little":
         raise RuntimeError("little-endian host required")
     path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg", "-y", "-v", "error", "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", "pipe:0",
         "-c:a", "libvorbis", "-b:a", bitrate, "-ar", str(SR), "-ac", "1",
+        "-fflags", "+bitexact", "-flags:a", "+bitexact",
         "-metadata", f"TITLE={title}",
-        "-metadata", "ARTIST=DefendTaipei",
-        "-metadata", "COMMENT=Original procedural audio, CC0-1.0, ported from the web build's synthesizer.",
+        "-metadata", f"ARTIST={artist}",
+        "-metadata", "COMMENT=" + ("Derived from pinned Web CC0 recording; see CREDITS.md." if recorded else "Original procedural audio, CC0-1.0, ported from the web synthesizer or native Foley."),
         "-metadata", "LICENSE=CC0-1.0",
         str(path),
     ]
     proc = subprocess.run(cmd, input=np.ascontiguousarray(samples).tobytes(), capture_output=True)
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr.decode()[:1500])
+    # Vorbis can overshoot short transients even when the input PCM is bounded.
+    # Measure the actual decoder output, then re-encode with adequate headroom.
+    for _ in range(3):
+        decoded = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(SR), "pipe:1"],
+            capture_output=True, check=True,
+        )
+        peak = float(np.max(np.abs(np.frombuffer(decoded.stdout, dtype=np.float32))))
+        if peak <= .86:
+            break
+        samples = samples * (.82 / peak)
+        subprocess.run(cmd, input=np.ascontiguousarray(samples).tobytes(), capture_output=True, check=True)
+    else:
+        raise RuntimeError(f"Unable to bound decoded peak for {path}")
 
 
 def loopify(src: np.ndarray, fade_n: int) -> np.ndarray:
@@ -107,7 +124,7 @@ def gun(kind: str) -> np.ndarray:
     }[kind]
     crack, body, dur, vol = spec
     n = int(SR * (dur * 1.8 + 0.08))
-    rng = np.random.default_rng(abs(hash(kind)) % 10_000)
+    rng = np.random.default_rng(int.from_bytes(hashlib.sha256(kind.encode()).digest()[:4], "little"))
     sig = 0.9 * noise_burst(rng, n, min(0.55, 800 / crack), dur * 0.5)
     sig += 0.7 * noise_burst(rng, n, 0.12, dur * 1.6)
     sig += 0.8 * vol * tone(n, body * 1.8, body * 0.5, dur)
@@ -277,7 +294,135 @@ def bed(kind: str) -> np.ndarray:
     return norm(loopify(sig, extra), 0.5)
 
 
+def extended(kind: str) -> np.ndarray:
+    """Web evening/shelter motifs plus native interaction Foley; no recordings."""
+    seconds = {"garbage_truck": 6.8, "temple": 7.0, "firecrackers": 6.0,
+               "thunder": 5.2, "jet": 4.5, "rotor": 1.5,
+               "shelter_clock": 3.3, "water": 1.2, "cook": 1.5}.get(kind, 0.8)
+    n = int(SR * seconds)
+    seed = int.from_bytes(hashlib.sha256(kind.encode()).digest()[:4], "little")
+    rng = np.random.default_rng(seed)
+    sig = np.zeros(n)
+    if kind == "garbage_truck":
+        phrase = [(659.25,1),(622.25,1),(659.25,1),(622.25,1),(659.25,1),(493.88,1),
+                  (587.33,1),(523.25,1),(440,2),(261.63,1),(329.63,1),(440,1),
+                  (493.88,2),(329.63,1),(415.3,1),(493.88,1),(523.25,2),
+                  (329.63,1),(659.25,1),(622.25,1),(659.25,1),(622.25,1),
+                  (659.25,1),(493.88,1),(587.33,1),(523.25,1),(440,2)]
+        at = 0.0
+        for hz, beats in phrase:
+            sig += tone(n, hz, hz, .19 * beats * .45, at)
+            sig += .16 * tone(n, hz*3, hz*3, .19 * beats * .45, at)
+            at += .19 * beats
+    elif kind == "temple":
+        for hz, gain in [(196,.6),(523,.3),(851,.18),(1210,.1)]:
+            sig += gain * tone(n, hz, hz*.995, 2.0)
+        for i in range(8):
+            sig += .22 * tone(n, 900, 830, .055, 1.2+i*.45)
+        for hz in (110,165):
+            sig += .07 * tone(n, hz, hz, 3.0, .8)
+    elif kind == "firecrackers":
+        at = .1
+        for _ in range(46):
+            at += .03 + rng.random()**2*.22
+            sig += noise_burst(rng,n,.45,.025,at) * (.4+rng.random()*.6)
+    elif kind == "thunder":
+        sig = lowpass(rng.standard_normal(n),.04) * env_burst(n,.05,1.3)
+        sig += lowpass(rng.standard_normal(n),.012) * env_burst(n,.3,2.0,.4)
+    elif kind == "jet":
+        t = np.arange(n)/SR
+        roar = lowpass(rng.standard_normal(n),.22)
+        sig = roar * np.exp(-((t-1.3)/1.15)**2)
+        sig += .15*tone(n,220,90,3.2)
+    elif kind == "rotor":
+        for i in range(7):
+            sig += lowpass(rng.standard_normal(n),.04)*env_burst(n,.01,.07,i/5.2)
+    elif kind == "shelter_clock":
+        for i in range(4):
+            sig += noise_burst(rng,n,.7,.008,i)
+    elif kind == "shelter_cup":
+        sig = tone(n,3100,3000,.18)
+    elif kind == "shelter_chair":
+        sig = tone(n,240,180,.3)+.2*noise_burst(rng,n,.1,.25)
+    elif kind == "shelter_pot":
+        sig = tone(n,900,880,.3)+.5*tone(n,1210,1190,.25)
+    elif kind == "door_open":
+        sig = .45*tone(n,180,380,.35)+.3*noise_burst(rng,n,.08,.4)
+        sig += .7*tone(n,1100,600,.04,.04)
+    elif kind == "door_close":
+        sig = tone(n,95,40,.16,.05)+.5*noise_burst(rng,n,.12,.08,.05)
+        sig += .25*tone(n,1700,900,.045,.2)
+    elif kind in ("barricade", "build"):
+        for i in range(3):
+            sig += tone(n,230,80,.065,i*.2)+noise_burst(rng,n,.3,.035,i*.2)
+    elif kind == "unboard":
+        sig = .6*tone(n,320,160,.25)+noise_burst(rng,n,.15,.22)
+        sig += tone(n,2200,1300,.06,.4)
+    elif kind in ("pickup", "equip", "heal", "reload"):
+        count = 3 if kind == "reload" else 2
+        for i in range(count):
+            sig += noise_burst(rng,n,.45,.06,.08+i*.18)
+            sig += (.7 if kind == "equip" else .25)*tone(n,1400,600,.05,.1+i*.18)
+    elif kind in ("drink", "water", "cook"):
+        sig = lowpass(rng.standard_normal(n),.16)*env_burst(n,.1,.4)
+        for i in range(6):
+            sig += .4*tone(n,320+i*60,140+i*20,.045,i*.11)
+    elif kind == "eat":
+        for i in range(4):
+            sig += noise_burst(rng,n,.22,.06,i*.15)
+    elif kind == "melee_blunt":
+        sig = tone(n,140,60,.12)+.45*lowpass(rng.standard_normal(n),.08)*env_burst(n,.003,.09)
+    elif kind == "swish_heavy":
+        sig = lowpass(rng.standard_normal(n),.18)*env_burst(n,.06,.12)
+    elif kind == "ui_confirm":
+        sig = tone(n,660,660,.055)+.6*tone(n,880,880,.07,.08)
+    elif kind == "ui_open":
+        sig = tone(n,560,470,.045)
+    elif kind == "denied":
+        sig = tone(n,220,180,.08)+.6*tone(n,180,140,.08,.15)
+    elif kind == "dry_fire":
+        sig = noise_burst(rng,n,.65,.012)+.25*tone(n,1500,800,.02)
+    else:
+        raise ValueError(kind)
+    return norm(fade_ends(sig, 8, min(int(SR*.06),n//4)), .72)
+
+
+def import_recordings(web: Path) -> list[dict]:
+    """Import the pinned Web recordings, preserving source hashes and credits."""
+    result = []
+    for family in ("gun", "boom"):
+        files = sorted((web / "public/sfx" / family).glob("*.mp3"))
+        expected = 12 if family == "gun" else 3
+        if len(files) != expected:
+            raise RuntimeError(f"Expected {expected} pinned {family} samples, found {len(files)}")
+        for source in files:
+            pcm = subprocess.run(["ffmpeg","-v","error","-i",str(source),"-f","f32le",
+                                  "-ar",str(SR),"-ac","1","pipe:1"],capture_output=True,check=True)
+            dry = np.frombuffer(pcm.stdout,dtype=np.float32).copy()
+            for room in ("dry", "room", "far"):
+                samples = dry
+                if room != "dry":
+                    coef = .35 if room == "room" else .12
+                    samples = lowpass(dry,coef)
+                    tail = .5 if room == "room" else .8
+                    padded = np.pad(samples,(0,int(SR*tail)))
+                    for delay,gain in ([(.045,.35),(.09,.12),(.135,.04)] if room == "room"
+                                       else [(.2,.25),(.36,.11),(.56,.04)]):
+                        at = int(SR*delay)
+                        padded[at:at+len(samples)] += samples*gain
+                    samples = padded
+                name = f"rec_{source.stem}_{room}.ogg"
+                write_ogg(OUT/name,norm(fade_ends(samples,4,int(SR*.025)),.78),"56k",f"Web {source.stem} {room}", artist=("Ben Jaszczak, Brian Nelson, Kevin Heras, Matthew Nanney" if family == "gun" else "rubberduck"), recorded=True)
+                result.append({"path":f"audio/{name}","source":str(source.relative_to(web)),
+                               "source_sha256":hashlib.sha256(source.read_bytes()).hexdigest(),
+                               "license":"CC0-1.0", "variant":room})
+    return result
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--web-root",type=Path,default=ROOT.parent/"defendtaipei-web")
+    args = parser.parse_args()
     clips: list[tuple[str, np.ndarray, str, str]] = []
     for kind in ("pistol", "rifle", "sniper", "mg", "shotgun", "at"):
         clips.append((f"gun_{kind}.ogg", gun(kind), "48k", f"Gun {kind}"))
@@ -304,12 +449,13 @@ def main() -> None:
         ("room.ogg", bed("room"), "24k", "Room tone"),
         ("radio_bed.ogg", bed("radio"), "24k", "Radio bed"),
     ]
-    # Drop files from the previous pack that this set replaces.
-    keep = {name for name, _, _, _ in clips}
-    if OUT.exists():
-        for old in OUT.glob("*.ogg"):
-            if old.name not in keep:
-                old.unlink()
+    for kind in ("garbage_truck","temple","firecrackers","thunder","jet","rotor",
+                 "shelter_clock","shelter_cup","shelter_chair","shelter_pot",
+                 "door_open","door_close","barricade","unboard","pickup","equip",
+                 "heal","reload","drink","water","cook","eat","build",
+                 "melee_blunt","swish_heavy","ui_confirm","ui_open","denied","dry_fire"):
+        clips.append((kind+".ogg",extended(kind),"40k",kind.replace("_"," ")))
+    clips.append(("rain_indoor.ogg",norm(lowpass(bed("rain"),.09),.5),"28k","Indoor rain"))
     total = 0
     for name, samples, bitrate, title in clips:
         path = OUT / name
@@ -325,9 +471,27 @@ def main() -> None:
     jump = abs(float(pcm[0] - pcm[-1]))
     if jump > 0.08:
         raise RuntimeError(f"siren loop step {jump}")
-    if total > 3 * 1024 * 1024:
-        raise RuntimeError(f"audio {total} bytes exceeds 3 MB")
-    print(f"total_bytes {total} files {len(clips)}")
+    recorded = import_recordings(args.web_root)
+    source_by_path = {entry["path"]:entry for entry in recorded}
+    manifest = []
+    for path in sorted(OUT.glob("*.ogg")):
+        decoded = subprocess.run(["ffmpeg","-v","error","-i",str(path),"-f","f32le","-ac","1",
+                                  "-ar",str(SR),"pipe:1"],capture_output=True,check=True)
+        pcm = np.frombuffer(decoded.stdout,dtype=np.float32)
+        if len(pcm) == 0 or not np.isfinite(pcm).all() or np.max(np.abs(pcm)) < .001:
+            raise RuntimeError(f"Invalid/silent decoded clip: {path.name}")
+        entry = {"path":"audio/"+path.name,"duration":len(pcm)/SR,"bytes":path.stat().st_size,
+                 "sha256":hashlib.sha256(path.read_bytes()).hexdigest(),"sample_rate":SR,
+                 "channels":1,"decoded_peak":float(np.max(np.abs(pcm))),
+                 "decoded_rms":float(np.sqrt(np.mean(pcm**2))),"license":"CC0-1.0"}
+        entry.update(source_by_path.get(entry["path"],{"source":"tools/generate_audio.py"}))
+        manifest.append(entry)
+    total = sum(entry["bytes"] for entry in manifest)
+    (OUT/"manifest.json").write_text(json.dumps({"web_commit":"b9b0a2736642b37dd45925a4719dfef08b8f36b4",
+                        "sample_rate":SR,"clips":manifest},ensure_ascii=False,indent=2)+"\n")
+    if total > 5 * 1024 * 1024:
+        raise RuntimeError(f"audio {total} bytes exceeds 5 MB")
+    print(f"total_bytes {total} files {len(manifest)}")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # Streets, entrances and title flow
 
-**Historical scope:** this records PR #17's first street/title wave. The next wave replaces fixed-open leaves with [interactive persisted doors](DOORS-PARITY.md), adds the [survivor map](SURVIVOR-MAP-PARITY.md), [expanded HUD/report history](HUD-PARITY.md), and [weather/power-responsive atmosphere](CITY-ATMOSPHERE-PARITY.md). Its native QA expands the 18 captures below to 28. Statements about fixed-open doors below describe PR #17, not the current build.
+**Historical scope:** this records PR #17's first street/title wave. The next wave replaces fixed-open leaves with [interactive persisted doors](DOORS-PARITY.md), adds the [survivor map](SURVIVOR-MAP-PARITY.md), [expanded HUD/report history](HUD-PARITY.md), and [weather/power-responsive atmosphere](CITY-ATMOSPHERE-PARITY.md). Its native QA expands the 18 captures below to 28. Statements about fixed-open doors below describe PR #17, not the current build. Later waves also add interiors and selective pickup; current native QA has 43 captures. [SETTINGS-PARITY.md](SETTINGS-PARITY.md) records the now-implemented audio/language preferences and next-run 1/2/4-hour day choices.
 
 This document describes the native visual work prompted by physical-phone screenshots showing overly clean paving and walls, conspicuous colored asphalt patches, missing visible doors and a sparse start screen. It records the implemented scope and the checks required for this revision. It does not certify pixel-for-pixel Web parity or a hardware frame-rate target.
 
@@ -55,7 +55,7 @@ Controls is a three-page guide to movement/combat, supplies/shelter, and saving/
 
 Portraits come from `human::rig::make_rig`, using each role's actual outfit and selected gender. A small CPU rasterizer produces transparent 160 × 208 portraits and caches them by role and gender, for at most twelve images. They do not require six continuously running portrait cameras or animated rigs. The title tree is rebuilt when its viewport, page, survivor, language or save-status render key changes.
 
-The native flow preserves the Web distinction between choosing a character and committing to departure. It does not include the Web's full Preferences or Settings screens, configurable day length, multiplayer or teammate selection. The native day remains one real hour at 1×; prologue skipping occurs on the prologue screen.
+The native flow preserves the Web distinction between choosing a character and committing to departure. PR #17 originally used a fixed one-hour day; the current Settings follow-up adds audio, language and next-run 1/2/4-hour choices, and the briefing reflects that selection. Existing runs retain their saved duration. Full Web preferences, multiplayer and teammate selection remain outside this scope; prologue skipping occurs on the prologue screen.
 
 ## Performance approach
 

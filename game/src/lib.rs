@@ -6,6 +6,8 @@
 use bevy::{prelude::*, window::WindowMode};
 
 mod audio;
+#[cfg(not(target_os = "android"))]
+mod audio_qa;
 mod camera;
 pub mod chunk;
 mod city;
@@ -25,6 +27,7 @@ mod player;
 mod qa;
 pub mod roles;
 pub mod save;
+pub mod settings;
 mod story;
 pub mod survival;
 mod touch;
@@ -34,6 +37,11 @@ pub mod worldplay;
 
 /// Builds and runs the game. Called by the desktop `main` and by the Android entry point.
 pub fn run() {
+    #[cfg(not(target_os = "android"))]
+    if std::env::args().any(|arg| arg == "--audio-qa") {
+        audio_qa::run();
+        return;
+    }
     // Early marker for CI / logcat grepping (before window / GPU init).
     println!("DTPERF boot starting");
 
@@ -98,6 +106,7 @@ pub fn run() {
             combat::CombatPlugin,
         ))
         .add_plugins((
+            settings::SettingsPlugin,
             game_flow::GameFlowPlugin,
             audio::AudioPlugin,
             hud::HudPlugin,

@@ -115,6 +115,7 @@ pub struct HomeLayout {
     pub new_game: ScreenRect,
     pub help: ScreenRect,
     pub about: ScreenRect,
+    pub settings: ScreenRect,
     pub notice: ScreenRect,
     pub footer: ScreenRect,
     pub lang_zh: ScreenRect,
@@ -144,8 +145,14 @@ pub fn home_layout(viewport: Vec2) -> HomeLayout {
     };
     let continue_game = ScreenRect::new(menu_x, menu_top, menu_w, 58.0);
     let new_game = ScreenRect::new(menu_x, menu_top + 68.0, menu_w, 58.0);
-    let help = ScreenRect::new(menu_x, menu_top + 138.0, (menu_w - 10.0) * 0.5, 44.0);
-    let about = ScreenRect::new(help.max.x + 10.0, help.min.y, help.width(), help.height());
+    let help = ScreenRect::new(menu_x, menu_top + 138.0, (menu_w - 16.0) / 3.0, 44.0);
+    let settings = ScreenRect::new(help.max.x + 8.0, help.min.y, help.width(), help.height());
+    let about = ScreenRect::new(
+        settings.max.x + 8.0,
+        help.min.y,
+        help.width(),
+        help.height(),
+    );
     let notice = ScreenRect::new(menu_x, menu_top + 190.0, menu_w, 28.0);
     let footer = ScreenRect::new(x, bottom - 16.0, width, 16.0);
     let lang_w = if portrait { 58.0 } else { 74.0 };
@@ -193,6 +200,7 @@ pub fn home_layout(viewport: Vec2) -> HomeLayout {
         new_game,
         help,
         about,
+        settings,
         notice,
         footer,
         lang_zh,
@@ -316,6 +324,7 @@ fn overlay_layout(viewport: Vec2, top_gap: f32) -> DeathLayout {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PauseLayout {
+    pub settings: ScreenRect,
     pub frame: ScreenRect,
     pub summary: ScreenRect,
     pub heading: ScreenRect,
@@ -352,7 +361,13 @@ pub fn pause_layout(viewport: Vec2) -> PauseLayout {
             button_w,
             if viewport.y < 600.0 { 28.0 } else { 48.0 },
         ),
-        heading: ScreenRect::new(x, (top - 48.0).max(insets.top), button_w, 40.0),
+        heading: ScreenRect::new(x, (top - 48.0).max(insets.top), button_w - 100.0, 40.0),
+        settings: ScreenRect::new(
+            x + button_w - 88.0,
+            (top - 48.0).max(insets.top),
+            88.0,
+            36.0,
+        ),
         resume: ScreenRect::new(x, top, button_w, height),
         menu: ScreenRect::new(x, top + height + gap, button_w, height),
         status: ScreenRect::new(x, top + height * 2.0 + gap + 8.0, button_w, 56.0),

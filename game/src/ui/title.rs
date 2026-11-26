@@ -34,6 +34,7 @@ pub(crate) struct TitleMenu {
 #[derive(Message, Clone, Copy, Debug)]
 pub(crate) enum TitleAction {
     NewGame,
+    Settings,
     Role(usize),
     Gender(Gender),
     Language(Language),
@@ -65,6 +66,7 @@ struct RenderKey {
     available: bool,
     notice: String,
     error: Option<String>,
+    day_hours: u8,
 }
 
 #[derive(Resource, Default)]
@@ -89,8 +91,9 @@ pub(super) fn pointer_actions(
     consumed: Res<ConsumedPresses>,
     keys: Res<ButtonInput<KeyCode>>,
     mut actions: MessageWriter<TitleAction>,
+    settings: Option<Res<super::settings::SettingsUi>>,
 ) {
-    if flow.get() != &GameFlow::Title {
+    if flow.get() != &GameFlow::Title || settings.as_ref().is_some_and(|s| s.open || s.captured) {
         return;
     }
     let viewport = viewport(&windows);
@@ -119,6 +122,7 @@ fn hit_action(menu: TitleMenu, viewport: Vec2, point: Vec2) -> Option<TitleActio
             (layout.new_game, TitleAction::NewGame),
             (layout.continue_game, TitleAction::Continue),
             (layout.help, TitleAction::Help),
+            (layout.settings, TitleAction::Settings),
             (layout.about, TitleAction::About),
             (layout.lang_zh, TitleAction::Language(Language::ZhTw)),
             (layout.lang_en, TitleAction::Language(Language::En)),
@@ -174,13 +178,25 @@ pub(super) fn apply_actions(
     mut start: MessageWriter<StartGame>,
     mut load: MessageWriter<ContinueGame>,
     mut sfx: MessageWriter<SfxEvent>,
+    mut settings: Option<ResMut<super::settings::SettingsUi>>,
 ) {
     let mut departing = false;
     for action in events.read() {
-        if flow.get() != &GameFlow::Title || departing {
+        if flow.get() != &GameFlow::Title
+            || departing
+            || settings.as_ref().is_some_and(|s| s.open || s.captured)
+        {
             continue;
         }
         let applied = match *action {
+            TitleAction::Settings if menu.page == TitlePage::Home => {
+                if let Some(settings) = settings.as_deref_mut() {
+                    settings.open = true;
+                    settings.captured = true;
+                    println!("DTUI action=SettingsOpen");
+                }
+                true
+            }
             TitleAction::Language(value) => {
                 *language = value;
                 true
@@ -248,7 +264,7 @@ pub(super) fn apply_actions(
             _ => false,
         };
         if applied {
-            sfx.write(SfxEvent::Clink { dist: 0.0 });
+            sfx.write(SfxEvent::Ui { confirm: false });
         }
     }
 }
@@ -265,6 +281,7 @@ pub(super) fn render(
     mut images: Option<ResMut<Assets<Image>>>,
     mut assets: ResMut<TitleAssets>,
     mut cache: ResMut<TitleCache>,
+    preferences: Option<Res<crate::settings::GamePreferences>>,
     roots: Query<Entity, With<TitleRoot>>,
 ) {
     if flow.get() != &GameFlow::Title {
@@ -278,6 +295,7 @@ pub(super) fn render(
         available: save.available,
         notice: save.notice.clone(),
         error: save.error.clone(),
+        day_hours: preferences.as_ref().map_or(1, |p| p.day_hours),
     };
     if cache.0.as_ref() == Some(&key) && !roots.is_empty() {
         return;
@@ -427,6 +445,13 @@ fn render_home(root: &mut ChildSpawnerCommands, key: &RenderKey, font: &UiFont) 
         root,
         l.about,
         tr(lang, "製作名單", "About"),
+        ButtonStyle::Quiet,
+        font,
+    );
+    button(
+        root,
+        l.settings,
+        tr(lang, "設定", "Settings"),
         ButtonStyle::Quiet,
         font,
     );
@@ -898,11 +923,17 @@ fn render_briefing(
     text(
         root,
         ScreenRect::new(x, r.min.y + 38.0, width, if short { 40.0 } else { 56.0 }),
-        tr(
-            lang,
-            "一天 = 現實 1 小時（1×）\n開場後，帶著物資回到避難所。",
-            "One day = 1 real hour at 1×.\nBring supplies back to your shelter.",
-        ),
+        &match lang {
+            Language::ZhTw => format!(
+                "一天 = 現實 {} 小時（1×）\n開場後，帶著物資回到避難所。",
+                key.day_hours
+            ),
+            Language::En => format!(
+                "One day = {} real {} at 1×.\nBring supplies back to your shelter.",
+                key.day_hours,
+                if key.day_hours == 1 { "hour" } else { "hours" }
+            ),
+        },
         if short { 11.0 } else { 14.0 },
         PAPER,
         font,
@@ -969,8 +1000,8 @@ fn render_information(root: &mut ChildSpawnerCommands, key: &RenderKey, font: &U
     let content = if key.menu.page == TitlePage::About {
         tr(
             lang,
-            "保衛台北 / Defend Taipei\n\n一位普通人，在萬華活下去的故事。\n原作：DefendTaipei-Lab\n原生版本：Rust + Bevy\n\n地圖資料 © OpenStreetMap contributors（ODbL）\n字型：Noto Sans CJK TC（SIL OFL）\n\n本版可探索萬華核心街區，包含避難所、\n物資生存與存檔續玩。",
-            "DEFEND TAIPEI\n\nAn ordinary person's survival in Wanhua.\nOriginal: DefendTaipei-Lab\nNative edition: Rust + Bevy\n\nMap © OpenStreetMap contributors (ODbL)\nFont: Noto Sans CJK TC (SIL OFL)\n\nThis edition covers the Wanhua core, shelter,\nsupplies, survival and saved journeys.",
+            "保衛台北 / Defend Taipei\n\n一位普通人，在萬華活下去的故事。\n原作：DefendTaipei-Lab\n原生版本：Rust + Bevy\n\n地圖資料 © OpenStreetMap contributors（ODbL）\n字型：Noto Sans CJK TC（SIL OFL）\n錄音：Free Firearm Sound Library、rubberduck（CC0）\n\n本版可探索萬華核心街區，包含避難所、\n物資生存與存檔續玩。",
+            "DEFEND TAIPEI\n\nAn ordinary person's survival in Wanhua.\nOriginal: DefendTaipei-Lab\nNative edition: Rust + Bevy\n\nMap © OpenStreetMap contributors (ODbL)\nFont: Noto Sans CJK TC (SIL OFL)\nRecordings: Free Firearm Sound Library / rubberduck (CC0)\n\nThis edition covers the Wanhua core, shelter,\nsupplies, survival and saved journeys.",
         )
     } else {
         match key.menu.help_page {

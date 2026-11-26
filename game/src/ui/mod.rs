@@ -11,6 +11,7 @@ mod pause;
 mod portrait;
 mod scavenge;
 mod screens;
+pub(crate) mod settings;
 mod shelter;
 mod title;
 
@@ -53,6 +54,17 @@ impl Plugin for FlowUiPlugin {
             .init_resource::<title::TitleCache>()
             .init_resource::<ConsumedPresses>()
             .init_resource::<PauseOpen>()
+            .init_resource::<settings::SettingsUi>()
+            .init_resource::<settings::SettingsCache>()
+            .init_resource::<crate::audio::AudioSettings>()
+            .init_resource::<crate::settings::GamePreferences>()
+            .init_resource::<crate::settings::SettingsStatus>()
+            .add_message::<settings::SettingsAction>()
+            .add_message::<crate::settings::FlushSettings>()
+            .add_message::<bevy::input::touch::TouchInput>()
+            .add_message::<bevy::input::mouse::MouseButtonInput>()
+            .add_message::<bevy::window::WindowFocused>()
+            .add_message::<bevy::window::AppLifecycle>()
             .init_resource::<UiModal>()
             .init_resource::<crate::worldplay::ScavengeSession>()
             .init_resource::<shelter::PanelState>()
@@ -61,6 +73,14 @@ impl Plugin for FlowUiPlugin {
             .add_message::<TitleAction>()
             .add_message::<OpenPanel>()
             .add_systems(OnEnter(GameFlow::Title), title::reset)
+            .add_systems(
+                Update,
+                (settings::pointer_actions, settings::apply_actions)
+                    .chain()
+                    .in_set(settings::SettingsSet)
+                    .before(title::pointer_actions)
+                    .before(pause::drive_pause),
+            )
             .add_systems(
                 Update,
                 (title::pointer_actions, title::apply_actions)
@@ -94,7 +114,8 @@ impl Plugin for FlowUiPlugin {
             );
         app.add_systems(
             PostUpdate,
-            (shelter::render_panels, title::render).before(bevy::ui::UiSystems::Prepare),
+            (shelter::render_panels, title::render, settings::render)
+                .before(bevy::ui::UiSystems::Prepare),
         );
     }
 }

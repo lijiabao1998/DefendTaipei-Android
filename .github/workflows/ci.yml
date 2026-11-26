@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev pkg-config mesa-vulkan-drivers
+            libasound2-dev libasound2-plugins libudev-dev libwayland-dev libxkbcommon-dev pkg-config mesa-vulkan-drivers pulseaudio pulseaudio-utils
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,7 +46,7 @@ jobs:
       - name: Gradle retry behavior
         run: bash scripts/test-gradle-assemble.sh
 
-      - name: Android update and signature helpers
+      - name: Python update, signature and audio helpers
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
 
       - name: cargo clippy
@@ -58,6 +58,22 @@ jobs:
       - name: cargo build (desktop)
         run: cargo build -p defend_taipei --bin defend-taipei
 
+      - name: Capture actual native audio output
+        env:
+          BEVY_ASSET_ROOT: ${{ github.workspace }}/game
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          python3 scripts/audio_capture.py --binary target/debug/defend-taipei --out native-audio-qa
+
+      - name: Upload native audio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-audio-qa
+          path: native-audio-qa/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Native GPU screenshots and save/continue flow
         env:
           DEFEND_TAIPEI_QA_OUT: ${{ github.workspace }}/native-qa
@@ -67,9 +83,9 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(python3 -c 'from pathlib import Path; paths=sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")); print(paths[0] if paths else "")')"
           test -n "$VK_ICD_FILENAMES"
-          # Leave a minute after the internal 20-minute deadline to write evidence.
-          timeout 1260s target/debug/defend-taipei --qa > native-qa.log 2>&1
-          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 39, report'
+          # Leave a minute after the internal 25-minute deadline to write evidence.
+          timeout 1560s target/debug/defend-taipei --qa > native-qa.log 2>&1
+          python3 -c 'import json; report=json.load(open("native-qa/qa-report.json")); assert report["success"], report; assert len(report["captures"]) == 43, report'
 
       - name: Upload native QA evidence
         if: always()
@@ -187,6 +203,47 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: Enable captured emulator audio
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pulseaudio pulseaudio-utils xvfb x11-utils libgl1 libopengl0 \
+            libx11-xcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 \
+            libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=defendtaipei_android rate=48000 channels=2 format=s16le
+          python3 scripts/emulator-audio-preflight.py --configure --out emulator-audio-host
+
+      - name: Start virtual display for emulator audio
+        # Current AOSP audio/paaudio-headless-impl.c intentionally returns NULL
+        # for Pulse contexts. -no-window/-no-qt select that headless executable.
+        # Keep the GUI executable on a local X server so real PA output exists:
+        # https://android.googlesource.com/platform/external/qemu/+/emu-master-dev/audio/paaudio-headless-impl.c
+        run: |
+          mkdir -p emulator-audio-host
+          Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp > emulator-audio-host/xvfb.log 2>&1 &
+          emulator_xvfb_pid=$!
+          emulator_display_ready=0
+          for attempt in $(seq 1 20); do
+            if ! kill -0 "$emulator_xvfb_pid" 2>/dev/null; then
+              cat emulator-audio-host/xvfb.log
+              exit 1
+            fi
+            if timeout 1s env DISPLAY=:99 xdpyinfo >/dev/null 2>&1; then
+              emulator_display_ready=1
+              break
+            fi
+            sleep 0.25
+          done
+          if [[ "$emulator_display_ready" != 1 ]]; then
+            cat emulator-audio-host/xvfb.log
+            echo "Virtual display did not become ready" >&2
+            exit 1
+          fi
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          echo "QT_QPA_PLATFORM=xcb" >> "$GITHUB_ENV"
+
       - name: Build Rust library (.so) x86_64
         run: |
           export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
@@ -224,7 +281,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-api34-x86_64-google_apis
+          key: avd-api34-x86_64-google_apis-audio-gui-v2
 
       - name: Create AVD snapshot (cache miss)
         if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -234,7 +291,7 @@ jobs:
           target: google_apis
           arch: x86_64
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -gpu swiftshader_indirect -no-boot-anim -camera-back none
           disable-animations: true
           script: echo "AVD ready"
 
@@ -246,11 +303,11 @@ jobs:
           target: google_apis
           arch: x86_64
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -gpu swiftshader_indirect -no-boot-anim -camera-back none
           disable-animations: true
           # android-emulator-runner runs each line as its own `sh -c`, so keep
           # this as a single line (no backslash continuations).
-          script: chmod +x scripts/emulator-smoke.sh scripts/emulator-gameplay-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && GAMEPLAY_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-gameplay-smoke" ./scripts/emulator-gameplay-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && UPDATE_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-update-smoke" bash scripts/emulator-update-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
+          script: chmod +x scripts/emulator-smoke.sh scripts/emulator-gameplay-smoke.sh && SMOKE_SECS=45 SMOKE_OUT="$GITHUB_WORKSPACE/emulator-smoke" ./scripts/emulator-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && python3 scripts/emulator-audio-preflight.py --out "$GITHUB_WORKSPACE/emulator-audio-host" && GAMEPLAY_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-gameplay-smoke" ./scripts/emulator-gameplay-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" && python3 scripts/emulator-audio-smoke.py --apk "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk" --out "$GITHUB_WORKSPACE/emulator-audio-qa" && UPDATE_SMOKE_OUT="$GITHUB_WORKSPACE/emulator-update-smoke" bash scripts/emulator-update-smoke.sh "$GITHUB_WORKSPACE/DefendTaipei-x86_64-debug.apk"
 
       - name: Upload smoke artifacts
         if: always()
@@ -261,5 +318,7 @@ jobs:
             emulator-smoke/
             emulator-gameplay-smoke/
             emulator-update-smoke/
+            emulator-audio-qa/
+            emulator-audio-host/
           if-no-files-found: warn
           retention-days: 14
