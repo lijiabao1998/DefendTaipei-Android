@@ -821,6 +821,7 @@ fn ragged_patch(w: f32, h: f32, r: &mut Park) -> MeshBuf {
 /// slabs, whose door holes are already cut, so none can seal an entrance accidentally.
 fn frontage_wear(b: &Bld, out: &mut Parts) {
     let mut r = Park(b.seed7 ^ 0x6d70_8f31);
+    let commercial = super::commercial::plan(b, super::world());
     let Some(door) = b.door else { return };
     let mut walls: Vec<&WallBox> = b
         .walls
@@ -838,6 +839,17 @@ fn frontage_wear(b: &Bld, out: &mut Parts) {
         rank(a).total_cmp(&rank(c))
     });
     for (index, w) in walls.into_iter().take(6).enumerate() {
+        // Preserve every old RNG draw even when a new closed shopfront owns this
+        // wall. Meters and brick patches must not poke through its glazing/shutter.
+        let mut covered = Parts::default();
+        let out = if commercial
+            .as_ref()
+            .is_some_and(|plan| super::commercial::covers_wall(plan, w))
+        {
+            &mut covered
+        } else {
+            &mut *out
+        };
         let l = w.a.distance(w.c);
         let mid = (w.a + w.c) / 2.0;
         let n = wall_normal(b, w);
@@ -991,6 +1003,7 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
         return;
     }
     let exterior = super::exterior::plan(b, super::world());
+    let commercial = super::commercial::plan(b, super::world()).is_some();
     let u = (w.c - w.a) / l;
     let n = wall_normal(b, w);
     let ry = n.x.atan2(n.y);
@@ -1001,17 +1014,21 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
     if b.h > GF + FH && r.f() < 0.55 {
         let idx = (r.f() * VSIGN_N as f32) as usize % VSIGN_N;
         let s = if r.f() < 0.5 { 0.6 } else { l - 0.6 };
-        let g = geom::cuboid(0.1, 2.8, 0.75)
-            .map_uv(|uv, _| [(idx as f32 + uv[0]) / VSIGN_N as f32, 1.0 - uv[1]]);
         let y = (GF + 1.6).min(b.h - 1.5);
         let transform = lt(s, y, 0.5);
-        if !super::exterior::attachment_conflicts(
-            b,
-            &exterior,
-            transform.transform_point3(Vec3::ZERO),
-            Vec3::new(0.05, 1.4, 0.375),
-            n,
-        ) {
+        if !commercial
+            && !super::exterior::attachment_conflicts(
+                b,
+                &exterior,
+                transform.transform_point3(Vec3::ZERO),
+                Vec3::new(0.05, 1.4, 0.375),
+                n,
+            )
+        {
+            // The old random blade identity is replaced by the shop's own atlas
+            // label. Its draws above remain, preserving the following AC layout.
+            let g = geom::cuboid(0.1, 2.8, 0.75)
+                .map_uv(|uv, _| [(idx as f32 + uv[0]) / VSIGN_N as f32, 1.0 - uv[1]]);
             out.add(Mat::VSign, &g, transform, WHITE);
         }
     }
@@ -1154,6 +1171,7 @@ fn frontage_planter(out: &mut Parts, t: Mat4, seed: u64) {
 /// not a second guessed facade, and uses the existing near-detail material batches.
 fn frontage_life(b: &Bld, world: &WorldData, out: &mut Parts) {
     let Some(door) = b.door else { return };
+    let commercial = super::commercial::plan(b, world).is_some();
     let mut walls: Vec<_> = b
         .walls
         .iter()
@@ -1224,27 +1242,32 @@ fn frontage_life(b: &Bld, world: &WorldData, out: &mut Parts) {
             && (b.kind != "home" || r.f() < 0.42)
         {
             let color = [0x648276, 0x8c5243, 0x777c6e, 0x526f6d][(r.f() * 4.0) as usize % 4];
-            let awning = geom::cuboid(width, 0.035, depth).map_uv(|_, p| [p[0] * 1.5, p[2] * 1.5]);
-            let at = transform
-                * geom::at(0.0, 3.05, 0.16)
-                * Mat4::from_rotation_x(0.16)
-                * geom::at(0.0, 0.0, depth / 2.0);
-            out.add(Mat::Tin, &awning, at, hex(color));
-            out.add(
-                Mat::VCol,
-                &bx(width, 0.1, 0.04, 0.0, 2.88, depth + 0.15),
-                transform,
-                hex(0x777064),
-            );
-            for x in [-width * 0.42, width * 0.42] {
-                frontage_bar(
-                    out,
+            // Retain the original conditional and colour draw before suppressing
+            // its geometry; the later plants keep exactly their previous RNG.
+            if !commercial {
+                let awning =
+                    geom::cuboid(width, 0.035, depth).map_uv(|_, p| [p[0] * 1.5, p[2] * 1.5]);
+                let at = transform
+                    * geom::at(0.0, 3.05, 0.16)
+                    * Mat4::from_rotation_x(0.16)
+                    * geom::at(0.0, 0.0, depth / 2.0);
+                out.add(Mat::Tin, &awning, at, hex(color));
+                out.add(
+                    Mat::VCol,
+                    &bx(width, 0.1, 0.04, 0.0, 2.88, depth + 0.15),
                     transform,
-                    Vec3::new(x, 2.62, 0.2),
-                    Vec3::new(x, 2.93, depth * 0.82),
-                    0.035,
-                    0x5a5b51,
+                    hex(0x777064),
                 );
+                for x in [-width * 0.42, width * 0.42] {
+                    frontage_bar(
+                        out,
+                        transform,
+                        Vec3::new(x, 2.62, 0.2),
+                        Vec3::new(x, 2.93, depth * 0.82),
+                        0.035,
+                        0x5a5b51,
+                    );
+                }
             }
         }
 
