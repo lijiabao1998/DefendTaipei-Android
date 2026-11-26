@@ -11,6 +11,17 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.AppCompat.NoActionBar"
         tools:targetApi="34">
+        <!-- Only copied performance reports can be shared, with a temporary
+             read grant selected by the user in the Android share chooser. -->
+        <provider
+            android:name=".PerformanceReportProvider"
+            android:authorities="${applicationId}.performance_reports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/perf_report_paths" />
+        </provider>
         <!-- screenOrientation="sensor": follows the device in landscape and portrait.
              configChanges keeps the activity alive on rotation; Bevy gets a resize instead. -->
         <activity

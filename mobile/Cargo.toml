@@ -15,5 +15,8 @@ path = "src/lib.rs"
 defend_taipei = { path = "../game" }
 bevy = { workspace = true, features = ["android-game-activity"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
+
 [lints]
 workspace = true

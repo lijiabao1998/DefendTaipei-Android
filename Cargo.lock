@@ -2442,6 +2442,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "defend_taipei",
+ "jni 0.21.1",
 ]
 
 [[package]]

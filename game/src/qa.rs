@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use bevy::{
     app::AppExit,
-    camera::{RenderTarget, ShadowLodOrigin},
+    camera::RenderTarget,
     prelude::*,
     render::{
         render_resource::{TextureFormat, TextureUsages},
@@ -44,6 +44,10 @@ enum Action {
     SettingsGame,
     SettingsClose,
     SettingsPause,
+    SettingsPerformance,
+    SettingsPerformanceLandscape,
+    SettingsDiagnostics,
+    PerformanceStreet,
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -124,6 +128,24 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Title,
     },
     Stage {
+        name: "02-settings-performance-portrait",
+        size: [390, 844],
+        action: Action::SettingsPerformance,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
+        name: "02-settings-performance-small-landscape",
+        size: [800, 360],
+        action: Action::SettingsPerformanceLandscape,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
+        name: "02-settings-diagnostics-portrait",
+        size: [390, 844],
+        action: Action::SettingsDiagnostics,
+        flow: ExpectedFlow::Title,
+    },
+    Stage {
         name: "02a-title-small-portrait",
         size: [320, 640],
         action: Action::SettingsClose,
@@ -169,6 +191,12 @@ const STAGES: &[Stage] = &[
         name: "04a-streetscape-portrait",
         size: [390, 844],
         action: Action::Street,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04a1-streetscape-scale70-portrait",
+        size: [390, 844],
+        action: Action::PerformanceStreet,
         flow: ExpectedFlow::Playing,
     },
     Stage {
@@ -460,11 +488,18 @@ impl Plugin for QaPlugin {
 }
 
 fn set_target(world: &mut World, run: &mut QaRun, size: [u32; 2]) -> Result<(), String> {
-    let camera = world
+    let world_camera = world
         .query_filtered::<Entity, With<GameCamera>>()
         .iter(world)
         .next()
         .ok_or("Game camera did not spawn")?;
+    // Keep the existing QA renderer contract on the actual world camera.
+    world.entity_mut(world_camera).insert(Msaa::Off);
+    let camera = world
+        .query_filtered::<Entity, With<crate::performance::render::PresentationCamera>>()
+        .iter(world)
+        .next()
+        .ok_or("Presentation camera did not spawn")?;
     let window_entity = world
         .query_filtered::<Entity, With<PrimaryWindow>>()
         .iter(world)
@@ -484,7 +519,6 @@ fn set_target(world: &mut World, run: &mut QaRun, size: [u32; 2]) -> Result<(), 
     world.entity_mut(camera).insert((
         RenderTarget::Image(handle.clone().into()),
         IsDefaultUiCamera,
-        ShadowLodOrigin,
         Msaa::Off,
     ));
     run.target = Some(handle);
@@ -519,6 +553,8 @@ fn player_position(world: &mut World) -> Result<Vec3, String> {
 
 fn reset_and_close_settings(world: &mut World) {
     use crate::ui::settings::{SettingsAction as A, SettingsPage};
+    world.write_message(A::Page(SettingsPage::Performance));
+    world.write_message(A::Reset);
     world.write_message(A::Page(SettingsPage::Game));
     world.write_message(A::Reset);
     world.write_message(A::Page(SettingsPage::Audio));
@@ -533,6 +569,12 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     run.entrance_building = None;
     run.interior_building = None;
     println!("DTQA entering {}", stage.name);
+    if run.stage > 0 && matches!(STAGES[run.stage - 1].action, Action::PerformanceStreet) {
+        // Restore only this explicit QA fixture before continuing the original
+        // gameplay route. Runtime preferences never change themselves on close.
+        *world.resource_mut::<crate::performance::PerformancePreferences>() =
+            crate::performance::PerformancePreferences::default();
+    }
     match stage.action {
         Action::None => {}
         Action::SettingsAudio => {
@@ -547,6 +589,44 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world.write_message(A::Page(SettingsPage::Game));
             world.write_message(A::DayHours(2));
             world.write_message(A::Language(crate::i18n::Language::En));
+        }
+        Action::SettingsPerformance | Action::SettingsPerformanceLandscape => {
+            use crate::ui::settings::{PerformanceSection, SettingsAction as A, SettingsPage};
+            world.write_message(A::Page(SettingsPage::Performance));
+            world.write_message(A::PerformanceSection(PerformanceSection::Display));
+            world.write_message(A::PerformanceProfile(
+                crate::performance::PerformanceProfile::Balanced,
+            ));
+            world.write_message(A::FrameCap(30));
+            world.write_message(A::RenderScale(70));
+            world.write_message(A::Language(
+                if matches!(stage.action, Action::SettingsPerformanceLandscape) {
+                    crate::i18n::Language::En
+                } else {
+                    crate::i18n::Language::ZhTw
+                },
+            ));
+        }
+        Action::SettingsDiagnostics => {
+            use crate::ui::settings::{PerformanceSection, SettingsAction as A};
+            world.write_message(A::PerformanceSection(PerformanceSection::Diagnostics));
+            world.write_message(A::PerformanceOverlay);
+            world.write_message(A::Language(crate::i18n::Language::ZhTw));
+        }
+        Action::PerformanceStreet => {
+            use crate::ui::settings::{SettingsAction as A, SettingsPage};
+            // Exercise the real UI actions while paused, then prove closing
+            // preserves both the selected preferences and the paused run.
+            world.resource_mut::<crate::ui::PauseOpen>().0 = true;
+            world.write_message(A::Open);
+            world.write_message(A::Page(SettingsPage::Performance));
+            world.write_message(A::PerformanceProfile(
+                crate::performance::PerformanceProfile::Balanced,
+            ));
+            world.write_message(A::FrameCap(30));
+            world.write_message(A::RenderScale(70));
+            world.write_message(A::PerformanceOverlay);
+            world.write_message(A::Close);
         }
         Action::SettingsClose => {
             reset_and_close_settings(world);
@@ -1092,7 +1172,7 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // Forty-three captures include the new settings views, with room for
+    // Forty-seven captures include performance controls and scaled 3D rendering, with room for
     // software Vulkan runner variance without removing any existing stage.
     if run.started.elapsed() > Duration::from_secs(1500) {
         return Err("Visual QA exceeded its 25-minute deadline".into());
@@ -1124,6 +1204,26 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         enter_stage(world, run, stage)?;
     }
     run.frame += 1;
+    if run.frame == SETTLE_FRAMES / 2 && matches!(stage.action, Action::PerformanceStreet) {
+        let settings = world.resource::<crate::ui::settings::SettingsUi>();
+        let preferences = world.resource::<crate::performance::PerformancePreferences>();
+        if settings.open
+            || settings.captured
+            || !world.resource::<crate::ui::PauseOpen>().0
+            || preferences.profile != crate::performance::PerformanceProfile::Balanced
+            || preferences.frame_cap != 30
+            || preferences.render_scale != 70
+            || !preferences.overlay
+            || world.resource::<Campaign>().day_hours != 1
+        {
+            return Err(
+                "Performance settings close changed preferences, resumed pause or altered this run"
+                    .into(),
+            );
+        }
+        run.report.assertions.push("Closing performance settings preserved the selected profile, 30 FPS request, 70% 3D resolution and overlay, kept the run paused and did not change its day length".into());
+        world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+    }
     if run.frame == SETTLE_FRAMES / 2 && matches!(stage.action, Action::Trade) {
         let settings = world.resource::<crate::ui::settings::SettingsUi>();
         if settings.open
@@ -1133,6 +1233,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 .resource::<crate::settings::GamePreferences>()
                 .day_hours
                 != 1
+            || *world.resource::<crate::performance::PerformancePreferences>()
+                != crate::performance::PerformancePreferences::default()
             || *world.resource::<crate::audio::AudioSettings>()
                 != crate::audio::AudioSettings::default()
             || *world.resource::<crate::i18n::Language>() != crate::i18n::Language::ZhTw
@@ -1143,11 +1245,11 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 .is_some()
         {
             return Err(
-                "Paused settings did not reset both pages and release capture before trade".into(),
+                "Paused settings did not reset all pages and release capture before trade".into(),
             );
         }
         run.report.assertions.push(
-            "Paused settings reset audio, next-run day length and language; closing released capture while preserving pause and the current run".into(),
+            "Paused settings reset performance, audio, next-run day length and language; closing released capture while preserving pause and the current run".into(),
         );
         world.resource_mut::<crate::ui::PauseOpen>().0 = false;
         world.write_message(OpenPanel(PanelKind::Trade));
@@ -1198,6 +1300,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     if matches!(
         stage.action,
         Action::Street
+            | Action::PerformanceStreet
             | Action::Entrance
             | Action::DoorOpen
             | Action::DoorClose
@@ -1371,6 +1474,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                     && !settings.captured
                     && preferences.day_hours == 1
                     && *audio == crate::audio::AudioSettings::default()
+                    && *world.resource::<crate::performance::PerformancePreferences>()
+                        == crate::performance::PerformancePreferences::default()
                     && *world.resource::<crate::i18n::Language>() == crate::i18n::Language::ZhTw
             }
             Action::SettingsPause => {
@@ -1393,6 +1498,82 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             ));
         }
         run.report.assertions.push(format!("{}: settings actions, independent preferences, modal state and current-run day length verified", stage.name));
+    }
+    if matches!(
+        stage.action,
+        Action::SettingsPerformance
+            | Action::SettingsPerformanceLandscape
+            | Action::SettingsDiagnostics
+            | Action::PerformanceStreet
+    ) {
+        use crate::performance::{
+            EffectivePerformance, PerformancePreferences, PerformanceProfile,
+        };
+        use crate::ui::settings::{PerformanceSection, SettingsPage, SettingsUi};
+        let preferences = world.resource::<PerformancePreferences>();
+        let effective = world.resource::<EffectivePerformance>();
+        let dimensions = world.resource::<crate::performance::render::RenderDimensions>();
+        let settings = world.resource::<SettingsUi>();
+        let diagnostics = matches!(stage.action, Action::SettingsDiagnostics);
+        let closed = matches!(stage.action, Action::PerformanceStreet);
+        if preferences.profile != PerformanceProfile::Balanced
+            || preferences.frame_cap != 30
+            || preferences.render_scale != 70
+            || effective.render_scale != 70
+            || effective.target_fps != 30
+            || dimensions.ui != stage.size
+            || dimensions.scale != 70
+            || (!closed && (!settings.open || settings.page != SettingsPage::Performance))
+            || (!closed
+                && settings.performance_section
+                    != if diagnostics {
+                        PerformanceSection::Diagnostics
+                    } else {
+                        PerformanceSection::Display
+                    })
+            || (closed
+                && (settings.open
+                    || settings.captured
+                    || world.resource::<crate::ui::PauseOpen>().0))
+        {
+            return Err(format!(
+                "Performance settings, render policy or modal state mismatch in {}",
+                stage.name
+            ));
+        }
+        let scene = dimensions.scene;
+        for (actual, full) in scene.into_iter().zip(stage.size) {
+            let expected = full as f32 * 0.7;
+            if (actual as f32 - expected).abs() > 2.0 || actual >= full {
+                return Err(format!(
+                    "{}: 70% scene extent {scene:?} does not match native UI {:?}",
+                    stage.name, stage.size
+                ));
+            }
+        }
+        let target = world
+            .query_filtered::<&RenderTarget, With<GameCamera>>()
+            .iter(world)
+            .next()
+            .ok_or("Game camera has no render target")?;
+        let RenderTarget::Image(target) = target else {
+            return Err("Game camera bypassed the scaled scene image".into());
+        };
+        let image = world
+            .resource::<Assets<Image>>()
+            .get(&target.handle)
+            .ok_or("Scaled scene image is missing")?;
+        if image.width() != scene[0] || image.height() != scene[1] {
+            return Err("Reported scene extent does not match actual render texture".into());
+        }
+        if world
+            .resource::<crate::settings::SettingsStatus>()
+            .error
+            .is_some()
+        {
+            return Err("Performance settings could not be saved".into());
+        }
+        run.report.assertions.push(format!("{}: requested 30 FPS and 70% scene image {}x{} with independent native {}x{} UI, actual render texture and settings state verified; fixed-timestep visual QA is not a device benchmark", stage.name, scene[0], scene[1], stage.size[0], stage.size[1]));
     }
     if matches!(stage.action, Action::Trade) {
         let settings = world.resource::<crate::ui::settings::SettingsUi>();
