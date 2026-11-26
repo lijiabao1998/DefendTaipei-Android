@@ -81,6 +81,8 @@ class FakeAdb:
         if args == ["devices"]:
             result = (0, self.devices, b"")
         elif args[:1] == ["install"]:
+            if "--no-incremental" not in args:
+                raise AssertionError("all update/recovery installs must disable incremental fallback")
             result = self.installs.pop(0)
         elif args == ["uninstall", updater.PACKAGE]:
             if self.on_uninstall:
@@ -174,6 +176,68 @@ class AndroidUpdateTests(unittest.TestCase):
         self.assertFalse(fake.uninstall_calls())
         self.assertFalse(self.backups.exists())
         self.assertIn("--migrate", "\n".join(self.output))
+
+    def test_repeated_identical_fallback_failure_keeps_explicit_migration_gate(self):
+        # ADB can emit an incremental failure on stdout and the same streamed
+        # failure on stderr. They describe one conflict, not two authorizations.
+        _, _, diagnostic = failure()
+        bare = diagnostic[diagnostic.index(b"Failure ["):]
+        repeated = (1, b"Performing Incremental Install\n" + bare + b"Performing Streamed Install\n", diagnostic)
+        fake = FakeAdb(installs=[repeated])
+        self.assertEqual(self.invoke(fake, "--apk", str(self.apk)), 1)
+        self.assertFalse(fake.uninstall_calls())
+        self.assertIn("--migrate", "\n".join(self.output))
+
+        fake = FakeAdb(installs=[repeated, success()])
+        original = fake.payload
+        self.assertEqual(self.invoke(fake, "--apk", str(self.apk), "--migrate", "--backup-dir", str(self.backups)), 0)
+        self.assertEqual(len(fake.uninstall_calls()), 1)
+        self.assertEqual(fake.payload, original)
+        self.assertEqual(list(self.backups.glob("*.json"))[0].read_bytes(), original)
+        self.assert_no_private_output()
+
+    def test_mixed_or_malformed_fallback_failures_never_uninstall(self):
+        _, _, first = failure()
+        for second in (failure("INSTALL_FAILED_VERSION_DOWNGRADE")[2],
+                       failure(package="example.other")[2],
+                       failure(package=updater.PACKAGE + ".other")[2],
+                       b"Failure [malformed diagnostic]\n"):
+            with self.subTest(second=second):
+                fake = FakeAdb(installs=[(1, first, second)])
+                self.assertEqual(self.invoke(fake, "--apk", str(self.apk), "--migrate", "--backup-dir", str(self.backups)), 1)
+                self.assertFalse(fake.uninstall_calls())
+                self.assertFalse(self.backups.exists())
+                self.assertEqual(fake.payload, save_bytes())
+                self.assertEqual(len(fake.calls), 2)
+
+    def test_unclassified_install_diagnostics_are_retained_bounded_and_escaped(self):
+        result = (1, b"Performing Streamed Install\n", b"Unexpected diagnostic\x1b[2J\n" + b"x" * 20000)
+        fake = FakeAdb(installs=[result])
+        self.assertEqual(self.invoke(fake, "--apk", str(self.apk), "--migrate"), 1)
+        printed = "\n".join(self.output)
+        self.assertIn("Performing Streamed Install", printed)
+        self.assertIn("Unexpected diagnostic", printed)
+        self.assertIn("[truncated]", printed)
+        self.assertNotIn("\x1b", printed)
+        self.assertLess(len(printed), 18000)
+        self.assertFalse(fake.uninstall_calls())
+        self.assert_no_private_output()
+
+    def test_sdk_library_incompatibility_is_not_a_signer_migration(self):
+        # AOSP InstallPackageHelper uses the same exact error code for this
+        # non-signature incompatibility, including the correct package name.
+        diagnostic = ("Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: Failure updating " + updater.PACKAGE
+                      + " as it updates an sdk library <test.library> without changing the versionMajor, but the"
+                      + " targetSdkVersion or minSdkVersion has changed: Old targetSdkVersion: 33 new targetSdkVersion: 34"
+                      + " Old minSdkVersion: 23 new minSdkVersion: 23 versionMajor: 1]\n").encode()
+        for stdout in (b"", diagnostic):
+            with self.subTest(repeated=bool(stdout)):
+                fake = FakeAdb(installs=[(1, stdout, diagnostic)])
+                self.assertEqual(self.invoke(fake, "--apk", str(self.apk), "--migrate", "--backup-dir", str(self.backups)), 1)
+                self.assertFalse(fake.uninstall_calls())
+                self.assertFalse(self.backups.exists())
+                self.assertEqual(fake.payload, save_bytes())
+                self.assertEqual(len(fake.calls), 2)
 
     def test_wrong_install_error_or_package_cannot_trigger_uninstall(self):
         for result in (failure("INSTALL_FAILED_VERSION_DOWNGRADE"), failure(package="example.other"),

@@ -182,7 +182,7 @@ PY_PASSWORD
   -dname 'CN=DefendTaipei CI Update Smoke,O=Disposable Test,C=TW' >"$RUN_DIR/alternate-key-generation.log" 2>&1
 cp -- "$APK" "$PRIVATE_DIR/alternate-source.apk"
 "$APKSIGNER_BIN" sign --ks "$PRIVATE_DIR/alternate.p12" --ks-key-alias update-smoke \
-  --ks-pass "file:$PRIVATE_DIR/password.txt" --out "$PRIVATE_DIR/alternate.apk" \
+  --ks-pass "file:$PRIVATE_DIR/password.txt" --v4-signing-enabled false --out "$PRIVATE_DIR/alternate.apk" \
   "$PRIVATE_DIR/alternate-source.apk" >"$RUN_DIR/alternate-signing.log" 2>&1
 "$APKSIGNER_BIN" verify --verbose --print-certs-pem "$PRIVATE_DIR/alternate.apk" >"$RUN_DIR/alternate-signer.log" 2>&1
 ALTERNATE_SIGNER=$(python3 "$SIGNER_PARSER" <"$RUN_DIR/alternate-signer.log")

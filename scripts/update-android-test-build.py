@@ -435,15 +435,28 @@ def backup_device(adb: Adb, directory: Path, say: Callable[[str], None] = print)
 def signature_mismatch(result) -> bool:
     if result.returncode == 0:
         return False
-    text = (result.stdout + result.stderr).decode("utf-8", "replace")
+    text = (result.stdout + b"\n" + result.stderr).decode("utf-8", "replace")
     failures = re.findall(r"(?:^|: )Failure \[(INSTALL_FAILED_[A-Z_]+):\s*([^\]\r\n]+)\]\s*$", text, re.MULTILINE)
-    if len(failures) != 1 or failures[0][0] != "INSTALL_FAILED_UPDATE_INCOMPATIBLE":
+    # adb can report the same failure for incremental and streamed fallback
+    # attempts. Only exact repetitions of one complete diagnostic are safe;
+    # a different code/message or an unparsed Failure record remains ambiguous.
+    starts = re.findall(r"(?:^|: )Failure \[", text, re.MULTILINE)
+    if not failures or len(starts) != len(failures) or len(set(failures)) != 1:
         return False
-    return re.search(r"(?<![\w.])" + re.escape(PACKAGE) + r"(?![\w.])", failures[0][1]) is not None
+    if failures[0][0] != "INSTALL_FAILED_UPDATE_INCOMPATIBLE":
+        return False
+    message = failures[0][1]
+    # AOSP also uses this code for SDK-library version changes. Migration is
+    # authorized only for a recognized certificate/upgrade-key mismatch.
+    if not any(phrase in message for phrase in ("signatures do not match", "upgrade keys do not match")):
+        return False
+    return re.search(r"(?<![\w.])" + re.escape(PACKAGE) + r"(?![\w.])", message) is not None
 
 
 def install(adb: Adb, apk: Path):
-    return adb.run(["install", "-r", "-t", str(apk)])
+    # This small updater needs one completed regular installation. Prevent an
+    # adjacent v4 .idsig from selecting adb's incremental/fallback sequence.
+    return adb.run(["install", "--no-incremental", "-r", "-t", str(apk)])
 
 
 def install_succeeded(result) -> bool:
@@ -454,6 +467,18 @@ def install_error_code(result) -> str:
     text = (result.stdout + result.stderr).decode("utf-8", "replace")
     codes = re.findall(r"\bINSTALL_FAILED_[A-Z_]+\b", text)
     return codes[-1] if codes else "ADB exit status " + str(result.returncode)
+
+
+def report_install_diagnostics(result, say: Callable[[str], None]) -> None:
+    # Only call with an APK install result, never run-as/private-save output.
+    # Preserve public package-manager errors for actionable CI/user reports;
+    # bound output and escape control characters rather than echoing terminals.
+    say("ADB install exit status: " + str(result.returncode))
+    for name, data in (("stdout", result.stdout), ("stderr", result.stderr)):
+        if data:
+            text = data[:16384].decode("utf-8", "replace")
+            suffix = " [truncated]" if len(data) > 16384 else ""
+            say("ADB install " + name + ": " + json.dumps(text, ensure_ascii=False) + suffix)
 
 
 def restore_bytes(adb: Adb, backup: Backup, data: bytes) -> None:
@@ -498,6 +523,7 @@ def update(adb: Adb, apk: Path, directory: Path, migrate: bool, say: Callable[[s
         say("APK installed successfully without clearing app data. Open the game and choose Continue if available.")
         return None
     if not signature_mismatch(result):
+        report_install_diagnostics(result, say)
         raise UpdateError("APK installation failed (" + install_error_code(result)
                           + ") for a reason other than this app's signing mismatch. Nothing was uninstalled.")
     if not migrate:
@@ -515,6 +541,7 @@ def update(adb: Adb, apk: Path, directory: Path, migrate: bool, say: Callable[[s
             raise UpdateError("Android did not confirm uninstall. No replacement or restore was attempted.")
         replacement = install(adb, apk)
         if not install_succeeded(replacement):
+            report_install_diagnostics(replacement, say)
             raise UpdateError("The old build was removed, but the new APK did not install ("
                               + install_error_code(replacement) + "). No rollback was performed.")
         restore_bytes(adb, checked, data)
@@ -559,6 +586,7 @@ def main(argv: list[str] | None = None, runner: Callable = subprocess.run, say: 
                 if apk:
                     replacement = install(adb, apk)
                     if not install_succeeded(replacement):
+                        report_install_diagnostics(replacement, say)
                         raise UpdateError("Recovery APK installation failed (" + install_error_code(replacement)
                                           + "). Restore never uninstalls an app.")
                 restore_bytes(adb, backup, data)

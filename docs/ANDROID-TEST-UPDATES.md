@@ -2,7 +2,7 @@
 
 一般更新直接安裝新 APK 即可；相同簽章會保留原有資料。早期 CI 每次產生不同的臨時 debug 簽章，Android 可能拒絕直接更新。現在改用[固定開發簽章](TEST-SIGNING.md)，從舊的臨時簽章轉過來時，可以用這個工具先保存進度，再完成一次存檔搬移。
 
-工具：[`scripts/update-android-test-build.py`](../scripts/update-android-test-build.py)。只需要 **Python 3.10 以上、Android Platform Tools 的 `adb`**，不需要安裝 Android Studio 或 aapt。它只接受套件名稱為 `tw.lijiabao.defendtaipei`、允許 `run-as` 存取的 debug APK。
+工具：[`scripts/update-android-test-build.py`](../scripts/update-android-test-build.py)。只需要 **Python 3.10 以上、近期 Android Platform Tools 的 `adb`**，不需要安裝 Android Studio 或 aapt。它只接受套件名稱為 `tw.lijiabao.defendtaipei`、允許 `run-as` 存取的 debug APK。
 
 ## 更新步驟
 
@@ -17,7 +17,7 @@ python3 scripts/update-android-test-build.py --apk "/path/to/DefendTaipei-arm64-
 
 Windows 如果使用 `python` 啟動 Python，將範例中的 `python3` 改成 `python`。
 
-工具會先執行普通的 `adb install -r -t`。新安裝、相同簽章的更新都走這條路，**不清除資料、不移除 App**。成功後開啟遊戲，有原有存檔就選「繼續」。
+工具會先執行普通的 `adb install --no-incremental -r -t`，避免 APK 旁的增量簽章檔使 ADB 自動切換安裝模式。新安裝、相同簽章的更新都走這條路，**不清除資料、不移除 App**。成功後開啟遊戲，有原有存檔就選「繼續」。
 
 如果它明確指出這個遊戲的簽章不同，執行以下指令。`--backup-dir` 請選電腦上會保留的資料夾，不要使用暫存目錄；省略時使用目前使用者家目錄的 `DefendTaipei-backups`：
 
@@ -25,7 +25,7 @@ Windows 如果使用 `python` 啟動 Python，將範例中的 `python3` 改成 `
 python3 scripts/update-android-test-build.py --apk "/path/to/DefendTaipei-arm64-debug.apk" --backup-dir "/path/to/DefendTaipei-backups" --migrate
 ```
 
-**`--migrate` 允許一次跨簽章重裝。** 工具仍會先嘗試正常更新；只有 Android 回覆 `INSTALL_FAILED_UPDATE_INCOMPATIBLE` 且明確指向本遊戲時，才會啟用搬移程序。其他安裝錯誤，例如空間不足、APK 不相容或降版限制，都不會觸發移除。
+**`--migrate` 允許一次跨簽章重裝。** 工具仍會先嘗試正常更新；只有 Android 回覆 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`、明確指向本遊戲，且包含已知簽章／升級金鑰不符的訊息時，才會啟用搬移程序。其他安裝錯誤，例如空間不足、SDK 程式庫版本變更、APK 不相容或降版限制，都不會觸發移除。
 
 搬移順序如下：
 
@@ -35,7 +35,7 @@ python3 scripts/update-android-test-build.py --apk "/path/to/DefendTaipei-arm64-
 4. 以上全部成功後，才移除舊測試版並安裝新 APK。
 5. 將原始位元組寫入新 App 的私有暫存檔，核對 SHA-256，再原子替換正式存檔，最後再次讀回核對。
 
-工具不會改寫或重新排版 JSON，不會把存檔內容印到終端。它只列出備份路徑與 SHA-256。完整遊戲進度仍由遊戲的「繼續」功能載入並執行遊戲端驗證；工具的檢查不是遊戲世界資料驗證器的替代品。
+工具不會改寫或重新排版 JSON，不會把存檔內容印到終端。它會列出備份路徑與 SHA-256；無法辨識或恢復階段的安裝失敗，也會列出 ADB 的公開安裝診斷，方便排除問題。完整遊戲進度仍由遊戲的「繼續」功能載入並執行遊戲端驗證；工具的檢查不是遊戲世界資料驗證器的替代品。
 
 沒有存檔、存檔不完整、無法讀取 debug 私有資料、備份無法寫入或校驗不符時，工具會停止，**不移除舊 App**。如果舊版尚未建立存檔，先開一局並手動儲存，再重跑。
 
@@ -82,6 +82,8 @@ python3 -m unittest discover -s scripts/tests -p 'test_android_update.py' -v
 ```
 
 測試覆蓋明確遷移授權、精確錯誤與套件判斷、裝置歧義、錯誤 APK、無存檔或壞存檔時禁止移除、備份先於移除、磁碟同步失敗、原始位元組恢復、暫存／最終校驗失敗、重裝失敗後保留備份，以及恢復命令。
+
+安裝模式固定使用 `--no-incremental`。[AOSP 的 ADB 實作](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/client/adb_install.cpp) 在未指定模式時可先嘗試增量安裝，失敗後再回退到普通安裝；[apksigner 的 v4 簽章](https://developer.android.com/tools/apksigner#options) 則會產生旁置的 `.idsig`。CI 的替代 APK 也明確關閉 v4 旁置檔。錯誤判斷只接受單一完整的本遊戲簽章衝突診斷，或該診斷的完全相同重複；不同代碼、不同套件、不同訊息或不完整的額外 `Failure` 都禁止移除。對應的模擬回歸測試涵蓋重複與混合診斷。先前 CI 只保留了錯誤代碼，未保留原始 ADB 輸出，因此該次失敗是否由重複診斷引起仍屬推斷；後續不明安裝失敗會保留有長度限制的公開診斷。
 
 ### Android 模擬器的實際更新驗收
 
