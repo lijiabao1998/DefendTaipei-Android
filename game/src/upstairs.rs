@@ -158,7 +158,7 @@ pub struct UpstairsPlugin;
 impl Plugin for UpstairsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Upstairs>()
-            .add_systems(Startup, (setup_art, spawn_ground_flights))
+            .add_systems(Startup, (setup_art, spawn_ground_flights).chain())
             .add_systems(OnEnter(GameFlow::Prologue), go_down_silently)
             .add_systems(OnExit(GameFlow::Playing), go_down_silently)
             .add_systems(PreUpdate, reset_on_load)
