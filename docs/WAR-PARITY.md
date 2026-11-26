@@ -16,10 +16,16 @@ References: `GREN`, `playerThrow`, `grenadeTick`, `blastReach`, `WAR`, `weaponDm
 - Above level 0.3, every (900 − 600 × level) × (0.7–1.3) s an air-raid siren and warning precede a long-range rocket (16/45 m, 190/70), cruise missile (22/62 m, 230/75) or short-range ballistic missile (24/70 m, 240/80) under a big ring, landing 8–10 s later outside the wound ring until the war is at its worst; each leaves a crater burning for 45 s.
 - Soldiers in the rings are hit too (300 in the core). Indoors (or upstairs) the player takes 15% of mortar fragments, and 60% (core) or 25% of a missile; cover halves it outdoors; more than 15 damage starts bleeding. Nothing falls while the player sleeps, and an air-raid warning ends accelerated time.
 
+## v12 PLA recon drones
+
+- Two quadcopter drones with a blinking red light circle 30–40 m up, starting over the two checkpoints and drifting slowly towards the player.
+- A drone directly overhead (within 24 m) that sees the player in the open for 2.5 s (1.5 s at night) reports them: four artillery shells fall around that spot 6 s later, 1.3 s apart, under red rings (6/18 m, the old shell's squared falloff), the three nearest patrols come to look, and the warning ends accelerated time. It reports again after 70 s (40 s at night).
+- Indoors, upstairs, under an arcade or tucked against a wall (a building within 1.6 m) the drones cannot see the player; exposure drains while hidden.
+
 ## Boundaries
 
 The Web's screen kick, the fire-and-earth column of a big warhead and its particle smoke are simplified to the shared blast flash, a scorch disc and rising flames. Timers are not saved, as in the Web.
 
 ## Checks
 
-Unit tests cover the war level curve and start, the damage falloff of every weapon and of the grenade. Native QA stage `04q-war-landscape` throws a real grenade from the bag and calls a barrage and a rocket, checking that the grenade is spent and the rounds fall under their rings.
+Unit tests cover the war level curve and start, the damage falloff of every weapon and of the grenade, the drone timing and what hides the player from the sky. Native QA stage `04q-war-landscape` throws a real grenade from the bag and calls a barrage and a rocket, checking that the grenade is spent and the rounds fall under their rings.

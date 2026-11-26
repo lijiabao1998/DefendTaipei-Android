@@ -54,6 +54,8 @@ pub struct WarWeapon {
     pub big: f32,
     pub lead: f32,
     pub mortar: bool,
+    /// The old artillery shell's wound damage falls off with the square.
+    pub squared: bool,
 }
 
 pub const MORTAR: WarWeapon = WarWeapon {
@@ -66,6 +68,7 @@ pub const MORTAR: WarWeapon = WarWeapon {
     big: 1.4,
     lead: 5.0,
     mortar: true,
+    squared: false,
 };
 pub const ROCKET: WarWeapon = WarWeapon {
     zh: "遠程火箭彈",
@@ -77,6 +80,7 @@ pub const ROCKET: WarWeapon = WarWeapon {
     big: 2.6,
     lead: 8.0,
     mortar: false,
+    squared: false,
 };
 pub const SRBM: WarWeapon = WarWeapon {
     zh: "短程彈道飛彈",
@@ -88,6 +92,7 @@ pub const SRBM: WarWeapon = WarWeapon {
     big: 4.0,
     lead: 10.0,
     mortar: false,
+    squared: false,
 };
 pub const CRUISE: WarWeapon = WarWeapon {
     zh: "巡弋飛彈",
@@ -99,6 +104,21 @@ pub const CRUISE: WarWeapon = WarWeapon {
     big: 3.6,
     lead: 9.0,
     mortar: false,
+    squared: false,
+};
+
+/// `SHELL`: the artillery a recon drone calls down on what it saw.
+pub const ARTILLERY: WarWeapon = WarWeapon {
+    zh: "砲彈",
+    en: "Artillery shell",
+    core: 6.0,
+    wound: 18.0,
+    core_dmg: 85.0,
+    wound_dmg: 50.0,
+    big: 1.4,
+    lead: 6.0,
+    mortar: true,
+    squared: true,
 };
 
 /// `weaponDmg`: damage at distance `d`.
@@ -106,7 +126,8 @@ pub fn weapon_dmg(w: &WarWeapon, d: f32) -> f32 {
     if d < w.core {
         w.core_dmg * (1.0 - 0.4 * (d / w.core))
     } else if d < w.wound {
-        w.wound_dmg * ((w.wound - d) / (w.wound - w.core))
+        let k = (w.wound - d) / (w.wound - w.core);
+        w.wound_dmg * if w.squared { k * k } else { k }
     } else {
         0.0
     }
@@ -199,6 +220,7 @@ pub struct WarStats {
     pub craters: u32,
     pub thrown: u32,
     pub duds: u32,
+    pub spotted: u32,
 }
 
 #[derive(Resource)]
@@ -211,11 +233,51 @@ struct WarArt {
     flame_mat: Handle<StandardMaterial>,
 }
 
+/// v12 a PLA recon drone circling over the city (`Recon`).
+#[derive(Component)]
+struct Drone {
+    c: Vec2,
+    r: f32,
+    a: f32,
+    h: f32,
+    spot: f32,
+    cd: f32,
+}
+
+#[derive(Component)]
+struct DroneLight;
+
+/// Seconds of exposure before a drone reports the player, and its cooldown
+/// (night: faster).
+pub fn drone_timing(night: bool) -> (f32, f32) {
+    if night { (1.5, 40.0) } else { (2.5, 70.0) }
+}
+
+/// `hidden`: indoors, upstairs, or tucked against a building (an arcade, a wall).
+pub fn hidden_from_sky(p: Vec2, upstairs: bool) -> bool {
+    let w = crate::map::world();
+    upstairs
+        || w.bld_at(p).is_some()
+        || [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y]
+            .iter()
+            .any(|d| w.bld_at(p + *d * 1.6).is_some())
+}
+
 /// Ask for a barrage or a strike at once (QA and tools).
 #[derive(Message, Clone, Copy, Debug)]
 pub enum WarCall {
-    Barrage { n: u32, at: Vec2 },
-    Strike { w: WarWeapon, at: Vec2 },
+    Barrage {
+        n: u32,
+        at: Vec2,
+    },
+    Strike {
+        w: WarWeapon,
+        at: Vec2,
+    },
+    /// A recon drone saw the player at `at`: four shells and nearby patrols.
+    Spotted {
+        at: Vec2,
+    },
 }
 
 pub struct WarPlugin;
@@ -226,12 +288,20 @@ impl Plugin for WarPlugin {
             .init_resource::<WarStats>()
             .add_message::<ThrowGrenade>()
             .add_message::<WarCall>()
-            .add_systems(Startup, setup_art)
+            .add_systems(Startup, (setup_art, spawn_drones))
             .add_systems(OnEnter(GameFlow::Prologue), reset)
             .add_systems(OnExit(GameFlow::Playing), clear)
             .add_systems(
                 Update,
-                (throw, fly_grenades, war_tick, war_calls, shells, craters)
+                (
+                    throw,
+                    fly_grenades,
+                    war_tick,
+                    drones,
+                    war_calls,
+                    shells,
+                    craters,
+                )
                     .chain()
                     .in_set(WorldSet)
                     .run_if(in_state(GameFlow::Playing)),
@@ -657,6 +727,33 @@ fn war_calls(
                     t += 0.9 + rng.0.next_f32() * 1.2;
                 }
             }
+            WarCall::Spotted { at } => {
+                stats.spotted += 1;
+                let mut t = ARTILLERY.lead;
+                for _ in 0..4 {
+                    let a = rng.0.next_f32() * std::f32::consts::TAU;
+                    let r = 4.5 * rng.0.next_f32().sqrt();
+                    let q = at + Vec2::from_angle(a) * r;
+                    let ring = spawn_ring(&mut commands, fx, q, ARTILLERY.core, ARTILLERY.wound);
+                    commands.spawn(Shell {
+                        t,
+                        p: q,
+                        w: ARTILLERY,
+                        whistled: false,
+                        ring,
+                    });
+                    t += 1.3;
+                }
+                notice.text = tr(
+                    *lang,
+                    "解放軍偵察無人機發現你！砲擊與巡邏隊正趕來——快躲進騎樓或室內！",
+                    "A PLA recon drone spotted you! Artillery and patrols are on their way—get under an arcade or indoors!",
+                )
+                .into();
+                sfx.write(SfxEvent::Radio { dist: 0.0 });
+                campaign.speed = 1;
+                campaign.sleeping = false;
+            }
             WarCall::Strike { w, at } => {
                 if w == ROCKET {
                     stats.rockets += 1;
@@ -881,9 +978,178 @@ fn craters(
     }
 }
 
+fn spawn_drones(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    use crate::geom::{MeshBuf, cuboid, cylinder, hex};
+    let w = crate::map::world();
+    let mut centres: Vec<Vec2> = w.checkpoints.iter().take(2).map(|c| c.p).collect();
+    while centres.len() < 2 {
+        let k = if centres.is_empty() { -1.0 } else { 1.0 };
+        centres.push(w.spawn + Vec2::new(60.0 * k, 40.0));
+    }
+    let mut body = MeshBuf::default();
+    body.add(&cuboid(0.5, 0.15, 0.3), Mat4::IDENTITY, hex(0x3a3e38));
+    for (x, z) in [
+        (0.45_f32, 0.45_f32),
+        (-0.45, 0.45),
+        (0.45, -0.45),
+        (-0.45, -0.45),
+    ] {
+        body.add(
+            &cuboid(0.7, 0.05, 0.06),
+            Mat4::from_translation(Vec3::new(x / 2.0, 0.0, z / 2.0))
+                * Mat4::from_rotation_y((-z).atan2(x)),
+            hex(0x3a3e38),
+        );
+        body.add(
+            &cylinder(0.28, 0.28, 0.01, 12),
+            Mat4::from_translation(Vec3::new(x, 0.08, z)),
+            hex(0x888888),
+        );
+    }
+    let mesh = meshes.add(body.into_mesh());
+    let mat = materials.add(StandardMaterial {
+        perceptual_roughness: 0.6,
+        ..default()
+    });
+    let light = meshes.add(Sphere::new(0.06).mesh().uv(6, 4));
+    let light_mat = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.19, 0.19),
+        emissive: LinearRgba::rgb(6.0, 0.4, 0.4),
+        unlit: true,
+        ..default()
+    });
+    for (i, c) in centres.into_iter().enumerate() {
+        let seed = i as f32 * 0.37 + 0.11;
+        commands
+            .spawn((
+                Drone {
+                    c,
+                    r: 30.0 + (seed * 91.7).fract() * 25.0,
+                    a: (seed * 37.3).fract() * 6.0,
+                    h: 30.0 + (seed * 53.1).fract() * 10.0,
+                    spot: 0.0,
+                    cd: 0.0,
+                },
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_xyz(c.x, 32.0, c.y).with_scale(Vec3::splat(1.8)),
+                Visibility::default(),
+            ))
+            .with_children(|d| {
+                d.spawn((
+                    DroneLight,
+                    Mesh3d(light.clone()),
+                    MeshMaterial3d(light_mat.clone()),
+                    Transform::from_xyz(0.0, -0.1, 0.0),
+                    bevy::light::NotShadowCaster,
+                ));
+            });
+    }
+}
+
+/// `Recon.update`: circle, drift towards the player, report what is in the open.
+#[allow(clippy::too_many_arguments)]
+fn drones(
+    time: Res<Time>,
+    pause: Res<PauseOpen>,
+    env: Res<CombatEnv>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
+    player: Query<&Transform, (With<Player>, Without<Drone>)>,
+    mut q: Query<(&mut Drone, &mut Transform, &Children)>,
+    mut lights: Query<&mut Visibility, With<DroneLight>>,
+    mut enemies: Query<&mut Enemy>,
+    mut calls: MessageWriter<WarCall>,
+    mut callouts: MessageWriter<crate::combat::Callout>,
+) {
+    if pause.0 {
+        return;
+    }
+    let dt = time.delta_secs().min(0.1);
+    let t = time.elapsed_secs();
+    let Ok(pt) = player.single() else { return };
+    let up = upstairs.as_deref().is_some_and(|u| u.active());
+    let pp = upstairs
+        .as_deref()
+        .and_then(|u| u.landing())
+        .unwrap_or(pt.translation.xz());
+    let hidden = hidden_from_sky(pp, up);
+    let (spot_time, spot_cd) = drone_timing(env.night);
+    for (mut d, mut tf, children) in &mut q {
+        d.a += dt * 12.0 / d.r;
+        let c = d.c;
+        d.c += (pp - c) * dt * 0.004;
+        let at = d.c + Vec2::from_angle(d.a) * d.r;
+        tf.translation = Vec3::new(at.x, d.h + (t * 0.8).sin() * 1.2, at.y);
+        tf.rotation = Quat::from_rotation_y(-d.a);
+        for child in children.iter() {
+            if let Ok(mut v) = lights.get_mut(child) {
+                v.set_if_neq(if (t * 6.0).sin() > 0.4 {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                });
+            }
+        }
+        d.cd -= dt;
+        if at.distance(pp) < 24.0 && !hidden {
+            d.spot += dt;
+            if d.spot > spot_time && d.cd <= 0.0 {
+                d.cd = spot_cd;
+                d.spot = 0.0;
+                calls.write(WarCall::Spotted { at: pp });
+                callouts.write(crate::combat::Callout {
+                    pos: Vec3::new(pp.x, 1.8, pp.y),
+                    audible: false,
+                    text: "（無線電）無人機回報目標位置",
+                });
+                // the three nearest patrols come to look
+                let mut near: Vec<_> = enemies
+                    .iter_mut()
+                    .filter(|e| e.0.alive() && e.0.post.is_none())
+                    .collect();
+                near.sort_by(|a, b| {
+                    a.0.pos
+                        .distance_squared(pp)
+                        .total_cmp(&b.0.pos.distance_squared(pp))
+                });
+                for mut e in near.into_iter().take(3) {
+                    if e.0.state != crate::combat::SolState::Combat {
+                        e.0.state = crate::combat::SolState::Investigate;
+                        e.0.target = Some(pp);
+                        e.0.timer = 300.0;
+                    }
+                }
+            }
+        } else {
+            d.spot = (d.spot - dt * 0.5).max(0.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drones_report_faster_at_night_and_miss_the_hidden() {
+        assert_eq!(drone_timing(true), (1.5, 40.0));
+        assert_eq!(drone_timing(false), (2.5, 70.0));
+        let w = crate::map::world();
+        let inside = w.blds[w.stairs[0].building as usize].c;
+        assert!(hidden_from_sky(inside, false) || w.bld_at(inside).is_none());
+        assert!(hidden_from_sky(Vec2::ZERO, true));
+        // the middle of a wide road is in the open
+        let road = w.roads.iter().find(|r| r.w >= 12.0).unwrap();
+        let mid = (road.p[0] + road.p[1]) * 0.5;
+        if w.bld_at(mid).is_none() {
+            assert!(!hidden_from_sky(mid, false));
+        }
+        assert!(weapon_dmg(&ARTILLERY, 12.0) < weapon_dmg(&MORTAR, 12.0));
+    }
 
     #[test]
     fn war_level_rises_over_a_week_and_with_reclaimed_areas() {
