@@ -112,6 +112,44 @@ def media_volume() -> dict:
     return parse_media_volume(adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--get'))
 
 
+def configure_media_volume(report: dict, timeout: float = 20.0) -> None:
+    initial = media_volume()
+    report['initial_media_volume'] = initial
+    report['configured_media_volume'] = initial
+    setup = {'method': 'input_keyevent_VOLUME_UP', 'key_presses': 0, 'readbacks': [initial]}
+    report['media_volume_setup'] = setup
+    minimum, maximum = initial['minimum'], initial['maximum']
+    if initial['current'] == maximum:
+        return
+    # API 34's media_session --set attributes shell UID 2000 to
+    # com.android.server.media; AppOps rejects it even when cmd exits zero.
+    # Use normal volume keys on the idle launcher, whose default is MUSIC:
+    # https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/services/core/java/com/android/server/audio/AudioService.java
+    # main() has already required a disposable emulator and stopped the game.
+    deadline = time.monotonic() + timeout
+    adb('shell', 'input', 'keyevent', 'KEYCODE_HOME')
+    time.sleep(0.5)
+    # The first press can just open the system volume panel. Permit a small
+    # number of ignored/delayed presses, but never accept command success in
+    # place of an actual maximum-volume readback or retry without a bound.
+    for _ in range(min(maximum - minimum + 4, 64)):
+        if time.monotonic() >= deadline:
+            break
+        setup['key_presses'] += 1
+        adb('shell', 'input', 'keyevent', 'KEYCODE_VOLUME_UP')
+        time.sleep(0.35)
+        current = media_volume()
+        setup['readbacks'].append(current)
+        report['configured_media_volume'] = current
+        if (current['minimum'], current['maximum']) != (minimum, maximum):
+            raise AssertionError(f'Media volume range changed during setup: {initial} -> {current}')
+        if current['current'] == maximum:
+            return
+    current = report['configured_media_volume']['current']
+    raise AssertionError(f'Media volume did not reach its reported maximum: '
+                         f'{current}/{maximum} after {setup["key_presses"]} volume-up keys')
+
+
 def assert_audition_settings(prefs: dict, category: int, audible: bool) -> None:
     audio = prefs['audio']
     field = ['effects', 'ambience', 'radio'][category - 1]
@@ -208,11 +246,7 @@ def main() -> None:
         adb('shell', 'settings', 'put', 'system', 'user_rotation', '0')
         adb('emu', 'sensor', 'set', 'acceleration', '0:9.8:0')
         adb('shell', 'settings', 'put', 'system', 'sound_effects_enabled', '0')
-        report['initial_media_volume'] = media_volume()
-        maximum = report['initial_media_volume']['maximum']
-        adb('shell', 'cmd', 'media_session', 'volume', '--stream', '3', '--set', str(maximum))
-        report['configured_media_volume'] = media_volume()
-        assert report['configured_media_volume']['current'] == maximum, 'Media volume did not reach its reported maximum'
+        configure_media_volume(report)
         launch()
         layout = open_settings()
         tap(layout['tabs'][0], r'DTSETTINGS action=page value=Audio')
