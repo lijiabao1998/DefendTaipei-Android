@@ -23,7 +23,12 @@ pub enum Mat {
     Column,
     Shutter,
     Ceiling,
+    /// Street-lamp heads. Other city emitters use their own shared response.
     Lamp,
+    /// Existing occupied-room panes; preserves the original window selection.
+    WindowGlow,
+    /// Existing fluorescent fixtures under arcade ceilings.
+    ArcadeGlow,
     VCol,
     Metal,
     Glass,
@@ -168,7 +173,7 @@ pub fn arcade(b: &Bld, out: &mut BuildingMeshes) {
     for k in 0..nb {
         let s = 0.35 + (k as f32 + 0.5) * step;
         let (g, t) = arc_box(1.0, 0.04, 0.18, at(s, ARC / 2.0), GF - 0.24, ang);
-        out.roof.add(Mat::Lamp, &g, t, WHITE);
+        out.roof.add(Mat::ArcadeGlow, &g, t, WHITE);
         // roll-up shutter on each bay of the recessed shopfront, except at the shop door
         if (s - a.dl / 2.0).abs() - (step - COL) / 2.0 > DOOR_W / 2.0 + 0.1
             && !commercial.as_ref().is_some_and(|plan| {

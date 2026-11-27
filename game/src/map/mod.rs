@@ -195,6 +195,8 @@ fn material(m: &MapMaterials, k: Mat) -> Handle<StandardMaterial> {
         Mat::Shutter => m.shutter.clone(),
         Mat::Ceiling => m.ceiling.clone(),
         Mat::Lamp => m.lamp.clone(),
+        Mat::WindowGlow => m.window_glow.clone(),
+        Mat::ArcadeGlow => m.arcade_glow.clone(),
         Mat::VCol => m.vcol.clone(),
         Mat::Metal => m.metal.clone(),
         Mat::Glass => m.glass.clone(),

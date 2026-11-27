@@ -66,7 +66,12 @@ pub struct MapMaterials {
     pub column: Handle<StandardMaterial>,
     pub shutter: Handle<StandardMaterial>,
     pub ceiling: Handle<StandardMaterial>,
+    /// Shared street-head material; a glow is distinct from an actual spill light.
     pub lamp: Handle<StandardMaterial>,
+    /// Existing lit-window panes, independent of street-lamp and arcade colour.
+    pub window_glow: Handle<StandardMaterial>,
+    /// Existing arcade ceiling fixtures; one shared material for the entire city.
+    pub arcade_glow: Handle<StandardMaterial>,
     /// Vertex-coloured cloth / concrete / painted parts (matC / conc).
     pub vcol: Handle<StandardMaterial>,
     /// Vertex-coloured metal parts (detMat: metalness 0.5, roughness 0.45).
@@ -1154,6 +1159,16 @@ pub fn build_materials(
             ..default()
         }),
         lamp: mats.add(StandardMaterial {
+            base_color: Color::WHITE,
+            emissive: LinearRgba::rgb(1.2, 1.1, 0.95),
+            ..default()
+        }),
+        window_glow: mats.add(StandardMaterial {
+            base_color: Color::WHITE,
+            emissive: LinearRgba::rgb(1.2, 1.1, 0.95),
+            ..default()
+        }),
+        arcade_glow: mats.add(StandardMaterial {
             base_color: Color::WHITE,
             emissive: LinearRgba::rgb(1.2, 1.1, 0.95),
             ..default()

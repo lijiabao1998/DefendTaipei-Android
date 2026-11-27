@@ -30,7 +30,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev libasound2-plugins libudev-dev libwayland-dev libxkbcommon-dev pkg-config mesa-vulkan-drivers pulseaudio pulseaudio-utils
+            libasound2-dev libasound2-plugins libudev-dev libwayland-dev libxkbcommon-dev pkg-config mesa-vulkan-drivers pulseaudio pulseaudio-utils python3-pil
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -60,6 +60,11 @@ jobs:
           mkdir -p native-qa
           cargo run -p defend_taipei --example exterior_workload -- --check > native-qa/exterior-workload.json
 
+      - name: City lighting source, selection and bounded workload gate
+        run: |
+          mkdir -p native-qa
+          cargo run -p defend_taipei --example lighting_workload -- --check > native-qa/lighting-workload.json
+
       - name: cargo build (desktop)
         run: cargo build -p defend_taipei --bin defend-taipei
 
@@ -88,15 +93,15 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(python3 -c 'from pathlib import Path; paths=sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")); print(paths[0] if paths else "")')"
           test -n "$VK_ICD_FILENAMES"
-          # CI77's 58 scenes needed nearly 24 minutes. Preserve them and all gates
-          # while adding four street scenes; leave one minute after the 30-minute
-          # internal deadline for its report. The desktop job remains 60 minutes.
+          # Preserve all 62 CI79 scenes and add six controlled lighting captures.
+          # Keep the 30-minute internal deadline and one minute for its report.
+          # The desktop job remains 60 minutes.
           timeout 1860s target/debug/defend-taipei --qa > native-qa.log 2>&1
-          python3 - <<'PY'
+          /usr/bin/python3 - <<'PY'
           import json
           report = json.load(open("native-qa/qa-report.json"))
           assert report["success"] and report["scope"] == "full", report
-          assert report["expected_captures"] == 62 and len(report["captures"]) == 62, report
+          assert report["expected_captures"] == 68 and len(report["captures"]) == 68, report
           exterior = [capture["exterior"] for capture in report["captures"] if "exterior" in capture]
           assert len(exterior) == 6, report
           assert {capture["scene"] for capture in exterior} == {"Townhouse", "Walkup", "Shophouse", "ServiceStair", "Rooftop", "Cutaway"}, report
@@ -154,6 +159,216 @@ jobs:
           assert scooters["parking_bays"] >= 2 and scooters["marking_pixel_samples"] >= 8, scooters
           assert street_scenes["Taxi"]["prop_kinds"] == ["Taxi"], street_scenes["Taxi"]
           assert street_scenes["Truck"]["prop_kinds"] == ["Truck"], street_scenes["Truck"]
+          # Fixed order from the complete, successful CI79 raw report (62 captures).
+          # Adding a development subset or renaming/deleting an earlier scene cannot pass.
+          original_stages = """01-title-landscape
+          02-title-portrait
+          02-settings-audio-portrait
+          02-settings-audio-small-landscape
+          02-settings-game-portrait
+          02-settings-performance-portrait
+          02-settings-performance-small-landscape
+          02-settings-diagnostics-portrait
+          02a-title-small-portrait
+          02b-survivor-portrait
+          02c-survivor-small-landscape
+          02d-briefing-small-landscape
+          02e-briefing-portrait
+          03-prologue
+          04-playing
+          04a-streetscape-portrait
+          04a1-streetscape-scale70-portrait
+          04b-entrance-landscape
+          04c-door-open-landscape
+          04d-door-closed-landscape
+          04d1-barricaded-portrait
+          04d2-barricade-blocked-portrait
+          04d3-barricade-removed-landscape
+          04d4-barricade-inventory-portrait
+          04d5-shop-interior-landscape
+          04d6-scavenge-portrait
+          04d7-scavenge-partial-portrait
+          04d8-scavenge-small-landscape
+          04d9-scavenge-empty-portrait
+          04d10-shop-depleted-landscape
+          04d11-home-interior-portrait
+          04d12-exterior-townhouse-landscape
+          04d13-exterior-walkup-landscape
+          04d14-exterior-shophouse-landscape
+          04d15-exterior-service-stair-landscape
+          04d16-exterior-rooftop-landscape
+          04d17-exterior-cutaway-portrait
+          04d18-commercial-arcade-landscape
+          04d19-commercial-food-landscape
+          04d20-commercial-essentials-landscape
+          04d21-commercial-night-landscape
+          04d22-commercial-blackout-landscape
+          04d23-streets-junction-landscape
+          04d24-streets-scooters-portrait
+          04d25-streets-taxi-landscape
+          04d26-streets-truck-landscape
+          04e-survivor-map-portrait
+          04f-survivor-map-small-landscape
+          04g-rain-portrait
+          04h-night-portrait
+          04i-blackout-portrait
+          04j-survival-warnings-portrait
+          05-shelter-landscape
+          06-shelter-small-landscape
+          07-shelter-portrait
+          08-inventory-portrait
+          08a-radio-journal-portrait
+          08b-pause-small-landscape
+          08c-settings-paused-small-landscape
+          09-barter-portrait
+          10-title-with-save
+          11-continued""".splitlines()
+          assert [capture["stage"] for capture in report["captures"] if "lighting" not in capture] == original_stages, report
+          # Six captures retain the original camera and world fixture. NoSpillControl is
+          # explicitly diagnostic: only the actual six SpotLight intensities are zeroed.
+          from pathlib import Path
+          from math import sqrt, cos
+          from PIL import Image
+          lighting_captures = [capture for capture in report["captures"] if "lighting" in capture]
+          assert len(lighting_captures) == 6, report
+          assert len({Path(capture["file"]).resolve() for capture in lighting_captures}) == 6, lighting_captures
+          lighting = {capture["lighting"]["scene"]: capture["lighting"] for capture in lighting_captures}
+          assert list(lighting) == ["Day", "Dusk", "Night", "NoSpillControl", "Blackout", "Restored"], lighting
+          expected_lighting_names = [
+              "04d27-lighting-day-landscape", "04d28-lighting-dusk-landscape",
+              "04d29-lighting-night-landscape", "04d30-lighting-no-spill-control-landscape",
+              "04d31-lighting-blackout-landscape", "04d32-lighting-restored-landscape",
+          ]
+          assert [capture["stage"] for capture in lighting_captures] == expected_lighting_names, lighting_captures
+          workload = json.load(open("native-qa/lighting-workload.json"))
+          assert workload["success"] and workload["world_identity_matches_verified_wave3"] and workload["catalogue_deterministic"], workload
+          catalog = {int(site["id"]): site for site in workload["light_sites"]}
+          assert len(catalog) == workload["catalogue"]["admitted_spill_sites"], workload["catalogue"]
+          catalog_counts = [sum(site["kind"] == kind for site in catalog.values()) for kind in ("street", "sign", "arcade")]
+          luma = lambda rgb: (54 * rgb[0] + 183 * rgb[1] + 19 * rgb[2]) // 256
+          def distance(a, b):
+              return sqrt(sum((x - y) ** 2 for x, y in zip(a, b)))
+          def in_cone(slot, point, margin=0.0):
+              delta = [x - y for x, y in zip(point, slot["actual_position"])]
+              length = sqrt(sum(x*x for x in delta))
+              return length > 0.001 and length < slot["range"] + margin and sum(x*y for x, y in zip(delta, slot["actual_direction"])) / length > cos(slot["outer_angle"] + margin / length)
+          for capture in lighting_captures:
+              evidence = capture["lighting"]
+              assert evidence["measurement"] == "actual_shadowless_spot_components_source_geometry_and_paired_gpu_pixels_not_full_occlusion", evidence
+              assert capture["width"] == 1280 and capture["height"] == 720, capture
+              assert evidence["actual_pool_entities"] == 6 and evidence["city_point_lights"] == 0, evidence
+              assert evidence["total_spot_lights"] == 6 and evidence["total_point_lights"] == 1 and evidence["unrelated_point_lights"] == 1, evidence
+              assert evidence["stable_observation_frames"] == 30 and evidence["stable_source_slots"], evidence
+              assert all(count > 0 for count in evidence["source_catalog_counts"]), evidence
+              assert evidence["source_catalog_counts"] == catalog_counts, evidence
+              assert [slot["slot"] for slot in evidence["slots"]] == list(range(6)), evidence
+              sources = [slot["source_id"] for slot in evidence["slots"] if slot["source_id"] is not None]
+              assert len(sources) == len(set(sources)), evidence
+              assert evidence["actual_active_lights"] == sum(slot["intensity"] > 0 for slot in evidence["slots"]), evidence
+              for slot in evidence["slots"]:
+                  assert not slot["shadow_maps"] and not slot["contact_shadows"], slot
+                  assert 0 <= slot["gain"] <= 1 and slot["intensity"] >= 0, slot
+                  if slot["source_id"] is None:
+                      assert slot["intensity"] == 0, slot
+                      continue
+                  assert slot["source_geometry_verified"], slot
+                  site = catalog[slot["source_id"]]
+                  assert slot["kind"].lower() == site["kind"], (slot, site)
+                  for actual_key, planned_key in (("source_position", "position"), ("source_direction", "direction"), ("receiver", "receiver")):
+                      assert distance(slot[actual_key], site[planned_key]) < 0.0001, (slot, site)
+                  assert distance(slot["color"], site["color_srgba"][:3]) < 0.0001, (slot, site)
+                  for actual_key, planned_key in (("range", "range"), ("inner_angle", "inner_angle_radians"), ("outer_angle", "outer_angle_radians")):
+                      assert abs(slot[actual_key] - site[planned_key]) < 0.0001, (slot, site)
+                  strength = evidence["night"] if evidence["power"] and not evidence["diagnostic_direct_light_override"] else 0
+                  expected_intensity = site["intensity_lumens_at_full_strength"] * strength * slot["gain"]
+                  assert abs(slot["intensity"] - expected_intensity) <= max(0.1, expected_intensity * 0.002), (slot, expected_intensity)
+                  assert slot["source_id"] >> 56 == {"Street": 1, "Sign": 2, "Arcade": 3}[slot["kind"]], slot
+                  assert (slot["kind"] == "Street") == (slot["slot"] < 4), slot
+                  assert distance(slot["actual_position"], slot["source_position"]) < 0.001, slot
+                  assert distance(slot["actual_direction"], slot["source_direction"]) < 0.0001, slot
+                  assert slot["actual_direction"][1] < -0.7 and abs(distance(slot["actual_direction"], [0, 0, 0]) - 1) < 0.0001, slot
+                  assert 0 < slot["inner_angle"] < slot["outer_angle"] < 1.571, slot
+                  assert 0 < slot["radius"] <= 0.3 and in_cone(slot, slot["receiver"]), slot
+                  allowance = {"Street": 0.22, "Sign": 0.65, "Arcade": 0.10}[slot["kind"]]
+                  assert all(lo - allowance <= value <= hi + allowance for lo, value, hi in zip(slot["source_geometry_bounds"][0], slot["actual_position"], slot["source_geometry_bounds"][1])), slot
+                  if evidence["scene"] in ("Dusk", "Night", "NoSpillControl", "Restored"):
+                      assert distance([slot["actual_position"][0], slot["actual_position"][2]], [evidence["player"][0], evidence["player"][2]]) <= 36.001, slot
+                      assert slot["gain"] >= 0.999, slot
+              # Re-read each PNG rather than trusting self-reported RGB or pass counters.
+              assert Path(capture["file"]).resolve() == (Path("native-qa") / (capture["stage"] + ".png")).resolve(), capture
+              image = Image.open(Path(capture["file"])).convert("RGB")
+              assert image.size == (capture["width"], capture["height"]), capture
+              assert len({tuple(pixel["probe"]["point"]) for pixel in evidence["probes"]}) == len(evidence["probes"]), evidence
+              for pixel in evidence["probes"]:
+                  x, y = pixel["probe"]["point"]
+                  assert 1 <= x < image.width - 1 and 1 <= y < image.height - 1, pixel
+                  samples = [image.getpixel((x + dx, y + dy)) for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
+                  median = sorted(samples, key=luma)[4]
+                  assert list(median) == pixel["rgb"] and pixel["luma"] == luma(median), pixel
+          for key in ("building_id", "player", "camera", "zoom", "wetness", "source_catalog_counts", "unrelated_point_lights"):
+              assert all(evidence[key] == lighting["Day"][key] for evidence in lighting.values()), (key, lighting)
+          assert lighting["Day"]["night"] < 0.01 and lighting["Day"]["actual_active_lights"] == 0, lighting["Day"]
+          assert 0.49 <= lighting["Dusk"]["night"] <= 0.51 and 0 < lighting["Dusk"]["actual_active_lights"] <= 6, lighting["Dusk"]
+          night = lighting["Night"]
+          assert night["night"] > 0.99 and night["power"] and 0 < night["actual_active_lights"] <= 6, night
+          assert {slot["kind"] for slot in night["slots"] if slot["intensity"] > 0} == {"Street", "Sign", "Arcade"}, night
+          for role in ("GroundStreet", "GroundSign", "GroundArcade"):
+              probes = [pixel["probe"] for pixel in night["probes"] if pixel["probe"]["role"] == role]
+              assert len(probes) >= 3, (role, night)
+              for probe in probes:
+                  slot = next(slot for slot in night["slots"] if slot["source_id"] == probe["source_id"])
+                  assert role == "Ground" + slot["kind"] and in_cone(slot, probe["world"]), (probe, slot)
+                  assert slot["inherited_visible"] and slot["view_visible"] and slot["in_main_view_cluster"], slot
+          for pixel in night["probes"]:
+              # Coverage records possible overlap; the A/B disables the entire
+              # bounded pool and makes no isolated per-emitter pixel claim.
+              assert pixel["probe"]["geometric_cone_sources"] == [slot["source_id"] for slot in night["slots"] if slot["source_id"] is not None and in_cone(slot, pixel["probe"]["world"])], pixel
+              if pixel["probe"]["role"] == "GroundControl":
+                  assert all(not in_cone(slot, pixel["probe"]["world"], 0.8) for slot in night["slots"] if slot["source_id"] is not None), pixel
+          for scene in ("NoSpillControl", "Blackout", "Restored"):
+              evidence = lighting[scene]
+              assert evidence["comparison_reference"] == "Night", evidence
+              assert [pixel["probe"] for pixel in night["probes"]] == [pixel["probe"] for pixel in evidence["probes"]], evidence
+              assert len(evidence["comparisons"]) == len(night["probes"]), evidence
+              for old, new in zip(night["slots"], evidence["slots"]):
+                  for key in ("slot", "source_id", "actual_position", "actual_direction", "range", "radius", "inner_angle", "outer_angle", "color"):
+                      assert old[key] == new[key], (scene, key, old, new)
+              if scene != "Blackout":
+                  for key in ("minute", "night", "power", "ambient", "ambient_color", "sun_illuminance", "sun_color", "material_state", "material_emissive"):
+                      assert evidence[key] == night[key], (scene, key, evidence, night)
+              for reference, current, comparison in zip(night["probes"], evidence["probes"], evidence["comparisons"]):
+                  delta = reference["luma"] - current["luma"]
+                  channel_delta = max(abs(a - b) for a, b in zip(reference["rgb"], current["rgb"]))
+                  role = current["probe"]["role"]
+                  ground = role in ("GroundStreet", "GroundSign", "GroundArcade")
+                  matched = (delta >= 8 if ground else channel_delta <= 3) if scene == "NoSpillControl" else (delta >= 15 if scene == "Blackout" else channel_delta <= 4)
+                  assert comparison["reference_rgb"] == reference["rgb"] and comparison["current_rgb"] == current["rgb"], comparison
+                  assert comparison["reference_luma"] == luma(reference["rgb"]) and comparison["current_luma"] == luma(current["rgb"]), comparison
+                  assert comparison["difference"] == delta and comparison["matched"] == matched, comparison
+                  assert comparison["role"] == role and comparison["source_id"] == current["probe"]["source_id"] and comparison["point"] == current["probe"]["point"], comparison
+          control = lighting["NoSpillControl"]
+          assert control["diagnostic_direct_light_override"] and control["power"] and control["actual_active_lights"] == 0, control
+          assert all(not evidence["diagnostic_direct_light_override"] for scene, evidence in lighting.items() if scene != "NoSpillControl"), lighting
+          ground = [sample for sample in control["comparisons"] if sample["role"] in ("GroundStreet", "GroundSign", "GroundArcade")]
+          unchanged = [sample for sample in control["comparisons"] if sample["role"] == "GroundControl"]
+          assert control["ground_response_samples"] == len(ground) >= 9, control
+          assert control["ground_response_hits"] == sum(sample["matched"] for sample in ground), control
+          assert control["ground_response_hits"] * 4 >= len(ground), control
+          assert control["unchanged_control_samples"] == len(unchanged) >= 4, control
+          assert control["unchanged_control_hits"] == sum(sample["matched"] for sample in unchanged), control
+          assert control["unchanged_control_hits"] * 4 >= len(unchanged) * 3, control
+          assert all(any(sample["matched"] and sample["role"] == role for sample in ground) for role in ("GroundStreet", "GroundSign", "GroundArcade")), control
+          blackout = lighting["Blackout"]
+          assert not blackout["power"] and blackout["actual_active_lights"] == 0, blackout
+          assert all(value == 0 for _, rgb in blackout["material_emissive"] for value in rgb), blackout
+          for role, key in (("OccupiedWindow", "window_response_hits"), ("Sign", "sign_response_hits")):
+              assert blackout[key] == sum(sample["matched"] for sample in blackout["comparisons"] if sample["role"] == role) > 0, blackout
+          restored = lighting["Restored"]
+          assert restored["power"] and restored["actual_active_lights"] == night["actual_active_lights"], restored
+          assert all(abs(old["intensity"] - new["intensity"]) <= 0.1 and old["gain"] == new["gain"] for old, new in zip(night["slots"], restored["slots"])), restored
+          assert restored["restoration_samples"] == len(restored["comparisons"]) > 0, restored
+          assert restored["restoration_hits"] == sum(sample["matched"] for sample in restored["comparisons"]), restored
+          assert restored["restoration_hits"] * 10 >= restored["restoration_samples"] * 9, restored
           PY
 
       - name: Upload native QA evidence

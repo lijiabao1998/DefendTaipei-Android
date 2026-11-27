@@ -1,5 +1,11 @@
 # Wanhua frontage, rain and powered night lighting
 
+The lighting sections below document the original atmosphere baseline. The
+subsequent [lighting wave 4](WANHUA-LIGHTING-WAVE4.md) replaces its shared
+window/lamp glow and six point-light selection with separate glow roles and a
+bounded directional street/sign/arcade pool. The weather, power and gameplay
+boundaries described here remain in force.
+
 This wave extends the previous street-wear work with everyday frontage details and a
 visible response to the existing clock, weather and electrical supply. The reference
 remains Web **v24.42.0**, commit
