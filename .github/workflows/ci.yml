@@ -88,13 +88,15 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(python3 -c 'from pathlib import Path; paths=sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")); print(paths[0] if paths else "")')"
           test -n "$VK_ICD_FILENAMES"
-          # Leave a minute after the internal 25-minute deadline to write evidence.
-          timeout 1560s target/debug/defend-taipei --qa > native-qa.log 2>&1
+          # CI77's 58 scenes needed nearly 24 minutes. Preserve them and all gates
+          # while adding four street scenes; leave one minute after the 30-minute
+          # internal deadline for its report. The desktop job remains 60 minutes.
+          timeout 1860s target/debug/defend-taipei --qa > native-qa.log 2>&1
           python3 - <<'PY'
           import json
           report = json.load(open("native-qa/qa-report.json"))
           assert report["success"] and report["scope"] == "full", report
-          assert report["expected_captures"] == 58 and len(report["captures"]) == 58, report
+          assert report["expected_captures"] == 62 and len(report["captures"]) == 62, report
           exterior = [capture["exterior"] for capture in report["captures"] if "exterior" in capture]
           assert len(exterior) == 6, report
           assert {capture["scene"] for capture in exterior} == {"Townhouse", "Walkup", "Shophouse", "ServiceStair", "Rooftop", "Cutaway"}, report
@@ -127,6 +129,31 @@ jobs:
           assert all(value > 0.8 for value in night["sign_emissive"]), night
           assert blackout["night"] > 0.9 and not blackout["power"] and blackout["active_lights"] == 0, blackout
           assert all(value == 0.0 for value in blackout["sign_emissive"]), blackout
+          streets = [capture["streets"] for capture in report["captures"] if "streets" in capture]
+          assert len(streets) == 4, report
+          assert {capture["scene"] for capture in streets} == {"Junction", "Scooters", "Taxi", "Truck"}, report
+          for capture in streets:
+              assert capture["visibility_measurement"] == "uploaded_batches_and_main_view_membership_with_marking_pixel_probes_not_full_occlusion", capture
+              assert capture["feature_vertices"] >= 40 and capture["batches"], capture
+              assert all(batch["uploaded"]["meshes"] > 0 and batch["uploaded"]["vertices"] > 0 and batch["uploaded"]["in_main_view"] > 0 for batch in capture["batches"]), capture
+              assert capture["marking_pixel_samples"] == len(capture["marking_pixels"]), capture
+              assert capture["marking_pixel_hits"] == sum(pixel["matched"] for pixel in capture["marking_pixels"]), capture
+              for pixel in capture["marking_pixels"]:
+                  paint, asphalt = pixel["paint_rgb"], pixel["asphalt_rgb"]
+                  luma = lambda rgb: (54 * rgb[0] + 183 * rgb[1] + 19 * rgb[2]) // 256
+                  assert pixel["paint_luma"] == luma(paint) and pixel["asphalt_luma"] == luma(asphalt), pixel
+                  assert pixel["matched"] == (min(paint) >= 165 and max(paint) - min(paint) <= 65 and luma(paint) - luma(asphalt) >= 35), pixel
+              if capture["marking_pixel_samples"]:
+                  assert capture["marking_pixel_hits"] * 4 >= capture["marking_pixel_samples"], capture
+          street_scenes = {capture["scene"]: capture for capture in streets}
+          junction = street_scenes["Junction"]
+          assert junction["road_segment"] and junction["junction_end"] in (0, 1), junction
+          assert junction["junction_clearance"] > 0 and junction["approach_arrow"] and junction["marking_pixel_samples"] >= 8, junction
+          scooters = street_scenes["Scooters"]
+          assert scooters["prop_kinds"].count("Scooter") >= 2 and scooters["prop_kinds"].count("Lamp") == 1, scooters
+          assert scooters["parking_bays"] >= 2 and scooters["marking_pixel_samples"] >= 8, scooters
+          assert street_scenes["Taxi"]["prop_kinds"] == ["Taxi"], street_scenes["Taxi"]
+          assert street_scenes["Truck"]["prop_kinds"] == ["Truck"], street_scenes["Truck"]
           PY
 
       - name: Upload native QA evidence

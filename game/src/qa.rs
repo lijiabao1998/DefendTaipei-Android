@@ -51,6 +51,7 @@ enum Action {
     PerformanceStreet,
     Exterior(ExteriorScene),
     Commercial(CommercialScene),
+    Streets(StreetScene),
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -102,6 +103,34 @@ enum CommercialScene {
     Essentials,
     Night,
     Blackout,
+}
+
+/// These use existing immutable road segments and parked props; no display-only
+/// models or traffic objects are spawned for the captures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreetScene {
+    Junction,
+    Scooters,
+    Taxi,
+    Truck,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum StreetSubject {
+    Approach {
+        road: usize,
+        segment: usize,
+        end: u8,
+    },
+    Prop(usize),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StreetFixture {
+    scene: StreetScene,
+    subject: StreetSubject,
+    position: Vec2,
+    zoom: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -382,6 +411,30 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "04d23-streets-junction-landscape",
+        size: [1280, 720],
+        action: Action::Streets(StreetScene::Junction),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d24-streets-scooters-portrait",
+        size: [720, 1280],
+        action: Action::Streets(StreetScene::Scooters),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d25-streets-taxi-landscape",
+        size: [1280, 720],
+        action: Action::Streets(StreetScene::Taxi),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d26-streets-truck-landscape",
+        size: [1280, 720],
+        action: Action::Streets(StreetScene::Truck),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "04e-survivor-map-portrait",
         size: [390, 844],
         action: Action::Map,
@@ -491,6 +544,8 @@ struct Capture {
     #[serde(skip_serializing_if = "Option::is_none")]
     commercial: Option<CommercialEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    streets: Option<StreetEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     map_workload: Option<MapWorkload>,
 }
 
@@ -569,6 +624,54 @@ struct CommercialEvidence {
     streaming: crate::map::MapRenderStats,
 }
 
+#[derive(Clone, Serialize)]
+struct StreetPixelEvidence {
+    point: [u32; 2],
+    asphalt_point: [u32; 2],
+    paint_rgb: [u8; 3],
+    asphalt_rgb: [u8; 3],
+    paint_luma: u8,
+    asphalt_luma: u8,
+    matched: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct StreetPixelProbe {
+    paint: [u32; 2],
+    asphalt: [u32; 2],
+}
+
+#[derive(Clone, Serialize)]
+struct StreetBatchEvidence {
+    chunk: [i32; 2],
+    uploaded: ExteriorMeshGroup,
+}
+
+/// Feature counts describe this real source segment/prop, while batch counts
+/// describe the complete shared-material street upload in its owner chunks.
+#[derive(Clone, Serialize)]
+struct StreetEvidence {
+    visibility_measurement: &'static str,
+    scene: String,
+    road_segment: Option<[usize; 2]>,
+    junction_end: Option<u8>,
+    junction_clearance: Option<f32>,
+    approach_arrow: bool,
+    prop_indices: Vec<usize>,
+    prop_kinds: Vec<String>,
+    parking_bays: usize,
+    feature_vertices: usize,
+    player: [f32; 3],
+    camera: [f32; 3],
+    zoom: f32,
+    projected_bounds: [[f32; 2]; 2],
+    batches: Vec<StreetBatchEvidence>,
+    marking_pixel_samples: usize,
+    marking_pixel_hits: usize,
+    marking_pixels: Vec<StreetPixelEvidence>,
+    streaming: crate::map::MapRenderStats,
+}
+
 #[derive(Clone, Copy)]
 struct ExteriorFixture {
     building: u32,
@@ -617,6 +720,7 @@ struct QaRun {
     interior_building: Option<u32>,
     exterior: Option<ExteriorFixture>,
     commercial: Option<CommercialFixture>,
+    streets: Option<StreetFixture>,
     door_test_id: Option<u32>,
     barricade_planks: Option<u32>,
     loot_fixture: Option<String>,
@@ -639,6 +743,8 @@ struct CaptureTicket {
     settings_pixels: Option<SettingsPixels>,
     exterior: Option<ExteriorEvidence>,
     commercial: Option<CommercialEvidence>,
+    streets: Option<StreetEvidence>,
+    street_pixels: Vec<StreetPixelProbe>,
     map_workload: Option<MapWorkload>,
 }
 
@@ -658,11 +764,13 @@ impl Plugin for QaPlugin {
             std::env::var_os("DEFEND_TAIPEI_QA_EXTERIOR_ONLY").is_some_and(|value| value == "1");
         let commercial_only =
             std::env::var_os("DEFEND_TAIPEI_QA_COMMERCIAL_ONLY").is_some_and(|value| value == "1");
+        let streets_only =
+            std::env::var_os("DEFEND_TAIPEI_QA_STREETS_ONLY").is_some_and(|value| value == "1");
         let stages: Vec<_> = STAGES
             .iter()
             .enumerate()
             .filter_map(|(index, stage)| {
-                ((!exterior_only && !commercial_only)
+                ((!exterior_only && !commercial_only && !streets_only)
                     || index == 0
                     || matches!(
                         stage.action,
@@ -671,14 +779,20 @@ impl Plugin for QaPlugin {
                             | Action::Depart
                             | Action::Skip
                     )
-                    || (commercial_only && matches!(stage.action, Action::Commercial(_)))
-                    || (!commercial_only
+                    || (streets_only && matches!(stage.action, Action::Streets(_)))
+                    || (!streets_only
+                        && commercial_only
+                        && matches!(stage.action, Action::Commercial(_)))
+                    || (!streets_only
+                        && !commercial_only
                         && exterior_only
                         && matches!(stage.action, Action::Exterior(_))))
                 .then_some(index)
             })
             .collect();
-        let scope = if commercial_only {
+        let scope = if streets_only {
+            "streets_subset"
+        } else if commercial_only {
             "commercial_subset"
         } else if exterior_only {
             "exterior_subset"
@@ -704,6 +818,7 @@ impl Plugin for QaPlugin {
             interior_building: None,
             exterior: None,
             commercial: None,
+            streets: None,
             door_test_id: None,
             barricade_planks: None,
             loot_fixture: None,
@@ -813,6 +928,7 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     run.interior_building = None;
     run.exterior = None;
     run.commercial = None;
+    run.streets = None;
     println!("DTQA entering {}", stage.name);
     if run.stage > 0
         && matches!(
@@ -926,6 +1042,27 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                 crate::map::world().blds[fixture.building as usize].c,
             ));
             run.exterior = Some(fixture);
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+            world.resource_mut::<Campaign>().game_min = 720.0;
+            world
+                .resource_mut::<crate::survival::ShelterEnvironment>()
+                .power = true;
+            let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+            progress.weather.next = 5000.0;
+            progress.weather.until = 0.0;
+            progress.weather.amount = 0.0;
+            progress.weather.intensity = 0.0;
+            progress.weather.wet = 0.0;
+        }
+        Action::Streets(scene) => {
+            let fixture = street_fixture(crate::map::world(), scene, stage.size)?;
+            println!(
+                "DTQA streets fixture scene={scene:?} source={:?} player={:?} zoom={:.3}",
+                fixture.subject, fixture.position, fixture.zoom
+            );
+            move_view(world, fixture.position, fixture.zoom)?;
+            run.streets = Some(fixture);
             world.write_message(OpenPanel(PanelKind::Close));
             world.resource_mut::<crate::ui::PauseOpen>().0 = false;
             world.resource_mut::<Campaign>().game_min = 720.0;
@@ -1185,13 +1322,13 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
         }
         Action::Map => {
             // Resume the pre-existing route at its exterior-cutaway camera,
-            // time, power and weather after the commercial day/night sequence.
+            // time, power and weather after the commercial/street sequences.
             // Exploration from the extra real-world fixture positions remains;
             // these stages are retained, not claimed to have identical pixels.
             if run.stage > 0
                 && matches!(
                     STAGES[run.stages[run.stage - 1]].action,
-                    Action::Commercial(_)
+                    Action::Commercial(_) | Action::Streets(_)
                 )
             {
                 let previous =
@@ -2400,6 +2537,758 @@ fn commercial_evidence(
     })
 }
 
+/// The catalog is render-derived and is built once per fixture selection, not
+/// once per candidate. Source world/prop records never change during QA.
+struct StreetCatalog {
+    roads: Vec<crate::map::street::RoadMarkingPlan>,
+    parking: Vec<crate::map::street::ParkingPlan>,
+}
+
+impl StreetCatalog {
+    fn new(data: &crate::map::WorldData) -> Self {
+        Self {
+            roads: crate::map::street::road_marking_plans(data),
+            parking: crate::map::street::parking_plans(data),
+        }
+    }
+}
+
+struct StreetFeatures {
+    parts: Vec<(crate::map::ChunkKey, crate::map::build::Parts)>,
+    prop_indices: Vec<usize>,
+    parking_bays: usize,
+    junction_clearance: Option<f32>,
+    approach_arrow: bool,
+}
+
+fn street_prop_indices(data: &crate::map::WorldData, fixture: StreetFixture) -> Vec<usize> {
+    use crate::map::street::PropKind;
+    let StreetSubject::Prop(index) = fixture.subject else {
+        return Vec::new();
+    };
+    if fixture.scene != StreetScene::Scooters {
+        return vec![index];
+    }
+    let anchor = data.props[index];
+    let mut scooters: Vec<_> = data
+        .props
+        .iter()
+        .enumerate()
+        .filter(|(_, prop)| {
+            prop.kind == PropKind::Scooter
+                && prop.p.distance(anchor.p) < 3.1
+                && (prop.ang - anchor.ang).abs() < 0.01
+        })
+        .map(|(id, _)| id)
+        .collect();
+    scooters.sort_unstable();
+    scooters.truncate(4);
+    if let Some((lamp, _)) = data
+        .props
+        .iter()
+        .enumerate()
+        .filter(|(_, prop)| prop.kind == PropKind::Lamp && prop.p.distance(anchor.p) < 9.0)
+        .min_by(|a, b| {
+            a.1.p
+                .distance_squared(anchor.p)
+                .total_cmp(&b.1.p.distance_squared(anchor.p))
+                .then(a.0.cmp(&b.0))
+        })
+    {
+        scooters.push(lamp);
+    }
+    scooters
+}
+
+fn street_features(
+    data: &crate::map::WorldData,
+    fixture: StreetFixture,
+    catalog: &StreetCatalog,
+) -> Result<StreetFeatures, String> {
+    use crate::map::{ChunkKey, build::Parts, street};
+    let mut parts: Vec<(ChunkKey, Parts)> = Vec::new();
+    let mut add = |key: ChunkKey, geometry: Parts| {
+        if let Some((_, existing)) = parts.iter_mut().find(|(owner, _)| *owner == key) {
+            existing.merge(geometry);
+        } else {
+            parts.push((key, geometry));
+        }
+    };
+    let mut result = StreetFeatures {
+        parts: Vec::new(),
+        prop_indices: street_prop_indices(data, fixture),
+        parking_bays: 0,
+        junction_clearance: None,
+        approach_arrow: false,
+    };
+    match fixture.subject {
+        StreetSubject::Approach { road, segment, end } => {
+            let layout = catalog
+                .roads
+                .iter()
+                .find(|plan| plan.road_index == road && plan.segment_index == segment)
+                .ok_or("Street fixture source segment no longer has a marking plan")?;
+            let approach = layout
+                .approaches
+                .iter()
+                .find(|approach| approach.end == end)
+                .ok_or("Street fixture source approach is missing")?;
+            add(
+                ChunkKey::of((layout.a + layout.b) / 2.0),
+                street::approach_geometry(approach),
+            );
+            result.junction_clearance = Some(approach.clearance);
+            result.approach_arrow = approach.has_arrow;
+        }
+        StreetSubject::Prop(_) => {
+            for index in &result.prop_indices {
+                let prop = &data.props[*index];
+                add(ChunkKey::of(prop.p), street::prop_geometry(prop));
+                if let Some(parking) = catalog
+                    .parking
+                    .iter()
+                    .find(|plan| plan.prop_index == *index)
+                {
+                    add(ChunkKey::of(prop.p), street::parking_geometry(parking));
+                    result.parking_bays += 1;
+                }
+            }
+        }
+    }
+    parts.sort_by_key(|(key, _)| *key);
+    result.parts = parts;
+    Ok(result)
+}
+
+/// Reject obvious foreground buildings and tree crowns along the normal camera
+/// direction. This is candidate screening, not a claim of full pixel occlusion.
+fn street_camera_clear(data: &crate::map::WorldData, target: Vec3) -> bool {
+    use crate::map::street::PropKind;
+    let direction = Vec2::ONE.normalize();
+    (1..=36).all(|step| {
+        let distance = step as f32;
+        let p = target.xz() + direction * distance;
+        let height = target.y + distance * crate::camera::CAM_OFFSET.y / 40.0_f32.hypot(40.0);
+        data.bld_at(p)
+            .is_none_or(|building| building.h + 3.5 < height)
+            && !data.props.iter().any(|prop| {
+                matches!(prop.kind, PropKind::Tree(_)) && prop.p.distance(p) < 2.3 && height < 8.0
+            })
+    })
+}
+
+/// free() only measures distance to wall/cover segments: the centre inside a
+/// closed parked-car rectangle can be far from all four edges. A QA teleport
+/// must also remain outside the original solid vehicle footprint, with room for
+/// the player radius, rather than placing an unreachable camera inside a body.
+fn street_player_position_clear(data: &crate::map::WorldData, position: Vec2) -> bool {
+    if data.bld_at(position).is_some() || !data.free(position, 0.6) {
+        return false;
+    }
+    !data.props.iter().any(|prop| {
+        use crate::map::street::PropKind;
+        let (half_width, half_length) = match prop.kind {
+            PropKind::Car | PropKind::Taxi => (0.9, 2.2),
+            PropKind::Truck => (1.15, 3.25),
+            // Scooters are non-colliding decoration, but a review camera should
+            // still avoid placing the player's body through the parked model.
+            PropKind::Scooter => (0.36, 0.87),
+            _ => return false,
+        };
+        let delta = position - prop.p;
+        let along = Vec2::new(prop.ang.sin(), prop.ang.cos());
+        let across = Vec2::new(prop.ang.cos(), -prop.ang.sin());
+        delta.dot(across).abs() <= half_width + 0.6 && delta.dot(along).abs() <= half_length + 0.6
+    })
+}
+
+fn street_fixture(
+    data: &crate::map::WorldData,
+    scene: StreetScene,
+    size: [u32; 2],
+) -> Result<StreetFixture, String> {
+    use crate::map::street::PropKind;
+    let catalog = StreetCatalog::new(data);
+    let mut subjects = Vec::new();
+    if scene == StreetScene::Junction {
+        for road in &catalog.roads {
+            for approach in &road.approaches {
+                if approach.has_arrow && (9.0..=22.0).contains(&approach.width) {
+                    subjects.push(StreetSubject::Approach {
+                        road: road.road_index,
+                        segment: road.segment_index,
+                        end: approach.end,
+                    });
+                }
+            }
+        }
+    } else {
+        let kind = match scene {
+            StreetScene::Scooters => PropKind::Scooter,
+            StreetScene::Taxi => PropKind::Taxi,
+            StreetScene::Truck => PropKind::Truck,
+            StreetScene::Junction => unreachable!(),
+        };
+        subjects.extend(
+            data.props.iter().enumerate().filter_map(|(index, prop)| {
+                (prop.kind == kind).then_some(StreetSubject::Prop(index))
+            }),
+        );
+    }
+    let source_count = subjects.len();
+    let mut missing_features = 0;
+    let mut blocked_views = 0;
+    let mut candidates = Vec::new();
+    for subject in subjects {
+        let mut fixture = StreetFixture {
+            scene,
+            subject,
+            position: Vec2::ZERO,
+            zoom: 1.0,
+        };
+        let features = street_features(data, fixture, &catalog)?;
+        if scene == StreetScene::Scooters {
+            let scooters = features
+                .prop_indices
+                .iter()
+                .filter(|index| data.props[**index].kind == PropKind::Scooter)
+                .count();
+            let lamps = features
+                .prop_indices
+                .iter()
+                .filter(|index| data.props[**index].kind == PropKind::Lamp)
+                .count();
+            if scooters < 2 || lamps != 1 || features.parking_bays < 2 {
+                missing_features += 1;
+                continue;
+            }
+        }
+        let bounds: Vec<Vec3> = features
+            .parts
+            .iter()
+            .flat_map(|(_, parts)| {
+                parts
+                    .0
+                    .values()
+                    .flat_map(|mesh| mesh.pos.iter().copied().map(Vec3::from))
+            })
+            .collect();
+        if bounds.len() < 40 {
+            continue;
+        }
+        let (lo, hi) = bounds.iter().copied().fold(
+            (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+            |(lo, hi), point| (lo.min(point), hi.max(point)),
+        );
+        let centre = (lo + hi) / 2.0;
+        let screen_targets = [
+            centre,
+            Vec3::new(lo.x, 0.15, lo.z),
+            Vec3::new(lo.x, 0.15, hi.z),
+            Vec3::new(hi.x, 0.15, lo.z),
+            Vec3::new(hi.x, 0.15, hi.z),
+        ];
+        if !screen_targets
+            .into_iter()
+            .all(|point| street_camera_clear(data, point))
+        {
+            blocked_views += 1;
+            continue;
+        }
+        // Ground markings can use their centre. Parked vehicles retain their
+        // real collision; stand at a nearby clear road point and fit both them
+        // and, for scooters, the actual nearby lamp into the ordinary camera.
+        let mut positions = vec![centre.xz()];
+        for distance in [1.5, 2.5, 3.5, 5.0] {
+            for direction in [
+                Vec2::ONE.normalize(),
+                Vec2::new(1.0, -1.0).normalize(),
+                -Vec2::ONE.normalize(),
+                Vec2::new(-1.0, 1.0).normalize(),
+            ] {
+                positions.push(centre.xz() + direction * distance);
+            }
+        }
+        for position in positions {
+            if !position.cmpge(data.min + 1.0).all()
+                || !position.cmple(data.max - 1.0).all()
+                || !street_player_position_clear(data, position)
+                || features
+                    .parts
+                    .iter()
+                    .any(|(owner, _)| owner.dist(position) >= 58.0)
+            {
+                continue;
+            }
+            let Some(zoom) = commercial_zoom(&bounds, position, size) else {
+                continue;
+            };
+            fixture.position = position;
+            fixture.zoom = zoom;
+            candidates.push(fixture);
+            break;
+        }
+    }
+    candidates
+        .into_iter()
+        .max_by(|a, b| {
+            a.zoom.total_cmp(&b.zoom).then_with(|| {
+                b.position
+                    .distance_squared(data.spawn)
+                    .total_cmp(&a.position.distance_squared(data.spawn))
+            })
+        })
+        .ok_or_else(|| format!("No visible, collision-clear real-world {scene:?} street fixture: {source_count} sources, {missing_features} lack required features, {blocked_views} fail foreground screening"))
+}
+
+fn street_owner_keys(
+    data: &crate::map::WorldData,
+    fixture: StreetFixture,
+) -> Vec<crate::map::ChunkKey> {
+    let mut owners = match fixture.subject {
+        StreetSubject::Approach { road, segment, .. } => {
+            let source = &data.roads[road];
+            vec![crate::map::ChunkKey::of(
+                (source.p[segment] + source.p[segment + 1]) / 2.0,
+            )]
+        }
+        StreetSubject::Prop(_) => street_prop_indices(data, fixture)
+            .into_iter()
+            .map(|index| crate::map::ChunkKey::of(data.props[index].p))
+            .collect(),
+    };
+    owners.sort_unstable();
+    owners.dedup();
+    owners
+}
+
+fn street_ready(world: &mut World, fixture: StreetFixture) -> bool {
+    let Some(main_view) = main_camera_meshes(world) else {
+        return false;
+    };
+    for key in street_owner_keys(crate::map::world(), fixture) {
+        let Some(root) = world
+            .query::<(Entity, &crate::map::Chunk)>()
+            .iter(world)
+            .find_map(|(entity, chunk)| {
+                (chunk.key == key && chunk.lod == crate::map::Lod::Near).then_some(entity)
+            })
+        else {
+            return false;
+        };
+        if !world
+            .query::<(
+                Entity,
+                &ChildOf,
+                &crate::map::MapMeshMaterial,
+                &InheritedVisibility,
+                &ViewVisibility,
+            )>()
+            .iter(world)
+            .any(|(entity, parent, _, inherited, view)| {
+                parent.parent() == root
+                    && inherited.get()
+                    && view.get()
+                    && main_view.contains(&entity)
+            })
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn street_pixel_luma(rgb: [u8; 3]) -> u8 {
+    ((54 * rgb[0] as u32 + 183 * rgb[1] as u32 + 19 * rgb[2] as u32) / 256) as u8
+}
+
+fn street_marking_pixel_match(paint: [u8; 3], asphalt: [u8; 3]) -> bool {
+    let lo = *paint.iter().min().unwrap();
+    let hi = *paint.iter().max().unwrap();
+    // Neutral asphalt in CI77 is approximately RGB(114,110,99): brightness
+    // alone at 90 accepted the missing-paint negative control. Require a much
+    // lighter neutral surface AND local contrast against unpainted carriageway.
+    lo >= 165
+        && hi - lo <= 65
+        && street_pixel_luma(paint).saturating_sub(street_pixel_luma(asphalt)) >= 35
+}
+
+fn street_painted_triangles(features: &StreetFeatures, catalog: &StreetCatalog) -> Vec<[Vec2; 3]> {
+    use crate::map::{build::Mat, street};
+    let (lo, hi) = features
+        .parts
+        .iter()
+        .flat_map(|(_, parts)| parts.0.values())
+        .flat_map(|mesh| mesh.pos.iter().copied().map(|point| Vec3::from(point).xz()))
+        .fold(
+            (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN)),
+            |(lo, hi), point| (lo.min(point), hi.max(point)),
+        );
+    let (lo, hi) = (lo - 2.0, hi + 2.0);
+    let mut triangles = Vec::new();
+    let mut add = |parts: crate::map::build::Parts| {
+        if let Some(mesh) = parts.0.get(&Mat::Marking) {
+            triangles.extend(mesh.idx.as_chunks::<3>().0.iter().map(|indices| {
+                [indices[0], indices[1], indices[2]]
+                    .map(|index| Vec3::from(mesh.pos[index as usize]).xz())
+            }));
+        }
+    };
+    for road in &catalog.roads {
+        let margin = Vec2::splat(road.width * 0.5 + 1.0);
+        let min = road.a.min(road.b) - margin;
+        let max = road.a.max(road.b) + margin;
+        if min.x <= hi.x && max.x >= lo.x && min.y <= hi.y && max.y >= lo.y {
+            add(street::road_marking_geometry(road));
+        }
+    }
+    for parking in &catalog.parking {
+        let margin = parking.length.max(parking.width);
+        if parking.center.x + margin >= lo.x
+            && parking.center.x - margin <= hi.x
+            && parking.center.y + margin >= lo.y
+            && parking.center.y - margin <= hi.y
+        {
+            add(street::parking_geometry(parking));
+        }
+    }
+    triangles
+}
+
+/// Orthographic paint-to-camera ray against the selected source prop surfaces.
+/// It prevents a bright scooter body/plate from masquerading as the paint beneath
+/// it; this small fixture check is not a whole-world visibility renderer.
+fn street_prop_occludes(origin: Vec3, triangles: &[[Vec3; 3]]) -> bool {
+    let direction = crate::camera::CAM_OFFSET.normalize();
+    triangles.iter().any(|triangle| {
+        let e1 = triangle[1] - triangle[0];
+        let e2 = triangle[2] - triangle[0];
+        let p = direction.cross(e2);
+        let det = e1.dot(p);
+        if det.abs() < 1e-7 {
+            return false;
+        }
+        let inverse = det.recip();
+        let offset = origin - triangle[0];
+        let u = offset.dot(p) * inverse;
+        if !(0.0..=1.0).contains(&u) {
+            return false;
+        }
+        let q = offset.cross(e1);
+        let v = direction.dot(q) * inverse;
+        if v < 0.0 || u + v > 1.0 {
+            return false;
+        }
+        e2.dot(q) * inverse > 0.015
+    })
+}
+
+fn street_asphalt_control(
+    data: &crate::map::WorldData,
+    point: Vec3,
+    triangle: [Vec3; 3],
+    painted: &[[Vec2; 3]],
+    occluders: &[[Vec3; 3]],
+) -> Option<Vec3> {
+    let edge = [
+        triangle[1] - triangle[0],
+        triangle[2] - triangle[1],
+        triangle[0] - triangle[2],
+    ]
+    .into_iter()
+    .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))?
+    .xz()
+    .normalize_or_zero();
+    let normal = Vec2::new(-edge.y, edge.x);
+    // Compare with nearby carriageway under nearly the same lighting. Controls
+    // must lie outside every nearby source paint triangle, with an AA margin,
+    // and outside existing solid-prop/building collision.
+    for distance in [0.35, 0.5, 0.7, 1.0, 1.4] {
+        for direction in [normal, -normal, edge, -edge] {
+            let q = point.xz() + direction * distance;
+            if data.road_dist(q) > -0.16 || data.bld_at(q).is_some() || !data.free(q, 0.1) {
+                continue;
+            }
+            // Scooters intentionally have no gameplay collision, so free() by
+            // itself could choose their dark seat/body as an "asphalt" control.
+            // Reject every existing low prop footprint explicitly as well.
+            if data.props.iter().any(|prop| {
+                use crate::map::street::PropKind;
+                let (width, length) = match prop.kind {
+                    PropKind::Scooter => (0.4, 0.9),
+                    PropKind::Car | PropKind::Taxi => (1.0, 2.3),
+                    PropKind::Truck => (1.3, 3.4),
+                    PropKind::Lamp => (0.4, 0.4),
+                    PropKind::Tree(_) => (2.6, 2.6),
+                };
+                let delta = q - prop.p;
+                let along = Vec2::new(prop.ang.sin(), prop.ang.cos());
+                let across = Vec2::new(prop.ang.cos(), -prop.ang.sin());
+                delta.dot(along).abs() <= length && delta.dot(across).abs() <= width
+            }) {
+                continue;
+            }
+            if painted.iter().any(|triangle| {
+                crate::map::data::pip(q, triangle)
+                    || (0..3).any(|i| {
+                        crate::map::data::seg_dist(q, triangle[i], triangle[(i + 1) % 3]) < 0.14
+                    })
+            }) {
+                continue;
+            }
+            let target = Vec3::new(q.x, point.y, q.y);
+            if !street_prop_occludes(target, occluders) {
+                return Some(target);
+            }
+        }
+    }
+    None
+}
+
+fn street_evidence(
+    world: &mut World,
+    fixture: StreetFixture,
+    size: [u32; 2],
+) -> Result<(StreetEvidence, Vec<StreetPixelProbe>), String> {
+    use crate::map::{Chunk, Lod, MapMeshGeometry, MapMeshMaterial, build::Mat};
+    let data = crate::map::world();
+    let catalog = StreetCatalog::new(data);
+    let features = street_features(data, fixture, &catalog)?;
+    let main_view = main_camera_meshes(world).ok_or("Street camera has no visible mesh list")?;
+    let mut batches = Vec::new();
+    let mut handles = Vec::new();
+    let vertex_key = |p: [f32; 3]| p.map(|value| (value * 1000.0).round() as i32);
+    for (key, feature) in &features.parts {
+        let root = world
+            .query::<(Entity, &Chunk)>()
+            .iter(world)
+            .find_map(|(entity, chunk)| {
+                (chunk.key == *key && chunk.lod == Lod::Near).then_some(entity)
+            })
+            .ok_or_else(|| format!("Street source chunk {key:?} is not Near"))?;
+        let expected = crate::map::build_chunk(data, *key, Lod::Near).merged;
+        let mut found = HashSet::new();
+        let mut uploaded = ExteriorMeshGroup::default();
+        for (entity, parent, material, mesh, metadata, transform, local, inherited, view) in world
+            .query::<(
+                Entity,
+                &ChildOf,
+                &MapMeshMaterial,
+                &Mesh3d,
+                &MapMeshGeometry,
+                &GlobalTransform,
+                &Visibility,
+                &InheritedVisibility,
+                &ViewVisibility,
+            )>()
+            .iter(world)
+        {
+            if parent.parent() != root {
+                continue;
+            }
+            let planned = expected
+                .0
+                .get(&material.0)
+                .ok_or_else(|| format!("Street {key:?}: unexpected {:?} material", material.0))?;
+            let (min, max) = planned.aabb();
+            if !found.insert(material.0)
+                || metadata.vertices != planned.vcount()
+                || metadata.min.distance(min) > 0.001
+                || metadata.max.distance(max) > 0.001
+                || transform.translation().length() > 0.001
+                || *local == Visibility::Hidden
+                || !inherited.get()
+            {
+                return Err(format!(
+                    "Street {key:?}: {:?} uploaded geometry differs from runtime chunk",
+                    material.0
+                ));
+            }
+            let visible = view.get() && main_view.contains(&entity);
+            if feature.0.contains_key(&material.0) && !visible {
+                return Err(format!(
+                    "Street {key:?}: feature material {:?} absent from main view",
+                    material.0
+                ));
+            }
+            uploaded.meshes += 1;
+            uploaded.vertices += metadata.vertices;
+            uploaded.in_main_view += usize::from(visible);
+            handles.push(mesh.0.clone());
+        }
+        let expected_materials: HashSet<_> = expected
+            .0
+            .iter()
+            .filter_map(|(material, mesh)| (!mesh.is_empty()).then_some(*material))
+            .collect();
+        if found != expected_materials {
+            return Err(format!(
+                "Street {key:?}: incomplete uploaded material batches"
+            ));
+        }
+        for (material, mesh) in &feature.0 {
+            let full = expected.0.get(material).ok_or_else(|| {
+                format!("Street {key:?}: {material:?} feature material not integrated")
+            })?;
+            let vertices: HashSet<_> = full.pos.iter().copied().map(vertex_key).collect();
+            if mesh
+                .pos
+                .iter()
+                .copied()
+                .any(|point| !vertices.contains(&vertex_key(point)))
+            {
+                return Err(format!(
+                    "Street {key:?}: {material:?} feature vertices missing from runtime chunk"
+                ));
+            }
+        }
+        batches.push(StreetBatchEvidence {
+            chunk: [key.0, key.1],
+            uploaded,
+        });
+    }
+    if handles
+        .iter()
+        .any(|handle| !world.resource::<Assets<Mesh>>().contains(handle))
+    {
+        return Err("Street upload references a missing mesh asset".into());
+    }
+    let player = player_position(world)?;
+    if player.xz().distance(fixture.position) > 0.001
+        || !street_player_position_clear(data, player.xz())
+    {
+        return Err("Street camera position moved or overlaps existing collision".into());
+    }
+    let (camera, transform) = world
+        .query_filtered::<(&Camera, &GlobalTransform), With<GameCamera>>()
+        .iter(world)
+        .next()
+        .ok_or("Street camera is missing")?;
+    let mut lo = Vec2::splat(f32::MAX);
+    let mut hi = Vec2::splat(f32::MIN);
+    let mut probes = Vec::new();
+    let painted_ground = street_painted_triangles(&features, &catalog);
+    let occluders: Vec<_> = features
+        .parts
+        .iter()
+        .flat_map(|(_, parts)| parts.0.iter())
+        .filter(|(material, _)| **material != Mat::Marking)
+        .flat_map(|(_, mesh)| {
+            mesh.idx.as_chunks::<3>().0.iter().map(|indices| {
+                [indices[0], indices[1], indices[2]]
+                    .map(|index| Vec3::from(mesh.pos[index as usize]))
+            })
+        })
+        .collect();
+    let mut feature_vertices = 0;
+    for (_, parts) in &features.parts {
+        for (material, mesh) in &parts.0 {
+            feature_vertices += mesh.vcount();
+            for point in &mesh.pos {
+                let projected = camera
+                    .world_to_viewport(transform, Vec3::from(*point))
+                    .map_err(|err| format!("Street feature cannot be projected: {err:?}"))?;
+                lo = lo.min(projected);
+                hi = hi.max(projected);
+            }
+            if *material == Mat::Marking {
+                for triangle in mesh.idx.as_chunks::<3>().0.iter() {
+                    let triangle = [triangle[0], triangle[1], triangle[2]]
+                        .map(|index| Vec3::from(mesh.pos[index as usize]));
+                    let point = triangle.into_iter().sum::<Vec3>() / 3.0;
+                    if street_prop_occludes(point, &occluders) {
+                        continue;
+                    }
+                    let Some(control) =
+                        street_asphalt_control(data, point, triangle, &painted_ground, &occluders)
+                    else {
+                        continue;
+                    };
+                    let project = |point| {
+                        camera
+                            .world_to_viewport(transform, point)
+                            .map(|pixel| [pixel.x.round() as u32, pixel.y.round() as u32])
+                    };
+                    let sample = project(point).map_err(|err| {
+                        format!("Street marking pixel cannot be projected: {err:?}")
+                    })?;
+                    let asphalt = project(control).map_err(|err| {
+                        format!("Street asphalt control cannot be projected: {err:?}")
+                    })?;
+                    if sample[0] < size[0]
+                        && sample[1] < size[1]
+                        && asphalt[0] < size[0]
+                        && asphalt[1] < size[1]
+                        && (sample[0].abs_diff(asphalt[0]) >= 3
+                            || sample[1].abs_diff(asphalt[1]) >= 3)
+                    {
+                        probes.push(StreetPixelProbe {
+                            paint: sample,
+                            asphalt,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    probes.sort_unstable();
+    probes.dedup();
+    if lo.x < size[0] as f32 * 0.08
+        || lo.y < size[1] as f32 * 0.08
+        || hi.x > size[0] as f32 * 0.92
+        || hi.y > size[1] as f32 * 0.92
+        || (hi - lo).min_element() < 65.0
+    {
+        return Err(format!(
+            "Street {:?}: cropped or unreadably small feature {lo:?}..{hi:?}",
+            fixture.scene
+        ));
+    }
+    if matches!(fixture.scene, StreetScene::Junction | StreetScene::Scooters) && probes.len() < 8 {
+        return Err(format!(
+            "Street {:?}: insufficient actual marking triangle probes",
+            fixture.scene
+        ));
+    }
+    let atmosphere = world.resource::<crate::map::atmosphere::AtmosphereState>();
+    if atmosphere.night >= 0.1 || !atmosphere.power {
+        return Err("Street scene did not reach its explicit daylight/power fixture".into());
+    }
+    let (road_segment, junction_end) = match fixture.subject {
+        StreetSubject::Approach { road, segment, end } => (Some([road, segment]), Some(end)),
+        StreetSubject::Prop(_) => (None, None),
+    };
+    let prop_kinds = features
+        .prop_indices
+        .iter()
+        .map(|index| format!("{:?}", data.props[*index].kind))
+        .collect();
+    Ok((
+        StreetEvidence {
+            visibility_measurement: "uploaded_batches_and_main_view_membership_with_marking_pixel_probes_not_full_occlusion",
+            scene: format!("{:?}", fixture.scene),
+            road_segment,
+            junction_end,
+            junction_clearance: features.junction_clearance,
+            approach_arrow: features.approach_arrow,
+            prop_indices: features.prop_indices,
+            prop_kinds,
+            parking_bays: features.parking_bays,
+            feature_vertices,
+            player: player.to_array(),
+            camera: transform.translation().to_array(),
+            zoom: world.resource::<CameraZoom>().0,
+            projected_bounds: [lo.to_array(), hi.to_array()],
+            batches,
+            marking_pixel_samples: 0,
+            marking_pixel_hits: 0,
+            marking_pixels: Vec::new(),
+            streaming: world.resource::<crate::map::MapRenderStats>().clone(),
+        },
+        probes,
+    ))
+}
+
 fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     let checkpoint = run.checkpoint.as_ref().ok_or("Missing checkpoint")?;
     let position = player_position(world)?;
@@ -2450,8 +3339,10 @@ fn finish(world: &mut World, run: &mut QaRun) {
     run.finished = true;
     run.report.success = run.report.error.is_none()
         && run.report.captures.len() == run.stages.len()
-        && (matches!(run.report.scope, "exterior_subset" | "commercial_subset")
-            || run.continuation_checked);
+        && (matches!(
+            run.report.scope,
+            "exterior_subset" | "commercial_subset" | "streets_subset"
+        ) || run.continuation_checked);
     let report_path = run.output.join("qa-report.json");
     let result = serde_json::to_vec_pretty(&run.report)
         .map_err(|err| err.to_string())
@@ -2498,10 +3389,11 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // Retain all original gameplay, performance and architecture captures, then
-    // add commercial fronts with paired day/night/power-loss evidence.
-    if run.started.elapsed() > Duration::from_secs(1500) {
-        return Err("Visual QA exceeded its 25-minute deadline".into());
+    // CI77 needed nearly 24 minutes for the 58-scene Wave 2 suite. Four real
+    // street scenes now extend that same full route to 62 captures; retain every
+    // per-stage readiness, pixel and save assertion within a 30-minute run limit.
+    if run.started.elapsed() > Duration::from_secs(1800) {
+        return Err("Visual QA exceeded its 30-minute deadline".into());
     }
     if run.report.renderer.is_empty() {
         fs::create_dir_all(&run.output).map_err(|err| err.to_string())?;
@@ -2588,6 +3480,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 | Action::Blackout
                 | Action::Exterior(_)
                 | Action::Commercial(_)
+                | Action::Streets(_)
         )
     {
         // The explicit clock/weather fixture can dispatch several catch-up
@@ -2639,6 +3532,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             | Action::HomeInterior
             | Action::Exterior(_)
             | Action::Commercial(_)
+            | Action::Streets(_)
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -2674,11 +3568,15 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         let commercial_loaded = run
             .commercial
             .is_none_or(|fixture| commercial_ready(world, fixture));
+        let streets_loaded = run
+            .streets
+            .is_none_or(|fixture| street_ready(world, fixture));
         if !chunks_ready
             || !detail_ready
             || !interior_ready
             || !exterior_loaded
             || !commercial_loaded
+            || !streets_loaded
         {
             if run.wait_logged.elapsed() >= Duration::from_secs(5) {
                 let exterior = run
@@ -2690,7 +3588,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                     .map(|fixture| commercial_wait_status(world, fixture))
                     .unwrap_or_default();
                 println!(
-                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} commercial={} {} {}",
+                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} commercial={} streets={} {} {}",
                     stage.name,
                     run.frame,
                     chunks_ready,
@@ -2698,6 +3596,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                     interior_ready,
                     exterior_loaded,
                     commercial_loaded,
+                    streets_loaded,
                     exterior,
                     commercial
                 );
@@ -3042,6 +3941,17 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             evidence.night, evidence.power, evidence.sign_emissive
         ));
     }
+    let (streets, street_pixels) = if let Some(fixture) = run.streets {
+        let (evidence, probes) = street_evidence(world, fixture, stage.size)?;
+        run.report.assertions.push(format!(
+            "{}: real road segment {:?}, source props {:?}, {} parking bays, {} feature vertices retained in street batches with verified upload material/count/bounds metadata; normal camera, clear player position, projected bounds and main-view membership checked; projected white markings also require GPU pixel evidence",
+            stage.name, evidence.road_segment, evidence.prop_indices,
+            evidence.parking_bays, evidence.feature_vertices
+        ));
+        (Some(evidence), probes)
+    } else {
+        (None, Vec::new())
+    };
     let map_workload = matches!(stage.flow, ExpectedFlow::Playing)
         .then(|| map_workload(world))
         .flatten();
@@ -3064,6 +3974,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 settings_pixels,
                 exterior,
                 commercial,
+                streets,
+                street_pixels,
                 map_workload,
             },
         ))
@@ -3184,6 +4096,62 @@ fn capture_finished(
                 ));
             }
         }
+        let mut streets = ticket.streets.clone();
+        if let Some(evidence) = streets.as_mut() {
+            let neighborhood = |point: [u32; 2]| {
+                let mut pixels = Vec::with_capacity(9);
+                for dx in -1_i32..=1 {
+                    for dy in -1_i32..=1 {
+                        let x = point[0].saturating_add_signed(dx).min(image.width() - 1);
+                        let y = point[1].saturating_add_signed(dy).min(image.height() - 1);
+                        let pixel = image.get_pixel(x, y).0;
+                        pixels.push([pixel[0], pixel[1], pixel[2]]);
+                    }
+                }
+                pixels.sort_by_key(|rgb| street_pixel_luma(*rgb));
+                pixels
+            };
+            let pixels: Vec<_> = ticket
+                .street_pixels
+                .iter()
+                .map(|probe| {
+                    let asphalt_rgb = neighborhood(probe.asphalt)[4];
+                    let nearby_paint = neighborhood(probe.paint);
+                    let paint_rgb = nearby_paint
+                        .iter()
+                        .copied()
+                        .rev()
+                        .find(|rgb| street_marking_pixel_match(*rgb, asphalt_rgb))
+                        .unwrap_or(nearby_paint[8]);
+                    StreetPixelEvidence {
+                        point: probe.paint,
+                        asphalt_point: probe.asphalt,
+                        paint_rgb,
+                        asphalt_rgb,
+                        paint_luma: street_pixel_luma(paint_rgb),
+                        asphalt_luma: street_pixel_luma(asphalt_rgb),
+                        matched: street_marking_pixel_match(paint_rgb, asphalt_rgb),
+                    }
+                })
+                .collect();
+            let hits = pixels.iter().filter(|pixel| pixel.matched).count();
+            evidence.marking_pixels = pixels;
+            evidence.marking_pixel_samples = ticket.street_pixels.len();
+            evidence.marking_pixel_hits = hits;
+            if !ticket.street_pixels.is_empty() && hits * 4 < ticket.street_pixels.len() {
+                // Preserve the failed readback and every paired RGB/coordinate so
+                // a renderer/fixture failure is directly reviewable in CI.
+                image.save(&ticket.path).map_err(|err| err.to_string())?;
+                let debug = serde_json::to_vec_pretty(evidence).map_err(|err| err.to_string())?;
+                fs::write(ticket.path.with_extension("pixel-failure.json"), debug)
+                    .map_err(|err| err.to_string())?;
+                return Err(format!(
+                    "{}: white road/parking paint lacks paired asphalt contrast in projected GPU samples ({hits}/{})",
+                    ticket.name,
+                    ticket.street_pixels.len()
+                ));
+            }
+        }
         let colors: HashSet<_> = image
             .pixels()
             .step_by(37)
@@ -3205,6 +4173,7 @@ fn capture_finished(
             sampled_colors: colors.len(),
             exterior: ticket.exterior.clone(),
             commercial: ticket.commercial.clone(),
+            streets,
             map_workload: ticket.map_workload.clone(),
         })
     })();
@@ -3224,6 +4193,152 @@ fn capture_finished(
 #[cfg(test)]
 mod exterior_tests {
     use super::*;
+
+    #[test]
+    fn street_camera_rejects_vehicle_interiors_and_decorative_scooter_overlap() {
+        use crate::map::street::PropKind;
+        let data = crate::map::world();
+        for (kind, half_width, half_length) in [
+            (PropKind::Taxi, 0.9, 2.2),
+            (PropKind::Truck, 1.15, 3.25),
+            (PropKind::Scooter, 0.36, 0.87),
+        ] {
+            let (prop, outside) = data
+                .props
+                .iter()
+                .filter(|prop| prop.kind == kind && data.free(prop.p, 0.6))
+                .find_map(|prop| {
+                    let along = Vec2::new(prop.ang.sin(), prop.ang.cos());
+                    let across = Vec2::new(prop.ang.cos(), -prop.ang.sin());
+                    [
+                        across * (half_width + 1.0),
+                        -across * (half_width + 1.0),
+                        along * (half_length + 1.0),
+                        -along * (half_length + 1.0),
+                    ]
+                    .into_iter()
+                    .map(|offset| prop.p + offset)
+                    .find(|point| {
+                        data.road_dist(*point) < 0.0 && street_player_position_clear(data, *point)
+                    })
+                    .map(|outside| (prop, outside))
+                })
+                .expect(
+                    "real parked prop with a perimeter-clear centre and an outside street point",
+                );
+            assert!(!street_player_position_clear(data, prop.p));
+            assert!(street_player_position_clear(data, outside));
+        }
+    }
+
+    #[test]
+    fn street_pixel_probes_reject_foreground_prop_surfaces() {
+        let centre = crate::camera::CAM_OFFSET.normalize() * 2.0;
+        let right = Vec3::new(1.0, 0.0, -1.0).normalize();
+        let up = crate::camera::CAM_OFFSET.normalize().cross(right);
+        let triangle = [centre - right - up, centre + right - up, centre + up];
+        assert!(street_prop_occludes(Vec3::ZERO, &[triangle]));
+        assert!(!street_prop_occludes(right * 4.0, &[triangle]));
+        assert!(!street_prop_occludes(centre * 2.0, &[triangle]));
+    }
+
+    #[test]
+    fn street_marking_pixels_reject_real_asphalt_negative_controls() {
+        // Unpainted carriageway pixels from the verified CI77 04a capture.
+        let asphalt = [
+            [114, 109, 98],
+            [114, 110, 99],
+            [120, 115, 104],
+            [119, 115, 104],
+            [120, 116, 104],
+        ];
+        for paint in asphalt {
+            for road in asphalt {
+                assert!(!street_marking_pixel_match(paint, road));
+            }
+            assert!(street_marking_pixel_match([238, 234, 219], paint));
+        }
+        // Bright neutral pavement or UI alone also fails without local contrast.
+        assert!(!street_marking_pixel_match(
+            [220, 218, 208],
+            [210, 208, 198]
+        ));
+    }
+
+    #[test]
+    fn street_views_use_existing_sources_clear_positions_and_admitted_features() {
+        use crate::map::street::PropKind;
+        let data = crate::map::world();
+        let catalog = StreetCatalog::new(data);
+        for (scene, size) in [
+            (StreetScene::Junction, [1280, 720]),
+            (StreetScene::Scooters, [720, 1280]),
+            (StreetScene::Taxi, [1280, 720]),
+            (StreetScene::Truck, [1280, 720]),
+        ] {
+            let fixture = street_fixture(data, scene, size).unwrap();
+            let features = street_features(data, fixture, &catalog).unwrap();
+            assert!(street_player_position_clear(data, fixture.position));
+            assert!(crate::camera::ZOOM_RANGE.contains(&fixture.zoom));
+            assert!(
+                features
+                    .parts
+                    .iter()
+                    .all(|(owner, _)| owner.dist(fixture.position) < 58.0)
+            );
+            assert!(
+                features
+                    .parts
+                    .iter()
+                    .map(|(_, parts)| parts.vcount())
+                    .sum::<usize>()
+                    >= 40
+            );
+            match scene {
+                StreetScene::Junction => {
+                    assert!(features.prop_indices.is_empty());
+                    assert!(features.approach_arrow);
+                    assert!(features.junction_clearance.is_some_and(|value| value > 0.0));
+                }
+                StreetScene::Scooters => {
+                    assert!(features.parking_bays >= 2);
+                    assert!(
+                        features
+                            .prop_indices
+                            .iter()
+                            .filter(|index| data.props[**index].kind == PropKind::Scooter)
+                            .count()
+                            >= 2
+                    );
+                    assert_eq!(
+                        features
+                            .prop_indices
+                            .iter()
+                            .filter(|index| data.props[**index].kind == PropKind::Lamp)
+                            .count(),
+                        1
+                    );
+                }
+                StreetScene::Taxi | StreetScene::Truck => {
+                    assert_eq!(features.prop_indices.len(), 1);
+                    let expected = if scene == StreetScene::Taxi {
+                        PropKind::Taxi
+                    } else {
+                        PropKind::Truck
+                    };
+                    assert_eq!(data.props[features.prop_indices[0]].kind, expected);
+                }
+            }
+            eprintln!(
+                "Street fixture {scene:?}: source={:?}, props={:?}, bays={}, position={:?}, zoom={:.3}",
+                fixture.subject,
+                features.prop_indices,
+                features.parking_bays,
+                fixture.position,
+                fixture.zoom
+            );
+        }
+    }
 
     #[test]
     fn commercial_views_use_real_features_clear_positions_and_identical_lighting_cameras() {

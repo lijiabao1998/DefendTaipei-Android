@@ -274,44 +274,137 @@ fn commercial_features(world: &WorldData) -> Value {
     })
 }
 
+fn street_features(world: &WorldData) -> Value {
+    use defend_taipei::map::street::{self, PropKind};
+
+    let kind_name = |kind| match kind {
+        PropKind::Lamp => "lamp",
+        PropKind::Scooter => "scooter",
+        PropKind::Car => "car",
+        PropKind::Taxi => "taxi",
+        PropKind::Truck => "truck",
+        PropKind::Tree(_) => "tree",
+    };
+    let markings = street::road_marking_plans(world);
+    let parking = street::parking_plans(world);
+    let mut marking_meshes = MeshTotals::default();
+    let mut parking_meshes = MeshTotals::default();
+    let mut parking_by_kind = BTreeMap::<&str, usize>::new();
+    let mut original_props = BTreeMap::<&str, usize>::new();
+    let mut prop_meshes = BTreeMap::<&str, MeshTotals>::new();
+    let mut prop_vertex_bounds = BTreeMap::<&str, [usize; 2]>::new();
+    for plan in &markings {
+        marking_meshes.measure(&street::road_marking_geometry(plan));
+    }
+    for plan in &parking {
+        parking_meshes.measure(&street::parking_geometry(plan));
+        *parking_by_kind
+            .entry(kind_name(world.props[plan.prop_index].kind))
+            .or_default() += 1;
+    }
+    for prop in &world.props {
+        let name = kind_name(prop.kind);
+        *original_props.entry(name).or_default() += 1;
+        if matches!(prop.kind, PropKind::Tree(_)) {
+            continue;
+        }
+        let geometry = street::prop_geometry(prop);
+        let vertices = geometry.vcount();
+        prop_meshes.entry(name).or_default().measure(&geometry);
+        let bounds = prop_vertex_bounds.entry(name).or_insert([usize::MAX, 0]);
+        bounds[0] = bounds[0].min(vertices);
+        bounds[1] = bounds[1].max(vertices);
+    }
+    let parked_props: usize = world
+        .props
+        .iter()
+        .filter(|prop| {
+            matches!(
+                prop.kind,
+                PropKind::Scooter | PropKind::Car | PropKind::Taxi | PropKind::Truck
+            )
+        })
+        .count();
+    json!({
+        "scope": "Render-only replacements at original road/prop identities. Assembly material counts here are summed before chunk batching and are not resident draw calls. Trees, light entities and collision records are unchanged. Use resident totals for net cost against Wave 2.",
+        "original_props": original_props,
+        "planned_road_segments": markings.len(),
+        "segments_with_junction_clearance": markings.iter().filter(|plan| plan.clear_start > 0.71 || plan.clear_end > 0.71).count(),
+        "junction_crossings_and_stop_lines": markings.iter().map(|plan| plan.approaches.len()).sum::<usize>(),
+        "junction_approach_arrows": markings.iter().flat_map(|plan| &plan.approaches).filter(|approach| approach.has_arrow).count(),
+        "admitted_parking_bays": parking.len(),
+        "parking_bays_by_kind": parking_by_kind,
+        "existing_parked_props_without_admitted_bays": parked_props - parking.len(),
+        "all_world_marking_assemblies_if_near_or_mid": marking_meshes,
+        "all_world_parking_assemblies_if_near_or_mid": parking_meshes,
+        "all_world_affected_prop_assemblies_if_near_or_mid": prop_meshes,
+        "per_affected_prop_vertex_bounds_min_max": prop_vertex_bounds,
+    })
+}
+
 fn main() {
     let started = Instant::now();
     let world = map::world();
     let world_load_ms = started.elapsed().as_secs_f64() * 1000.0;
     let kit = WindowKit::new();
+    // Report the one-time render plan construction before inventory/position
+    // generation warms its global cache. This includes the first inventory copy;
+    // subsequent chunk timing must not silently appear to include this work.
+    let street_plan_started = Instant::now();
+    let _ = map::street::road_marking_plans(world);
+    let street_plan_initialization_ms = street_plan_started.elapsed().as_secs_f64() * 1000.0;
     let mut result = json!({
-        "variant": "wave2_commercial",
-        "baseline_commit": "6d0bbd55964d802e2ddaae886baf9ca8dc17dcb0",
+        "variant": "wave3_streets",
+        "baseline_commit": "230c82d85b47ea47c9411721bf68f7a7f0528d76",
+        "wave1_baseline_commit": "6d0bbd55964d802e2ddaae886baf9ca8dc17dcb0",
         "original_baseline_commit": "c17292889e884f8a13d4e14598a20b64dc490f81",
         "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Counts are submitted material meshes, not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, materials/textures, actors, dynamic doors, interior runtime meshes, rain and UI. CPU time is one development-build pass, not a benchmark.",
         "world_identity": world_identity(world),
         "world_load_ms": world_load_ms,
+        "street_plan_initialization_ms": street_plan_initialization_ms,
+        "timing_scope": "Street plan initialization is measured once before all inventories/chunks and includes the first plan-list copy. Position chunk timings use this warmed render-only cache. These development-build wall times are not a performance benchmark.",
         "features": features(world),
         "commercial_features": commercial_features(world),
+        "street_features": street_features(world),
         "positions": [
             position_workload(world, "spawn", world.spawn, &kit),
             position_workload(world, "existing_04a_streetscape", Vec2::new(161.94, -236.84), &kit),
         ],
     });
     let baseline: Value =
+        serde_json::from_str(include_str!("../../docs/streets-wave2-baseline.json"))
+            .expect("checked-in CI77 wave-two audit JSON");
+    let wave1: Value =
         serde_json::from_str(include_str!("../../docs/commercial-wave1-baseline.json"))
             .expect("checked-in CI75 wave-one audit JSON");
     let original: Value = serde_json::from_str(include_str!("../../docs/exterior-baseline.json"))
         .expect("checked-in original exterior audit JSON");
-    let identity_matches = result["world_identity"] == baseline["world_identity"];
+    let identity_matches = result["world_identity"] == baseline["world_identity"]
+        && result["world_identity"] == wave1["world_identity"];
     let original_identity_matches = result["world_identity"] == original["world_identity"];
-    let architecture_matches = result["features"] == baseline["features"];
+    let architecture_matches =
+        result["features"] == baseline["features"] && result["features"] == wave1["features"];
+    let commerce_matches = result["commercial_features"] == baseline["commercial_features"];
     let mut comparisons = Vec::new();
     let mut original_comparisons = Vec::new();
     let mut within_geometry_budget = true;
-    for ((current, previous), before_architecture) in result["positions"]
+    for reference in [&baseline, &wave1, &original] {
+        assert_eq!(
+            result["positions"].as_array().unwrap().len(),
+            reference["positions"].as_array().unwrap().len(),
+            "every original audit position must remain represented"
+        );
+    }
+    for (((current, previous), after_architecture), before_architecture) in result["positions"]
         .as_array()
         .unwrap()
         .iter()
         .zip(baseline["positions"].as_array().unwrap())
+        .zip(wave1["positions"].as_array().unwrap())
         .zip(original["positions"].as_array().unwrap())
     {
         assert_eq!(current["name"], previous["name"]);
+        assert_eq!(current["name"], after_architecture["name"]);
         assert_eq!(current["name"], before_architecture["name"]);
         // The engine's positions are f32. Decimal JSON round-tripping through
         // CI and Python can differ by one f64 ULP without changing either engine
@@ -324,21 +417,29 @@ fn main() {
                 .map(|coordinate| (coordinate.as_f64().unwrap() as f32).to_bits())
                 .collect::<Vec<_>>()
         };
+        for reference in [previous, after_architecture, before_architecture] {
+            assert_eq!(
+                coordinate_bits(&current["position"]),
+                coordinate_bits(&reference["position"])
+            );
+            assert_eq!(current["chunks"], reference["chunks"]);
+        }
+        assert_eq!(current["near_buildings"], previous["near_buildings"]);
         assert_eq!(
-            coordinate_bits(&current["position"]),
-            coordinate_bits(&previous["position"])
+            current["initial_lazy_detail_buildings_within70m"],
+            previous["initial_lazy_detail_buildings_within70m"]
         );
-        assert_eq!(current["chunks"], previous["chunks"]);
+        assert_eq!(current["lazy_detail"], previous["lazy_detail"]);
         let mut changes = serde_json::Map::new();
         let mut original_changes = serde_json::Map::new();
-        // Wave 2 is a separately bounded increment over the verified Wave 1
-        // source. Keep the original pre-architecture comparison visible below;
+        // Wave 3 is a separately bounded increment over the verified Wave 2
+        // source. Keep both earlier waves and the original comparison visible;
         // never present the new baseline as a smaller cumulative cost.
         for (metric, maximum_baseline_percent) in [
-            ("vertices", 106),
-            ("triangles", 106),
-            ("material_meshes", 105),
-            ("attribute_index_payload_bytes", 106),
+            ("vertices", 105),
+            ("triangles", 105),
+            ("material_meshes", 101),
+            ("attribute_index_payload_bytes", 105),
         ] {
             let before = previous["planned_resident_total"][metric].as_u64().unwrap();
             let after = current["planned_resident_total"][metric].as_u64().unwrap();
@@ -363,7 +464,8 @@ fn main() {
                 metric.to_owned(),
                 json!({
                     "original_baseline": original_before,
-                    "wave1": before,
+                    "wave1": after_architecture["planned_resident_total"][metric],
+                    "wave2": before,
                     "current": after,
                     "cumulative_change_percent": (after as f64 / original_before as f64 - 1.0) * 100.0,
                 }),
@@ -373,14 +475,15 @@ fn main() {
         original_comparisons.push(json!({"name": current["name"], "metrics": original_changes}));
     }
     result["baseline_comparison"] = json!({
-        "reference": "Verified wave-one CI75 resident geometry at merged main 6d0bbd5",
+        "reference": "Verified wave-two CI77 resident geometry at merged main 230c82d; exact artifact digest and source provenance in streets-wave2-baseline.json",
         "world_identity_matches": identity_matches,
         "wave1_feature_and_facade_vertex_counts_match": architecture_matches,
+        "wave2_commercial_feature_and_vertex_counts_match": commerce_matches,
         "geometry_budget_passed": within_geometry_budget,
         "positions": comparisons,
     });
     result["original_baseline_comparison"] = json!({
-        "reference": "Pre-architecture main c172928; cumulative costs, not the incremental wave-two budget",
+        "reference": "Pre-architecture main c172928; cumulative costs with Wave 1 and Wave 2 preserved, not the incremental Wave 3 budget",
         "world_identity_matches": original_identity_matches,
         "positions": original_comparisons,
     });
@@ -392,7 +495,11 @@ fn main() {
         );
         assert!(
             architecture_matches,
-            "commercial work changed the verified wave-one feature or facade vertex counts"
+            "street work changed the verified wave-one feature or facade vertex counts"
+        );
+        assert!(
+            commerce_matches,
+            "street work changed the verified wave-two commercial feature or vertex counts"
         );
         assert!(
             within_geometry_budget,
