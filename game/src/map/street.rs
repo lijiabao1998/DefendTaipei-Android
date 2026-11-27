@@ -3,6 +3,12 @@
 //! trucks (VehicleSystem spots) and street trees (trees.ts: 台灣欒樹, 樟樹, 茄苳 crowns of many
 //! small lumpy clumps, darker at the heart, lighter on top).
 
+mod markings;
+pub use markings::{
+    JunctionApproach, ParkingPlan, RoadMarkingPlan, approach_geometry, parking_geometry,
+    parking_plans, road_marking_geometry, road_marking_plans,
+};
+
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
@@ -210,44 +216,14 @@ pub fn roads(
                 continue;
             }
             sidewalks(w, &segment_doors, a, b, rw, out);
-            let u = (b - a) / l;
-            let n = Vec2::new(-u.y, u.x);
-            let y = 0.035 + rw * 0.0005;
-            let stripe = |out: &mut Parts, p: Vec2, len: f32, wid: f32, c: u32, rot: f32| {
-                let g = geom::plane(len, wid)
-                    .transformed(place(p.x, y, p.y, -rot) * Mat4::from_rotation_x(-FRAC_PI_2));
-                out.add(Mat::Marking, &g, Mat4::IDENTITY, hex(c));
-            };
-            // centre line: double yellow on the big roads, dashed white otherwise
-            if rw >= 12.0 {
-                for o in [-0.18f32, 0.18] {
-                    stripe(out, m + n * o, l, 0.12, 0xd8b040, ang);
-                }
-            } else {
-                let mut s = 1.0;
-                while s < l - 1.0 {
-                    let p = a + u * (s + 1.0);
-                    stripe(out, p, 2.0, 0.12, 0xe8e8e0, ang);
-                    s += 6.0;
-                }
-            }
-            // edge lines
-            for sd in [-1.0f32, 1.0] {
-                stripe(out, m + n * sd * (rw / 2.0 - 0.45), l, 0.1, 0xe8e8e0, ang);
-            }
-            // zebra crossing at junction ends
-            for (p, inward) in [(a, u), (b, -u)] {
-                let k = ((p.x * 10.0).round() as i32, (p.y * 10.0).round() as i32);
-                if junc.get(&k).copied().unwrap_or(0) < 2 || l < 14.0 {
-                    continue;
-                }
-                let c = p + inward * (rw * 0.5 + 2.5);
-                let mut t = -rw / 2.0 + 0.6;
-                while t < rw / 2.0 - 0.5 {
-                    stripe(out, c + n * t, 3.0, 0.45, 0xecece6, ang);
-                    t += 0.9;
-                }
-            }
+        }
+    }
+    if !lod_far {
+        for plan in markings::road_marking_plans_in(w, min, max) {
+            out.merge(road_marking_geometry(&plan));
+        }
+        for plan in markings::parking_plans_in(w, min, max) {
+            out.merge(parking_geometry(&plan));
         }
     }
 }
@@ -447,8 +423,52 @@ fn bx(w: f32, h: f32, d: f32, x: f32, y: f32, z: f32) -> MeshBuf {
     geom::cuboid(w, h, d).transformed(geom::at(x, y, z))
 }
 
-/// Street lamp (buildLamps): pole, arm, head.
+/// A planar vehicle panel with an explicit outward winding. Four vertices keep
+/// small plates, glazing and trim cheap while retaining real surface geometry.
+fn panel(points: [[f32; 3]; 4]) -> MeshBuf {
+    let normal = (Vec3::from(points[1]) - Vec3::from(points[0]))
+        .cross(Vec3::from(points[2]) - Vec3::from(points[0]))
+        .normalize();
+    MeshBuf {
+        pos: points.to_vec(),
+        nrm: vec![normal.into(); 4],
+        uv: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+        col: vec![WHITE; 4],
+        idx: vec![0, 1, 2, 0, 2, 3],
+    }
+}
+
+/// Small six-sided wheel hub, facing +X in the vehicle's local coordinates.
+fn hub(radius: f32) -> MeshBuf {
+    let mut mesh = MeshBuf::default();
+    mesh.pos.push([0.0, 0.0, 0.0]);
+    for i in 0..6 {
+        let a = i as f32 * std::f32::consts::TAU / 6.0;
+        mesh.pos.push([0.0, radius * a.cos(), radius * a.sin()]);
+    }
+    mesh.nrm = vec![[1.0, 0.0, 0.0]; 7];
+    mesh.uv = vec![[0.5, 0.5]; 7];
+    mesh.col = vec![WHITE; 7];
+    for i in 0..6u32 {
+        mesh.idx.extend_from_slice(&[0, i + 1, (i + 1) % 6 + 1]);
+    }
+    mesh
+}
+
+/// Street lamp (buildLamps): pole, arm, head, anchored foot and access hatch.
 fn lamp(out: &mut Parts, t: Mat4) {
+    out.add(
+        Mat::Metal,
+        &bx(0.3, 0.12, 0.3, 0.0, 0.06, 0.0),
+        t,
+        hex(0x555b58),
+    );
+    out.add(
+        Mat::VCol,
+        &geom::plane(0.085, 0.32),
+        t * geom::at(0.0, 0.48, 0.091),
+        hex(0x353b39),
+    );
     out.add(
         Mat::Metal,
         &geom::cylinder(0.07, 0.09, 5.0, 6),
@@ -529,15 +549,57 @@ fn scooter(out: &mut Parts, t: Mat4, seed: u32) {
             t,
             hex(0x2a2a2c),
         );
+        out.add(
+            Mat::Metal,
+            &bx(0.12, 0.075, 0.045, x, 1.39, 0.54),
+            t,
+            hex(0x303638),
+        );
+        out.add(
+            Mat::Glass,
+            &geom::plane(0.09, 0.05),
+            t * place(x, 1.39, 0.514, std::f32::consts::PI),
+            hex(0xb5c9d0),
+        );
+    }
+    // A shallow rear lens and plate distinguish the seat/body end from the front
+    // apron; they are non-emissive, as all these original vehicles remain parked.
+    for (width, height, y, color) in [(0.23, 0.09, 0.61, 0xb43c31), (0.19, 0.12, 0.43, 0xd6d5bf)] {
+        out.add(
+            Mat::VCol,
+            &geom::plane(width, height),
+            t * place(0.0, y, -0.758, std::f32::consts::PI),
+            hex(color),
+        );
+    }
+    for z in [-0.62, 0.6] {
+        for side in [-1.0, 1.0] {
+            out.add(
+                Mat::Metal,
+                &hub(0.105),
+                t * place(
+                    side * 0.052,
+                    0.24,
+                    z,
+                    if side < 0.0 {
+                        std::f32::consts::PI
+                    } else {
+                        0.0
+                    },
+                ),
+                hex(0x969b96),
+            );
+        }
     }
 }
 
-/// Parked car / taxi / truck (VehicleSystem, simplified bodies).
+/// Parked vehicles retain the original cover footprint. The old solid cabin hid
+/// its inset glass; exposed sloping windows now meet a narrow roof and side pillars.
 fn car(out: &mut Parts, t: Mat4, kind: PropKind, seed: u32) {
     let dark = hex(0x1a1a1c);
-    let (c, l, wd, _h) = match kind {
-        PropKind::Taxi => (0xf0c419, 4.3, 1.75, 1.45),
-        PropKind::Truck => (0x56603a, 6.4, 2.25, 2.8),
+    let (c, l, wd) = match kind {
+        PropKind::Taxi => (0xf0c419, 4.3, 1.75),
+        PropKind::Truck => (0x56603a, 6.4, 2.25),
         _ => (
             [
                 0xd8d8d8u32,
@@ -549,73 +611,238 @@ fn car(out: &mut Parts, t: Mat4, kind: PropKind, seed: u32) {
             ][seed as usize % 6],
             4.3,
             1.75,
-            1.45,
         ),
     };
     let body = hex(c);
     for z in [-l * 0.32, l * 0.32] {
-        for x in [-wd / 2.0 + 0.1, wd / 2.0 - 0.1] {
+        for side in [-1.0, 1.0] {
+            let x = side * (wd * 0.5 - 0.1);
             out.add(
                 Mat::VCol,
                 &geom::cylinder(0.33, 0.33, 0.24, 12),
                 t * geom::at(x, 0.33, z) * Mat4::from_rotation_z(FRAC_PI_2),
                 dark,
             );
+            out.add(
+                Mat::Metal,
+                &hub(0.18),
+                t * place(
+                    x + side * 0.121,
+                    0.33,
+                    z,
+                    if side < 0.0 {
+                        std::f32::consts::PI
+                    } else {
+                        0.0
+                    },
+                ),
+                hex(0x8d9699),
+            );
         }
     }
     if kind == PropKind::Truck {
+        // Keep the original 2.3 × 6.5 m collision envelope and 2.8 m cover height.
         out.add(
             Mat::Metal,
-            &bx(wd, 1.3, 1.8, 0.0, 1.25, l / 2.0 - 0.9),
+            &bx(wd, 1.3, 1.8, 0.0, 1.25, l * 0.5 - 0.9),
             t,
             body,
-        ); // cab
+        );
         out.add(
             Mat::Glass,
-            &bx(wd - 0.2, 0.6, 0.05, 0.0, 1.55, l / 2.0 + 0.01),
-            t,
-            WHITE,
+            &geom::plane(wd - 0.25, 0.52),
+            t * geom::at(0.0, 1.56, 3.204),
+            hex(0x9baeb4),
         );
+        for side in [-1.0, 1.0] {
+            let x = side * (wd * 0.5 + 0.003);
+            out.add(
+                Mat::Glass,
+                &geom::plane(1.16, 0.52),
+                t * place(x, 1.56, 2.35, side * FRAC_PI_2),
+                hex(0x8eaaad),
+            );
+            out.add(
+                Mat::VCol,
+                &geom::plane(0.2, 0.045),
+                t * place(x + side * 0.002, 1.12, 2.0, side * FRAC_PI_2),
+                hex(0x333b37),
+            );
+        }
         out.add(
             Mat::Tin,
             &bx(wd + 0.05, 1.9, l - 2.0, 0.0, 1.75, -0.9),
             t,
             scale_col(body, 0.85),
-        ); // canvas bed
+        );
+        // Rear doors are painted on the existing cargo shell; narrow lock bars and
+        // lower reflectors give the rear an actual readable construction.
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.025, 1.66),
+            t * place(0.0, 1.75, -3.103, std::f32::consts::PI),
+            hex(0x293128),
+        );
+        for x in [-0.34, 0.34] {
+            out.add(
+                Mat::Metal,
+                &bx(0.035, 1.65, 0.035, x, 1.75, -3.121),
+                t,
+                hex(0x9a9e8b),
+            );
+        }
+        for x in [-0.91, 0.91] {
+            out.add(
+                Mat::VCol,
+                &geom::plane(0.22, 0.11),
+                t * place(x, 0.94, -3.125, std::f32::consts::PI),
+                hex(0xc04734),
+            );
+        }
+        out.add(
+            Mat::VCol,
+            &bx(wd, 0.17, 0.12, 0.0, 0.54, 3.16),
+            t,
+            hex(0x42483f),
+        );
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.8, 0.22),
+            t * geom::at(0.0, 0.91, 3.207),
+            hex(0x303b35),
+        );
+        for x in [-0.76, 0.76] {
+            out.add(
+                Mat::VCol,
+                &geom::plane(0.4, 0.16),
+                t * geom::at(x, 0.87, 3.209),
+                hex(0xe4e5c9),
+            );
+        }
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.38, 0.13),
+            t * geom::at(0.0, 0.56, 3.224),
+            hex(0xc8ccba),
+        );
         return;
     }
     out.add(Mat::Metal, &bx(wd, 0.62, l, 0.0, 0.62, 0.0), t, body);
+    out.add(Mat::Metal, &bx(1.43, 0.08, 1.53, 0.0, 1.4, -0.2), t, body);
+    let glass = hex(0x8eaab2);
+    // Sloping windshield and rear screen: lower corners meet the body, upper
+    // corners meet the roof, with no opaque cabin inside either glass surface.
     out.add(
-        Mat::Metal,
-        &bx(wd - 0.12, 0.5, l * 0.48, 0.0, 1.18, -0.15),
+        Mat::Glass,
+        &panel([
+            [-0.80, 0.94, 1.0],
+            [0.80, 0.94, 1.0],
+            [0.70, 1.36, 0.56],
+            [-0.70, 1.36, 0.56],
+        ]),
         t,
-        body,
+        glass,
     );
     out.add(
         Mat::Glass,
-        &bx(wd - 0.1, 0.4, l * 0.46, 0.0, 1.18, -0.15),
+        &panel([
+            [0.80, 0.94, -1.32],
+            [-0.80, 0.94, -1.32],
+            [-0.70, 1.36, -0.96],
+            [0.70, 1.36, -0.96],
+        ]),
         t,
-        hex(0x8a9aa8),
+        glass,
     );
+    for side in [-1.0, 1.0] {
+        let mut points = [
+            [side * 0.81, 0.94, -1.32],
+            [side * 0.81, 0.94, 1.0],
+            [side * 0.71, 1.36, 0.56],
+            [side * 0.71, 1.36, -0.96],
+        ];
+        if side > 0.0 {
+            points.reverse();
+        }
+        out.add(Mat::Glass, &panel(points), t, glass);
+        let mut pillar = [
+            [side * 0.817, 0.94, -0.22],
+            [side * 0.817, 0.94, -0.12],
+            [side * 0.717, 1.36, -0.12],
+            [side * 0.717, 1.36, -0.22],
+        ];
+        if side > 0.0 {
+            pillar.reverse();
+        }
+        out.add(Mat::VCol, &panel(pillar), t, hex(0x343c3e));
+        // Outer door seam and flush handles stay inside the existing cover width.
+        let x = side * (wd * 0.5 + 0.003);
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.014, 0.48),
+            t * place(x, 0.68, -0.17, side * FRAC_PI_2),
+            hex(0x424a48),
+        );
+        for z in [-0.85, 0.47] {
+            out.add(
+                Mat::Metal,
+                &geom::plane(0.18, 0.04),
+                t * place(x + side * 0.002, 0.83, z, side * FRAC_PI_2),
+                hex(0xb8bdb6),
+            );
+        }
+    }
+    for end in [-1.0, 1.0] {
+        let angle = if end < 0.0 { std::f32::consts::PI } else { 0.0 };
+        out.add(
+            Mat::VCol,
+            &bx(wd - 0.05, 0.12, 0.08, 0.0, 0.47, end * 2.13),
+            t,
+            hex(0x3b4140),
+        );
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.34, 0.115),
+            t * place(0.0, 0.58, end * 2.177, angle),
+            hex(0xd3d6c5),
+        );
+        for x in [-0.56, 0.56] {
+            out.add(
+                Mat::VCol,
+                &geom::plane(0.4, 0.14),
+                t * place(x, 0.77, end * 2.153, angle),
+                hex(if end > 0.0 { 0xefebd0 } else { 0xb73b32 }),
+            );
+        }
+    }
     out.add(
         Mat::VCol,
-        &bx(0.3, 0.12, 0.04, -wd / 2.0 + 0.3, 0.75, l / 2.0),
-        t,
-        WHITE,
-    );
-    out.add(
-        Mat::VCol,
-        &bx(0.3, 0.12, 0.04, wd / 2.0 - 0.3, 0.75, l / 2.0),
-        t,
-        WHITE,
+        &geom::plane(0.56, 0.16),
+        t * geom::at(0.0, 0.77, 2.155),
+        hex(0x2a3334),
     );
     if kind == PropKind::Taxi {
         out.add(
             Mat::VCol,
-            &bx(0.5, 0.15, 0.2, 0.0, 1.5, -0.15),
+            &bx(0.5, 0.13, 0.22, 0.0, 1.505, -0.15),
             t,
-            hex(0xfff0a0),
+            hex(0xffedb0),
         );
+        // A dark inset on both sides reads as a taxi roof board without adding a
+        // new texture/material or claiming a particular real operator.
+        for end in [-1.0, 1.0] {
+            out.add(
+                Mat::VCol,
+                &geom::plane(0.34, 0.055),
+                t * place(
+                    0.0,
+                    1.505,
+                    -0.15 + end * 0.113,
+                    if end < 0.0 { std::f32::consts::PI } else { 0.0 },
+                ),
+                hex(0x556044),
+            );
+        }
     }
 }
 
@@ -737,6 +964,20 @@ fn tree(out: &mut Parts, t: Mat4, kind: u8) {
     out.add(Mat::Foliage, &fol, t, WHITE);
 }
 
+/// Full original prop at its real world transform. Native QA regenerates these
+/// exact batched parts instead of spawning an independent display-only model.
+pub fn prop_geometry(prop: &Prop) -> Parts {
+    let mut out = Parts::default();
+    let t = place(prop.p.x, 0.0, prop.p.y, prop.ang);
+    match prop.kind {
+        PropKind::Tree(kind) => tree(&mut out, t, kind),
+        PropKind::Lamp => lamp(&mut out, t),
+        PropKind::Scooter => scooter(&mut out, t, prop.seed),
+        kind => car(&mut out, t, kind, prop.seed),
+    }
+    out
+}
+
 pub fn props(list: &[Prop], min: Vec2, max: Vec2, lod_far: bool, out: &mut Parts) {
     for p in list {
         if p.p.x < min.x || p.p.y < min.y || p.p.x >= max.x || p.p.y >= max.y {
@@ -753,6 +994,27 @@ pub fn props(list: &[Prop], min: Vec2, max: Vec2, lod_far: bool, out: &mut Parts
     }
 }
 
+/// Exactly the original per-segment width/paint stream, also consulted by parking
+/// plans so a painted parking bay is never added beside a red or yellow curb.
+fn curb_style(a: Vec2, b: Vec2, rw: f32, side: f32) -> (f32, f32) {
+    let mut seed = ((a.x * 73.1 + a.y * 19.7 + b.x * 7.3 + b.y * 3.1 + side * 11.0).floor() as i64)
+        .unsigned_abs()
+        % 2147483646;
+    if seed == 0 {
+        seed = 1;
+    }
+    let mut next = || {
+        seed = (seed * 16807) % 2147483647;
+        seed as f32 / 2147483647.0
+    };
+    let width = if rw >= 12.0 {
+        2.6 + next() * 1.2
+    } else {
+        1.6 + next() * 0.8
+    };
+    (width, next())
+}
+
 /// roads.ts `curb`: an 18 cm granite curb (some painted red §169 / yellow §168 no-parking) and a
 /// 15 cm paved walk behind it, 2.6–3.8 m on main roads and 1.6–2.4 m on streets, stopped at the
 /// building line, in 4 m slabs; pieces that would land on a crossing road are left out.
@@ -764,25 +1026,8 @@ fn sidewalks(w: &WorldData, doors: &[Door], a: Vec2, b: Vec2, rw: f32, out: &mut
     let u = (b - a) / l;
     let n = Vec2::new(-u.y, u.x);
     let ang = u.y.atan2(u.x);
-    let main = rw >= 12.0;
     for sgn in [-1.0f32, 1.0] {
-        let mut ps = ((a.x * 73.1 + a.y * 19.7 + b.x * 7.3 + b.y * 3.1 + sgn * 11.0).floor()
-            as i64)
-            .unsigned_abs()
-            % 2147483646;
-        if ps == 0 {
-            ps = 1;
-        }
-        let mut pr = || {
-            ps = (ps * 16807) % 2147483647;
-            ps as f32 / 2147483647.0
-        };
-        let sw = if main {
-            2.6 + pr() * 1.2
-        } else {
-            1.6 + pr() * 0.8
-        };
-        let paint = pr();
+        let (sw, paint) = curb_style(a, b, rw, sgn);
         let o0 = rw / 2.0 + 0.18;
         let at = |t: f32, o: f32| a + u * t + n * (sgn * o);
         let off_road = |p: Vec2| w.road_dist(p) > -0.05;
@@ -863,6 +1108,99 @@ fn sidewalks(w: &WorldData, doors: &[Door], a: Vec2, b: Vec2, rw: f32, out: &mut
 #[cfg(test)]
 mod dressing_tests {
     use super::*;
+
+    #[test]
+    fn parked_vehicle_details_keep_existing_car_and_truck_cover_bounds() {
+        for (kind, half_width, half_length, height, budget) in [
+            (PropKind::Car, 0.9, 2.2, 1.45, 650),
+            (PropKind::Taxi, 0.9, 2.2, 1.575, 700),
+            (PropKind::Truck, 1.15, 3.25, 2.8, 700),
+            (PropKind::Scooter, 0.35, 0.87, 1.43, 600),
+        ] {
+            let prop = Prop {
+                kind,
+                p: Vec2::ZERO,
+                ang: 0.0,
+                seed: 19,
+            };
+            let parts = prop_geometry(&prop);
+            assert!(
+                parts.vcount() <= budget,
+                "{kind:?} exceeded its phone mesh budget"
+            );
+            for mesh in parts.0.values() {
+                for point in &mesh.pos {
+                    assert!(point.iter().all(|v| v.is_finite()));
+                    assert!(
+                        point[0].abs() <= half_width + 0.001,
+                        "{kind:?} width {point:?}"
+                    );
+                    assert!(
+                        point[2].abs() <= half_length + 0.001,
+                        "{kind:?} length {point:?}"
+                    );
+                    assert!(
+                        point[1] >= -0.001 && point[1] <= height + 0.001,
+                        "{kind:?} height {point:?}"
+                    );
+                }
+            }
+            let glass = &parts.0[&Mat::Glass];
+            assert!(
+                !glass.is_empty(),
+                "exposed vehicle glazing is part of the actual prop batch"
+            );
+            for (point, normal) in glass.pos.iter().zip(&glass.nrm) {
+                if kind != PropKind::Scooter && normal[0].abs() > 0.3 {
+                    assert!(point[0] * normal[0] > 0.0, "side glass must face outwards");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn street_props_remain_material_batched_and_absent_at_far_lod() {
+        let kinds = [
+            PropKind::Lamp,
+            PropKind::Scooter,
+            PropKind::Car,
+            PropKind::Taxi,
+            PropKind::Truck,
+        ];
+        let list: Vec<_> = kinds
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| Prop {
+                kind,
+                p: Vec2::new(index as f32 * 10.0, 0.0),
+                ang: 0.45,
+                seed: 27,
+            })
+            .collect();
+        let mut near = Parts::default();
+        props(
+            &list,
+            Vec2::splat(-20.0),
+            Vec2::splat(100.0),
+            false,
+            &mut near,
+        );
+        assert!(
+            near.0.len() <= 5,
+            "the same materials merge across all vehicles"
+        );
+        let mut far = Parts::default();
+        props(
+            &list,
+            Vec2::splat(-20.0),
+            Vec2::splat(100.0),
+            true,
+            &mut far,
+        );
+        assert_eq!(far.vcount(), 0);
+        let lamp = prop_geometry(&list[0]);
+        assert!(lamp.vcount() < 160);
+    }
 
     #[test]
     fn decorative_litter_keeps_the_whole_arcade_entrance_clear() {
