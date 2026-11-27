@@ -538,6 +538,8 @@ fn keyboard_actions(
     pause: Res<PauseOpen>,
     mut actions: MessageWriter<WorldAction>,
     mut pauses: MessageWriter<crate::ui::TogglePause>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
+    mut vehicles: Option<ResMut<Messages<crate::vehicles::VehicleAction>>>,
 ) {
     if flow.get() != &GameFlow::Playing || modal.blocks_input() {
         return;
@@ -548,22 +550,33 @@ fn keyboard_actions(
     if pause.0 {
         return;
     }
-    if keys.just_pressed(KeyCode::KeyE) {
+    let defaults = crate::input::ControlPreferences::default();
+    let controls = controls.as_deref().unwrap_or(&defaults);
+    use crate::input::ControlAction;
+    if controls.just_pressed(&keys, ControlAction::Interact) {
         actions.write(WorldAction::Interact);
     }
-    if keys.just_pressed(KeyCode::KeyB) {
+    if controls.just_pressed(&keys, ControlAction::Barricade) {
         actions.write(WorldAction::Barricade);
     }
-    if keys.just_pressed(KeyCode::KeyZ) {
+    if controls.just_pressed(&keys, ControlAction::Sleep) {
         actions.write(WorldAction::Sleep);
     }
     for (key, speed) in [
-        (KeyCode::Digit1, 1),
-        (KeyCode::Digit2, 3),
-        (KeyCode::Digit3, 20),
+        (ControlAction::Speed1, 1),
+        (ControlAction::Speed3, 3),
+        (ControlAction::Speed20, 20),
     ] {
-        if keys.just_pressed(key) {
+        if controls.just_pressed(&keys, key) {
             actions.write(WorldAction::Speed(speed));
+        }
+    }
+    if let Some(vehicles) = vehicles.as_deref_mut() {
+        if controls.just_pressed(&keys, ControlAction::VehicleReload) {
+            vehicles.write(crate::vehicles::VehicleAction::ReloadGun);
+        }
+        if controls.just_pressed(&keys, ControlAction::VehicleSwitch) {
+            vehicles.write(crate::vehicles::VehicleAction::SwitchGun);
         }
     }
 }
@@ -794,6 +807,8 @@ fn update_interaction_hint(
     lang: Res<Language>,
     mut hint: ResMut<InteractionHint>,
     mut door_prompt: ResMut<DoorPrompt>,
+    vehicles: Option<Res<crate::vehicles::VehicleFleet>>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
 ) {
     door_prompt.0 = None;
     let mut next = InteractionHint::default();
@@ -809,6 +824,22 @@ fn update_interaction_hint(
             &shelter,
             &obstacles,
         );
+        if let Some(fleet) = vehicles.as_deref()
+            && (fleet.current.is_some()
+                || matches!(target, InteractionTarget::None | InteractionTarget::Shelter))
+            && (fleet.current.is_some()
+                || fleet
+                    .nearest(player.translation.xz(), 2.6)
+                    .is_some_and(|vehicle| {
+                        fleet.reachable(vehicle.id, player.translation.xz(), &obstacles)
+                    }))
+            && let Some((label, detail)) = fleet.hint(player.translation.xz(), *lang)
+        {
+            next.label = label;
+            next.detail = detail;
+            hint.set_if_neq(next);
+            return;
+        }
         let (label, detail) =
             match target {
                 InteractionTarget::Door(door) => {
@@ -860,6 +891,24 @@ fn update_interaction_hint(
             };
         next.label = label.into();
         next.detail = detail.into();
+        if let Some(controls) = controls.as_deref() {
+            next.detail = next
+                .detail
+                .replace(
+                    " · E",
+                    &format!(
+                        " · {}",
+                        controls.key_label(crate::input::ControlAction::Interact)
+                    ),
+                )
+                .replace(
+                    " · B",
+                    &format!(
+                        " · {}",
+                        controls.key_label(crate::input::ControlAction::Barricade)
+                    ),
+                );
+        }
     }
     hint.set_if_neq(next);
 }
@@ -1141,8 +1190,13 @@ fn apply_actions(
     selected: Res<SelectedRole>,
     env: Res<ShelterEnvironment>,
     obstacles: Res<Obstacles>,
-    civilians: Query<&Transform, With<crate::human::Civilian>>,
+    nearby: (
+        Query<&Transform, With<crate::human::Civilian>>,
+        Option<Res<crate::vehicles::VehicleFleet>>,
+        Option<ResMut<Messages<crate::vehicles::VehicleAction>>>,
+    ),
 ) {
+    let (civilians, vehicle_state, mut vehicle_actions) = nearby;
     let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game, mut session) =
         states;
     if flow.get() != &GameFlow::Playing || pause.0 || game.hp <= 0.0 || game.over {
@@ -1235,6 +1289,17 @@ fn apply_actions(
                     continue;
                 }
                 let target = interaction_target(pos, &catalog, &progress, &shelter, &obstacles);
+                if let Some(fleet) = vehicle_state.as_deref()
+                    && (fleet.current.is_some()
+                        || (matches!(target, InteractionTarget::None | InteractionTarget::Shelter)
+                            && fleet.nearest(pos, 2.6).is_some_and(|vehicle| {
+                                fleet.reachable(vehicle.id, pos, &obstacles)
+                            })))
+                    && let Some(actions) = vehicle_actions.as_deref_mut()
+                {
+                    actions.write(crate::vehicles::VehicleAction::Interact);
+                    continue;
+                }
                 if let InteractionTarget::Trade = target {
                     panels.write(OpenPanel(PanelKind::Trade));
                     continue;
@@ -1377,6 +1442,25 @@ fn apply_actions(
                 }
             }
             WorldAction::Use(id) => {
+                if matches!(id.as_str(), "gas" | "patch" | "carbat" | "hose") {
+                    if let Some(fleet) = vehicle_state.as_deref()
+                        && let Some(vehicle) = fleet.current().or_else(|| fleet.nearest(pos, 2.6))
+                        && let Some(actions) = vehicle_actions.as_deref_mut()
+                    {
+                        actions.write(crate::vehicles::VehicleAction::UseItem {
+                            vehicle: vehicle.id,
+                            item: id.clone(),
+                        });
+                    } else {
+                        notice.text = tr(
+                            *lang,
+                            "走近載具後使用這項物資。",
+                            "Approach a vehicle to use this supply.",
+                        )
+                        .into();
+                    }
+                    continue;
+                }
                 let mut vitals = Vitals {
                     hp: game.hp,
                     hunger: needs.hunger,

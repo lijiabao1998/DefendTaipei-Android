@@ -75,6 +75,18 @@
       "source": "tools/generate_audio.py"
     },
     {
+      "path": "audio/armor_engine.ogg",
+      "duration": 2.0,
+      "bytes": 9036,
+      "sha256": "55046b8a98059fdb1ba0324438b30e01a763c42b476c8fc674e837705592da75",
+      "sample_rate": 22050,
+      "channels": 1,
+      "decoded_peak": 0.7424548268318176,
+      "decoded_rms": 0.3874257504940033,
+      "license": "CC0-1.0",
+      "source": "tools/generate_armor_engine.py; Web src/systems/armor.ts engine()"
+    },
+    {
       "path": "audio/barricade.ogg",
       "duration": 0.8185034013605442,
       "bytes": 7585,

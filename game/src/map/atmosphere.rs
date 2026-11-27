@@ -164,10 +164,16 @@ impl Plugin for AtmospherePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AtmosphereState>()
             .init_resource::<AtmosphereTimers>()
+            .init_resource::<super::street::furnishings::SignalPhase>()
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (update_materials, update_lights, update_rain)
+                (
+                    update_materials,
+                    update_lights,
+                    update_rain,
+                    super::street::furnishings::update_signals,
+                )
                     .chain()
                     .after(WorldSet),
             );

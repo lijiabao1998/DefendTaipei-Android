@@ -32,6 +32,16 @@ pub const SIGN_ROWS: f32 = 5.0;
 pub const SIGN_PARODY: usize = 10;
 pub const VSIGN_N: usize = 8;
 
+/// The existing atlas's upper-left 9×9 pixels are plain background in every
+/// cell. A constant lookup there makes an unbranded plaque without changing
+/// the saved sign index, atlas size, shared material or submitted mesh count.
+pub fn unbranded_sign_uv(index: usize) -> [f32; 2] {
+    [
+        ((index % SIGN_COLS as usize) as f32 + 4.5 / 256.0) / SIGN_COLS,
+        ((index / SIGN_COLS as usize) as f32 + 4.5 / 64.0) / SIGN_ROWS,
+    ]
+}
+
 /// Atlas index of a typed shop sign (store / pharmacy / police / b2sign kinds).
 pub fn sign_index(kind: &str) -> Option<usize> {
     Some(match kind {
@@ -72,6 +82,8 @@ pub struct MapMaterials {
     pub window_glow: Handle<StandardMaterial>,
     /// Existing arcade ceiling fixtures; one shared material for the entire city.
     pub arcade_glow: Handle<StandardMaterial>,
+    /// Shared signal lens materials; emission cycles without adding light entities.
+    pub signals: [Handle<StandardMaterial>; 6],
     /// Vertex-coloured cloth / concrete / painted parts (matC / conc).
     pub vcol: Handle<StandardMaterial>,
     /// Vertex-coloured metal parts (detMat: metalness 0.5, roughness 0.45).
@@ -827,6 +839,23 @@ fn tin_tex() -> Canvas {
     } // rib shading
     for y in [0.0, 64.0] {
         c.fill_rect(0.0, y, 128.0, 1.0, rgba(0.0, 0.0, 0.0, 0.18));
+        // Fasteners sit on the raised ribs. Their paired dark pit/light head
+        // and broad orange run distinguish aged sheet metal from grey striping.
+        for k in 0..5 {
+            let x = 4.0 + k as f32 * 25.6;
+            c.fill_ellipse(x, y + 3.4, 2.4, 1.7, rgba(90.0, 43.0, 20.0, 0.84));
+            c.fill_ellipse(x - 0.3, y + 2.8, 1.0, 0.9, rgba(217.0, 218.0, 202.0, 0.9));
+            c.grad_rect_v(
+                x - 1.6,
+                y + 4.5,
+                3.2,
+                24.0,
+                y + 4.5,
+                y + 28.5,
+                rgba(151.0, 64.0, 25.0, 0.65),
+                rgba(151.0, 64.0, 25.0, 0.0),
+            );
+        }
     } // panel laps
     for _ in 0..9 {
         let (x, w, l) = (r.f() * 128.0, 2.0 + r.f() * 6.0, 30.0 + r.f() * 98.0);
@@ -984,7 +1013,53 @@ fn facade_tile_tex() -> Canvas {
             if r.f() < 0.035 {
                 c.fill_rect(x + 2.0, y + 2.0, 27.0, 11.0, rgba(146.0, 145.0, 137.0, 0.8));
             }
+            // Visible broken corners expose rough cement behind the ceramic,
+            // with a small pale glaze edge; no window motif is painted here.
+            if (row * 9 + col + 1) % 19 == 0 {
+                c.fill_poly(
+                    &[
+                        (x + 1.0, y + 1.0),
+                        (x + 11.0, y + 1.0),
+                        (x + 8.0, y + 4.0),
+                        (x + 5.0, y + 5.0),
+                        (x + 1.0, y + 9.0),
+                    ],
+                    rgba(116.0, 113.0, 101.0, 0.95),
+                );
+                c.polyline(
+                    &[
+                        (x + 11.0, y + 1.0),
+                        (x + 8.0, y + 4.0),
+                        (x + 5.0, y + 5.0),
+                        (x + 1.0, y + 9.0),
+                    ],
+                    1.0,
+                    rgba(246.0, 241.0, 222.0, 0.82),
+                );
+            }
         }
+    }
+    // White mineral deposits collect at two horizontal joints, below the
+    // interrupted dark seepage. The original seven wall palettes stay intact.
+    for (x, y, width) in [(28.0, 79.0, 54.0), (151.0, 191.0, 66.0)] {
+        c.grad_rect_v(
+            x,
+            y,
+            width,
+            17.0,
+            y,
+            y + 17.0,
+            rgba(65.0, 73.0, 59.0, 0.31),
+            rgba(65.0, 73.0, 59.0, 0.0),
+        );
+        c.line(
+            x,
+            y + 3.0,
+            x + width,
+            y + 1.0,
+            1.1,
+            rgba(246.0, 241.0, 219.0, 0.62),
+        );
     }
     // Mild narrow streaks keep repaired ceramic readable without replicating the
     // dark painted-window motif of the distant wall texture on every balcony.
@@ -1172,6 +1247,14 @@ pub fn build_materials(
             base_color: Color::WHITE,
             emissive: LinearRgba::rgb(1.2, 1.1, 0.95),
             ..default()
+        }),
+        signals: std::array::from_fn(|index| {
+            let color = [0x3a1010, 0x3a3010, 0x103a20][index % 3];
+            mats.add(StandardMaterial {
+                base_color: Color::srgb_u8((color >> 16) as u8, (color >> 8) as u8, color as u8),
+                perceptual_roughness: 0.5,
+                ..default()
+            })
         }),
         vcol: mats.add(std(None, 0.88)),
         metal: mats.add(StandardMaterial {

@@ -4,7 +4,7 @@ Reference: Web v24.42.0, b9b0a2736642b37dd45925a4719dfef08b8f36b4; src/audio/aud
 
 ## Asset pack
 
-The native pack contains **104 OGG files**, approximately **1.07 MB**: 45 variants derived from the Web's 12 recorded gunshots and three recorded blasts, plus 59 synthetic clips. The exact checked inventory is assets/audio/manifest.json; attribution and source links are in assets/audio/CREDITS.md.
+The native pack contains **105 OGG files**, **1,080,594 encoded bytes**: 45 variants derived from the Web's 12 recorded gunshots and three recorded blasts, plus 60 synthetic clips. Wave 5 adds the bounded armored-engine loop. The exact checked inventory is assets/audio/manifest.json; attribution and source links are in assets/audio/CREDITS.md.
 
 All files are mono 22,050 Hz Vorbis, decoded by Bevy's existing Vorbis support. The generator validates finite, nonempty decoded PCM, RMS and decoded peaks. Lossy compression can overshoot an input peak, so it re-encodes from the original PCM until the decoded peak is at most 0.86. The mixer also limits the sum of effective stream gains to 0.85. This is conservative gain budgeting, not the Web's compressor/limiter DSP.
 
@@ -19,7 +19,7 @@ All files are mono 22,050 Hz Vorbis, decoded by Bevy's existing Vorbis support. 
 - The garbage-truck phrase follows the saved clock's **19:00–19:12** window and stops permanently at the actual power cutoff. Distance changes across that window. Temple cues use mapped temple names and the existing Longshan courtyard landmark within 70 m; thunder is scheduled during rain above 0.6. The rotor sounds near the actual open native helicopter evacuation site.
 - The siren keeps the original three cycles of 15/5/5 seconds with gaps. All-clear stops the alert loop and plays its separate tone. Broadcasts contain radio texture, not spoken Chinese.
 
-Success cues come from successful existing gameplay actions. Searching opens a Rummage cue; actual transfers emit Pickup. Item use distinguishes food, water, treatment and equipment. The Reload timbre currently accompanies ammunition unloading/handling; there is no new magazine or manual reload gameplay. Shelter transfers, prayer, barter and construction emit cues only on successful mutations. Denied/no-op/paused actions never play a success cue. Player melee swishes at swing timing and impacts require actual contact; indoor gun/grenade treatment considers the source or listener roof.
+Success cues come from successful existing gameplay actions. Searching opens a Rummage cue; actual transfers emit Pickup. Item use distinguishes food, water, treatment and equipment. The Reload timbre accompanies ammunition handling and Wave 5 mounted-weapon reloads; on-foot weapons retain their existing ammunition model. Shelter transfers, prayer, barter and construction emit cues only on successful mutations. Denied/no-op/paused actions never play a success cue. Player melee swishes at swing timing and impacts require actual contact; indoor gun/grenade treatment considers the source or listener roof.
 
 ## Controls and lifecycle
 
@@ -27,7 +27,7 @@ audio::AudioSettings exposes master, effects, ambience and radio gains plus mute
 
 Every player starts at zero gain until the current frame's mix is applied. Menu/pause/background transitions cancel world one-shots and delayed blasts, pause beds, and prevent late-loaded sound from leaking into a different screen. Interface previews can play on title/pause while the app is foreground; no preview is allowed in the background. Muting a bus silences existing sinks and cancels its one-shots. A paused siren keeps its logical position; leaving the run cancels it.
 
-At most **24 one-shot/siren voices**, **32 delayed requests** and **three bed entities** exist. Voices have explicit lifetimes even if no audio sink/device is available; the siren checks tagged entities, not only decoded sinks, so device loss cannot repeatedly spawn loops. Diagnostics use a finite cue vocabulary.
+At most **24 one-shot/siren voices**, **32 delayed requests**, **three bed entities** and **one armored-engine loop** exist. The engine loop follows the nearest live armored vehicle within 90 m, or the occupied armored vehicle; it uses the normal ambience gain and foreground/world lifecycle gates. Voices have explicit lifetimes even if no audio sink/device is available; the siren checks tagged entities, not only decoded sinks, so device loss cannot repeatedly spawn loops. Diagnostics use a finite cue vocabulary.
 
 ## Verification boundaries
 
@@ -36,6 +36,8 @@ AudioDiagnostics counts requests, dispatched voices, suppressions, dropped reque
 The isolated PCM harness inserts AudioScheduleControl with automatic=false. This suppresses only automatic street, shelter, evening, temple, weather and evacuation scheduling so a random cue cannot make a broken rain test pass. Normal gameplay defaults to automatic=true. The harness still uses the actual asset loader, decoder, AudioPlayer, AudioSink, volume routing, rain beds and lifecycle gates; explicit fixture sound requests are identified as such.
 
 Recording starts only after at least half a second of actual PCM and a later advancing buffer are observed; a monitor that never streams fails a bounded startup wait. The native output fixtures record real scene-start, transition and finish timestamps. Live mute, pause and window-focus loss require audible PCM before the transition and silence afterward; resume requires the inverse. Analysis windows remain within the actual scene across the bounded monitor-clock uncertainty, independent of application teardown. These windows verify routing and lifecycle output, not hardware latency.
+
+The full native harness has **18 output scenarios**. It retains the previous 13 scenarios and adds armored-engine playback, zero ambience gain, live mute, live pause and live focus loss. CI requires all 18 names in order, successful decoding of all 105 clips in every run, and the existing measured PCM assertions. The scenario list describes required coverage; a passing result still requires an actual report for the release commit.
 
 The Android emulator uses an explicit authenticated local PulseAudio server and dedicated sink for both QEMU playback and capture. A host preflight checks the actual emulator process's playback stream and sink routing after launch; a missing or muted route fails before the longer gameplay checks. Nine later PCM captures still independently require the expected audible or silent output after real settings touches, including cold restart. Host connection metadata cannot satisfy those audio assertions.
 

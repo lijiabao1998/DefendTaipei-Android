@@ -1,7 +1,10 @@
 //! Offline-rendered Web audio with recorded CC0 shots, lifecycle-safe buses,
 //! displacement-driven footsteps and Taipei environmental schedules.
+
 //! The asset manifest records source hashes and decoded sample measurements.
 //! Diagnostics count dispatches, never claim that a speaker produced sound.
+
+pub(crate) mod engine;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::OnceLock;
@@ -467,6 +470,7 @@ impl Plugin for AudioPlugin {
                     environment,
                     dispatch,
                     siren,
+                    engine::update,
                     mix_and_cleanup,
                 )
                     .chain()
@@ -575,6 +579,7 @@ fn footsteps(
     inventory: Option<Res<crate::inventory::Inventory>>,
     mut rt: ResMut<Runtime>,
     mut events: MessageWriter<SfxEvent>,
+    vehicles: Option<Res<crate::vehicles::VehicleFleet>>,
 ) {
     let Ok(player) = player.single() else { return };
     let pos = player.translation.xz();
@@ -585,7 +590,12 @@ fn footsteps(
         .position
         .map_or(0.0, |p| p.distance(pos) / dt.max(0.001));
     let run = velocity > 4.2;
-    if rt.player_step.advance(pos, dt, run, active) {
+    if rt.player_step.advance(
+        pos,
+        dt,
+        run,
+        active && vehicles.is_none_or(|v| v.current.is_none()),
+    ) {
         let crouched = stance.as_ref().is_some_and(|s| s.crouch);
         // Crouching still makes quiet footsteps; reduce this event's gain in dispatch.
         let heavy = inventory.as_ref().is_some_and(|i| i.weight() > 12.0);

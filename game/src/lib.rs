@@ -34,6 +34,7 @@ mod story;
 pub mod survival;
 mod touch;
 pub mod ui;
+pub mod vehicles;
 pub mod worldmap;
 pub mod worldplay;
 
@@ -124,6 +125,7 @@ pub fn run() {
             worldmap::WorldMapPlugin,
             map::atmosphere::AtmospherePlugin,
         ));
+    app.add_plugins((vehicles::VehiclePlugin, combat::armor::ArmorPlugin));
     #[cfg(not(target_os = "android"))]
     if qa_mode {
         app.add_plugins((

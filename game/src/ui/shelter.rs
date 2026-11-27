@@ -311,6 +311,42 @@ fn journal_rows(campaign: &Campaign, shelter: &Shelter, lang: Language) -> Vec<R
     rows
 }
 
+fn apply_binding_labels(
+    frame: &mut Frame,
+    controls: Option<&crate::input::ControlPreferences>,
+    language: Language,
+) {
+    if frame.panel.is_some() {
+        return;
+    }
+    let controls = controls.unwrap_or_else(|| crate::input::ControlPreferences::default_ref());
+    for widget in &mut frame.widgets {
+        let (label, action) = match widget.action.as_ref() {
+            Some(Action::Open(View::Inventory)) => (
+                tr(language, "背包", "Bag"),
+                crate::input::ControlAction::Inventory,
+            ),
+            Some(Action::Open(View::Shelter)) => (
+                tr(language, "避難所", "Shelter"),
+                crate::input::ControlAction::Shelter,
+            ),
+            Some(Action::Open(View::Trade)) => (
+                tr(language, "交易", "Trade"),
+                crate::input::ControlAction::Trade,
+            ),
+            Some(Action::Interact) => (
+                widget
+                    .text
+                    .strip_suffix(" E")
+                    .unwrap_or(tr(language, "互動", "Use")),
+                crate::input::ControlAction::Interact,
+            ),
+            _ => continue,
+        };
+        widget.text = format!("{label} {}", controls.key_label(action));
+    }
+}
+
 fn apply_interaction_label(frame: &mut Frame, hint: Option<&InteractionHint>) {
     if let Some(hint) = hint.filter(|hint| !hint.label.is_empty()) {
         for widget in &mut frame.widgets {
@@ -771,7 +807,7 @@ fn make_frame(
             ),
             (
                 toolbar[1],
-                tr(lang, "避難所 C", "Shelter C"),
+                tr(lang, "避難所 H", "Shelter H"),
                 Action::Open(View::Shelter),
             ),
             (
@@ -1033,6 +1069,7 @@ pub(super) fn drive_panels(
     pause: Res<PauseOpen>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
     consumed: Res<ConsumedPresses>,
     mut state: ResMut<PanelState>,
     mut modal: ResMut<UiModal>,
@@ -1117,6 +1154,7 @@ pub(super) fn drive_panels(
         },
     );
     apply_interaction_label(&mut frame, hint.as_deref());
+    apply_binding_labels(&mut frame, controls.as_deref(), *lang);
     let mut action = consumed.points.iter().find_map(|point| {
         frame.action_at(*point).or_else(|| {
             (state.view.is_none()
@@ -1132,12 +1170,16 @@ pub(super) fn drive_panels(
         keys.clear_just_pressed(KeyCode::Escape);
         action = Some(Action::Close);
     } else if state.view != Some(View::Moral) {
-        for (key, view) in [
-            (KeyCode::KeyI, View::Inventory),
-            (KeyCode::KeyC, View::Shelter),
-            (KeyCode::KeyT, View::Trade),
+        let controls = controls
+            .as_deref()
+            .unwrap_or_else(|| crate::input::ControlPreferences::default_ref());
+        for (action_key, view) in [
+            (crate::input::ControlAction::Inventory, View::Inventory),
+            (crate::input::ControlAction::Shelter, View::Shelter),
+            (crate::input::ControlAction::Trade, View::Trade),
         ] {
-            if keys.just_pressed(key) {
+            if controls.just_pressed(&keys, action_key) {
+                controls.clear_just_pressed(&mut keys, action_key);
                 action = Some(if state.view == Some(view) {
                     Action::Close
                 } else {
@@ -1284,6 +1326,7 @@ pub(super) struct PanelRenderWorld<'w> {
     scavenge: Res<'w, ScavengeSession>,
     progress: Option<Res<'w, ScavengeState>>,
     obstacles: Option<Res<'w, crate::map::Obstacles>>,
+    controls: Option<Res<'w, crate::input::ControlPreferences>>,
 }
 
 pub(super) fn render_panels(
@@ -1311,6 +1354,7 @@ pub(super) fn render_panels(
         scavenge,
         progress,
         obstacles,
+        controls,
     } = world;
     let mut frame =
         if flow.get() == &GameFlow::Playing && !pause.0 && !map.as_ref().is_some_and(|m| m.0) {
@@ -1342,6 +1386,7 @@ pub(super) fn render_panels(
             Frame::default()
         };
     apply_interaction_label(&mut frame, hint.as_deref());
+    apply_binding_labels(&mut frame, controls.as_deref(), *lang);
     if cache.0 == frame && (!roots.is_empty() || frame.widgets.is_empty()) {
         return;
     }
@@ -1352,6 +1397,15 @@ pub(super) fn render_panels(
     if frame.widgets.is_empty() {
         return;
     }
+    let viewport = windows
+        .iter()
+        .next()
+        .map_or(Vec2::new(1280.0, 720.0), |window| window.size());
+    let buttons: Vec<_> = frame.widgets.iter().filter_map(|widget| widget.action.as_ref().map(|action| serde_json::json!({"action":format!("{action:?}"),"rect":[widget.rect.min.x,widget.rect.min.y,widget.rect.max.x,widget.rect.max.y],"enabled":widget.enabled}))).collect();
+    println!(
+        "DTPANEL layout={}",
+        serde_json::json!({"viewport":[viewport.x,viewport.y],"view":format!("{:?}",state.view),"buttons":buttons})
+    );
     commands
         .spawn((
             SurvivalUiRoot,

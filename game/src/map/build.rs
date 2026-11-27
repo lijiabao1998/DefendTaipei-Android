@@ -29,6 +29,8 @@ pub enum Mat {
     WindowGlow,
     /// Existing fluorescent fixtures under arcade ceilings.
     ArcadeGlow,
+    /// Six shared road signal lenses: axis A/B × red/amber/green.
+    Signal(u8),
     VCol,
     Metal,
     Glass,
@@ -314,21 +316,31 @@ fn address_digits(out: &mut Parts, t: Mat4, number: u32) {
 
 pub fn sign(b: &Bld, out: &mut BuildingMeshes) {
     let Some(s) = b.sign else { return };
+    let temple = super::commercial::is_named_temple(b);
     let (cu, cv) = (
         (s.idx % SIGN_COLS as usize) as f32 / SIGN_COLS,
         (s.idx / SIGN_COLS as usize) as f32 / SIGN_ROWS,
     );
-    let g = geom::plane(s.w, 1.1)
-        .map_uv(|uv, _| [cu + uv[0] / SIGN_COLS, cv + (1.0 - uv[1]) / SIGN_ROWS]);
-    out.base
-        .add(Mat::Sign, &g, place(s.p.x, s.p.y, s.p.z, s.ry), WHITE);
+    let g = geom::plane(s.w, 1.1).map_uv(|uv, _| {
+        if temple {
+            super::textures::unbranded_sign_uv(s.idx)
+        } else {
+            [cu + uv[0] / SIGN_COLS, cv + (1.0 - uv[1]) / SIGN_ROWS]
+        }
+    });
+    out.base.add(
+        Mat::Sign,
+        &g,
+        place(s.p.x, s.p.y, s.p.z, s.ry),
+        if temple { hex(0x30241b) } else { WHITE },
+    );
     // back of the sign board (plain)
     let back = geom::cuboid(s.w, 1.1, 0.06);
     out.base.add(
         Mat::VCol,
         &back,
         place(s.p.x, s.p.y, s.p.z, s.ry) * geom::at(0.0, 0.0, -0.04),
-        hex(0x3a3c3e),
+        hex(if temple { 0x8d3028 } else { 0x3a3c3e }),
     );
 }
 

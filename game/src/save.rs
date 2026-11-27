@@ -92,6 +92,10 @@ struct SaveFile {
     world: ScavengeState,
     #[serde(default)]
     map: MapProgress,
+    #[serde(default)]
+    vehicles: crate::vehicles::VehicleFleet,
+    #[serde(default)]
+    armor: crate::combat::armor::ArmorFleet,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,6 +145,22 @@ impl SaveFile {
     fn validate(&self) -> Result<(), SaveError> {
         if self.version != SAVE_VERSION {
             return Err(SaveError::Version(self.version));
+        }
+        let capture_ids: Vec<_> = self
+            .armor
+            .units
+            .iter()
+            .filter_map(|unit| unit.captured_id)
+            .collect();
+        if capture_ids.iter().collect::<HashSet<_>>().len() != capture_ids.len()
+            || !self.vehicles.validate()
+            || !self.armor.validate()
+            || self.armor.units.iter().any(|unit| {
+                unit.captured_id
+                    .is_some_and(|id| self.vehicles.get(id).is_none_or(|v| v.kind != unit.kind))
+            })
+        {
+            return Err(SaveError::Invalid("Invalid vehicle or armour state"));
         }
         let player = &self.player;
         if !finite_range(player.hp, f32::MIN_POSITIVE, 100.0)
@@ -539,6 +559,14 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
             .get_resource::<MapProgress>()
             .cloned()
             .unwrap_or_default(),
+        vehicles: world
+            .get_resource::<crate::vehicles::VehicleFleet>()
+            .cloned()
+            .unwrap_or_default(),
+        armor: world
+            .get_resource::<crate::combat::armor::ArmorFleet>()
+            .cloned()
+            .unwrap_or_default(),
     };
     save.validate()?;
     Ok(save)
@@ -614,6 +642,18 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     }
     world.insert_resource(save.world);
     world.insert_resource(save.map);
+    // Resume with the physical vehicle intact and its throttle released. A
+    // persisted driving seat is retained; a background input never accelerates it.
+    if let Some(vehicle) = save.vehicles.current_mut() {
+        vehicle.speed = 0.0;
+        let position = vehicle.position();
+        if let Some(mut player) = world.get_mut::<Transform>(player_entity) {
+            player.translation = Vec3::new(position.x, 0.0, position.y);
+            player.rotation = Quat::from_rotation_y(vehicle.heading + std::f32::consts::PI);
+        }
+    }
+    world.insert_resource(save.vehicles);
+    world.insert_resource(save.armor);
     if let Some(mut input) = world.get_resource_mut::<MoveInput>() {
         *input = MoveInput::default();
     }
@@ -741,7 +781,56 @@ mod tests {
             needs: PlayerNeeds::default(),
             world: ScavengeState::default(),
             map: MapProgress::default(),
+            vehicles: crate::vehicles::VehicleFleet::default(),
+            armor: crate::combat::armor::ArmorFleet::default(),
         }
+    }
+
+    #[test]
+    fn legacy_save_adds_deterministic_ground_transport_without_changing_supplies() {
+        let sample = sample();
+        let expected = serde_json::to_value(&sample.vehicles).unwrap();
+        let mut legacy = serde_json::to_value(&sample).unwrap();
+        legacy.as_object_mut().unwrap().remove("vehicles");
+        legacy.as_object_mut().unwrap().remove("armor");
+        let loaded = decode(&serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(loaded.vehicles).unwrap(), expected);
+        assert_eq!(loaded.inventory, sample.inventory);
+        assert!(loaded.armor.validate());
+    }
+
+    #[test]
+    fn vehicle_save_keeps_fuel_damage_and_mounted_ammunition_and_rejects_duplicate_capture() {
+        let mut saved = sample();
+        let position = crate::map::world().spawn;
+        let id = saved
+            .vehicles
+            .add_captured(crate::vehicles::VehicleKind::Ztd05, position, 0.0);
+        saved.vehicles.current = Some(id);
+        let vehicle = saved.vehicles.get_mut(id).unwrap();
+        vehicle.fuel = 17.25;
+        vehicle.engine = 0.4;
+        vehicle.gun.as_mut().unwrap().fire().unwrap();
+        let encoded = serde_json::to_vec(&saved).unwrap();
+        let loaded = decode(&encoded).unwrap();
+        assert_eq!(
+            serde_json::to_value(&loaded.vehicles).unwrap(),
+            serde_json::to_value(&saved.vehicles).unwrap()
+        );
+        saved.armor.units[0].abandoned = true;
+        saved.armor.units[0].hp = 30.0;
+        saved.armor.units[0].captured_id = Some(99_999);
+        assert!(saved.validate().is_err());
+        saved.armor.units[0].kind = crate::vehicles::VehicleKind::Ztd05;
+        saved.armor.units[0].captured_id = Some(id);
+        assert!(saved.validate().is_ok());
+        let mut duplicate = saved.armor.units[0].clone();
+        duplicate.id = 99_998;
+        saved.armor.units.push(duplicate);
+        assert!(
+            saved.validate().is_err(),
+            "Two abandoned hulls must not map to one captured vehicle"
+        );
     }
 
     #[test]

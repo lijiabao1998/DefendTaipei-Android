@@ -83,6 +83,8 @@ pub struct RigAnim {
     last_pos: Vec2,
     hurt_was: f32,
     offset: [Vec3; JOINTS],
+    ride_blend: f32,
+    ride_height: f32,
 }
 
 /// A wandering civilian.
@@ -404,6 +406,8 @@ fn build_rigs(
                 last_pos: Vec2::NAN,
                 hurt_was: 0.0,
                 offset: built.offset,
+                ride_blend: 0.0,
+                ride_height: 0.0,
             },
         ));
     }
@@ -429,10 +433,14 @@ fn drive_player(
     stance: Res<PlayerStance>,
     mut shots: MessageReader<Gunshot>,
     mut q: Query<(&Transform, &mut RigAnim), With<Player>>,
+    vehicles: Option<Res<crate::vehicles::VehicleFleet>>,
 ) {
     let dt = time.delta_secs();
     let fired = shots.read().any(|s| s.by_player);
     for (t, mut r) in &mut q {
+        let mounted = vehicles
+            .as_ref()
+            .is_some_and(|fleet| fleet.current.is_some());
         let sp = measure(&mut r, t.translation.xz(), dt);
         // the player's root looks down local −Z; the model faces +Z
         let f = t.forward();
@@ -442,6 +450,8 @@ fn drive_player(
         }
         r.state = if state.hp <= 0.0 {
             AnimState::Death
+        } else if mounted {
+            AnimState::Idle
         } else if r.anim.shoot_t > 0.0 {
             AnimState::Shoot
         } else if stance.sneak || stance.low_cover {
@@ -503,6 +513,7 @@ fn animate_rigs(
     mut q: Query<(&mut RigAnim, &RigParts, Option<&Player>)>,
     mut tf: Query<&mut Transform, (Without<RigAnim>, Without<Player>)>,
     mut vis: Query<&mut Visibility, Without<RigAnim>>,
+    vehicles: Option<Res<crate::vehicles::VehicleFleet>>,
 ) {
     let dt = time.delta_secs().min(0.1);
     let e = |v: Vec3| Quat::from_euler(EulerRot::XYZ, v.x, v.y, v.z);
@@ -510,6 +521,37 @@ fn animate_rigs(
         let (state, yaw, speed) = (r.state, r.yaw, r.speed);
         r.anim.animate(state, yaw, speed, dt);
         let mut o = r.anim.out;
+        let mounted = player.and_then(|_| vehicles.as_deref().and_then(|fleet| fleet.current()));
+        if player.is_some() {
+            let target = if mounted.is_some() { 1.0 } else { 0.0 };
+            r.ride_blend += (target - r.ride_blend).clamp(-dt * 4.0, dt * 4.0);
+            if let Some(vehicle) = mounted {
+                r.ride_height = vehicle.spec().seat_y - 0.45;
+            }
+            let blend = r.ride_blend;
+            o.th_l.x = o.th_l.x * (1.0 - blend) - 1.2 * blend;
+            o.th_r.x = o.th_r.x * (1.0 - blend) - 1.2 * blend;
+            o.sh_l = o.sh_l * (1.0 - blend) + 1.5 * blend;
+            o.sh_r = o.sh_r * (1.0 - blend) + 1.5 * blend;
+            o.ua_l.x = o.ua_l.x * (1.0 - blend) - 0.9 * blend;
+            o.ua_r.x = o.ua_r.x * (1.0 - blend) - 0.9 * blend;
+            o.la_l.x = o.la_l.x * (1.0 - blend) - 0.4 * blend;
+            o.la_r.x = o.la_r.x * (1.0 - blend) - 0.4 * blend;
+            if let Ok(mut visibility) = vis.get_mut(p.root) {
+                visibility.set_if_neq(if mounted.is_some_and(|v| !v.spec().two) && blend > 0.5 {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                });
+            }
+            if let Ok(mut visibility) = vis.get_mut(p.joints[J::Weapon as usize]) {
+                visibility.set_if_neq(if mounted.is_some() {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                });
+            }
+        }
         if player.is_some()
             && let Some(progress) = player_gun.as_deref().and_then(|gun| gun.melee_progress())
         {
@@ -537,6 +579,9 @@ fn animate_rigs(
         } * Quat::from_rotation_y(o.spin);
         if let Ok(mut t) = tf.get_mut(p.root) {
             t.rotation = root_rot;
+            if player.is_some() {
+                t.translation.y = r.ride_height * r.ride_blend;
+            }
         }
         let set = |tf: &mut Query<&mut Transform, (Without<RigAnim>, Without<Player>)>,
                    j: J,

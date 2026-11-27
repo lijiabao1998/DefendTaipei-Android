@@ -477,7 +477,16 @@ fn sync_playing_banner(
     geometry: Option<Res<crate::hud::HudGeometry>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     card: Option<Single<(&mut Visibility, &mut Node), With<PlayingBanner>>>,
-    body: Option<Single<&mut Text, (With<PlayingBannerText>, Without<PlayingBannerFooter>)>>,
+    body: Option<
+        Single<
+            (&mut Text, &mut Node),
+            (
+                With<PlayingBannerText>,
+                Without<PlayingBannerFooter>,
+                Without<PlayingBanner>,
+            ),
+        >,
+    >,
     footer: Option<Single<&mut Text, (With<PlayingBannerFooter>, Without<PlayingBannerText>)>>,
 ) {
     if !matches!(state.get(), GameFlow::Playing) {
@@ -557,8 +566,11 @@ fn sync_playing_banner(
     card.1.top = px(rect.min.y);
     card.1.width = px(rect.width());
     card.1.height = px(rect.height());
-    if show && let Some(mut body) = body {
-        body.0 = campaign.notice.clone();
+    if let Some(mut body) = body {
+        body.1.height = px((rect.height() - 35.0).max(15.0));
+        if show {
+            body.0.0 = campaign.notice.clone();
+        }
     }
     if let Some(mut footer) = footer {
         footer.0 = footer_copy.to_owned();

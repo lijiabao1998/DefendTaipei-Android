@@ -5,7 +5,7 @@ use crate::{
     audio::{AudioCategory, AudioSettings, SfxEvent},
     game_flow::{Campaign, GameFlow},
     i18n::{Language, UiFont, tr},
-    input::{ScreenRect, safe_insets},
+    input::{CONTROL_ACTIONS, ControlAction, ControlPreferences, ScreenRect, safe_insets},
     performance::{
         PerformanceAction, PerformancePreferences, PerformanceProfile, PerformanceStatus,
     },
@@ -30,6 +30,7 @@ pub(crate) enum SettingsPage {
     Audio,
     Game,
     Performance,
+    Controls,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum PerformanceSection {
@@ -37,12 +38,22 @@ pub(crate) enum PerformanceSection {
     Display,
     Diagnostics,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ControlsSection {
+    #[default]
+    Touch,
+    Keyboard,
+}
 #[derive(Resource, Default)]
 pub(crate) struct SettingsUi {
     pub open: bool,
     pub captured: bool,
     pub page: SettingsPage,
     pub performance_section: PerformanceSection,
+    pub controls_section: ControlsSection,
+    pub bindings_page: usize,
+    pub binding_capture: Option<ControlAction>,
+    binding_notice: String,
     drag: Option<(Option<u64>, usize)>,
     viewport: Vec2,
 }
@@ -57,6 +68,14 @@ pub(crate) enum SettingsAction {
     Preview(AudioCategory),
     Language(Language),
     DayHours(u8),
+    ControlsSection(ControlsSection),
+    Vibration,
+    PreviewHaptic,
+    ButtonSize(u8),
+    BindingsPage(bool),
+    CaptureBinding(usize),
+    Bind(ControlAction, KeyCode),
+    CancelBinding,
     PerformanceSection(PerformanceSection),
     PerformanceProfile(PerformanceProfile),
     FrameCap(u16),
@@ -80,6 +99,11 @@ struct RenderKey {
     page: SettingsPage,
     performance_section: PerformanceSection,
     performance: PerformancePreferences,
+    controls: ControlPreferences,
+    controls_section: ControlsSection,
+    bindings_page: usize,
+    binding_capture: Option<ControlAction>,
+    binding_notice: String,
     capture_active: bool,
     report_available: bool,
     audio: AudioSettings,
@@ -113,6 +137,7 @@ pub(crate) struct SettingsLayout {
     pub audio_actions: [ScreenRect; 4],
     pub languages: [ScreenRect; 2],
     pub durations: [ScreenRect; 3],
+    pub controls_open: ScreenRect,
     pub reset: ScreenRect,
     pub close: ScreenRect,
     status: ScreenRect,
@@ -267,6 +292,12 @@ pub(crate) fn settings_layout(viewport: Vec2) -> SettingsLayout {
         capture.width(),
         action_h,
     );
+    let controls_open = ScreenRect::new(
+        detail.min.x,
+        detail.min.y,
+        detail.width(),
+        if short { 28.0 } else { 38.0 },
+    );
     SettingsLayout {
         frame,
         tabs,
@@ -287,12 +318,311 @@ pub(crate) fn settings_layout(viewport: Vec2) -> SettingsLayout {
         audio_actions,
         languages,
         durations,
+        controls_open,
         reset,
         close,
         status,
         detail,
     }
 }
+const BINDING_ROWS: usize = 4;
+
+pub(crate) struct ControlsLayout {
+    pub sections: [ScreenRect; 2],
+    pub vibration: ScreenRect,
+    pub preview: ScreenRect,
+    pub sizes: [ScreenRect; 3],
+    pub bindings: [ScreenRect; BINDING_ROWS],
+    binding_labels: [ScreenRect; BINDING_ROWS],
+    pub previous: ScreenRect,
+    pub next: ScreenRect,
+    page_label: ScreenRect,
+    touch_help: ScreenRect,
+    key_help: ScreenRect,
+}
+
+pub(crate) fn controls_layout(layout: &SettingsLayout, viewport: Vec2) -> ControlsLayout {
+    let short = viewport.y < 500.0;
+    let sections = layout.performance_sections;
+    let x = sections[0].min.x;
+    let w = layout.frame.width() - 24.0;
+    let top = sections[0].max.y + 8.0;
+    let bottom = layout.status.min.y - 6.0;
+    let height = if short { 30.0 } else { 42.0 };
+    let vibration = ScreenRect::new(x, top, (w - 8.0) * 0.65, height);
+    let preview = ScreenRect::new(vibration.max.x + 8.0, top, (w - 8.0) * 0.35, height);
+    let sizes_top = top + height + if short { 22.0 } else { 34.0 };
+    let size_w = (w - 16.0) / 3.0;
+    let sizes = std::array::from_fn(|i| {
+        ScreenRect::new(x + i as f32 * (size_w + 8.0), sizes_top, size_w, height)
+    });
+    let touch_help = ScreenRect::new(
+        x,
+        sizes[0].max.y + 8.0,
+        w,
+        (bottom - sizes[0].max.y - 8.0).max(0.0),
+    );
+    let previous = ScreenRect::new(x, top, w * 0.25, height);
+    let next = ScreenRect::new(x + w * 0.75, top, w * 0.25, height);
+    let page_label = ScreenRect::new(
+        previous.max.x + 8.0,
+        top + 5.0,
+        w * 0.5 - 16.0,
+        height - 5.0,
+    );
+    let rows_top = top + height + 6.0;
+    let row_h = ((bottom - rows_top - 26.0) / BINDING_ROWS as f32 - 4.0).clamp(22.0, 46.0);
+    let binding_labels = std::array::from_fn(|i| {
+        ScreenRect::new(
+            x,
+            rows_top + i as f32 * (row_h + 4.0),
+            w * 0.60 - 8.0,
+            row_h,
+        )
+    });
+    let bindings = std::array::from_fn(|i| {
+        ScreenRect::new(x + w * 0.60, binding_labels[i].min.y, w * 0.40, row_h)
+    });
+    let key_help = ScreenRect::new(
+        x,
+        bindings[BINDING_ROWS - 1].max.y + 6.0,
+        w,
+        (bottom - bindings[BINDING_ROWS - 1].max.y - 6.0).max(0.0),
+    );
+    ControlsLayout {
+        sections,
+        vibration,
+        preview,
+        sizes,
+        bindings,
+        binding_labels,
+        previous,
+        next,
+        page_label,
+        touch_help,
+        key_help,
+    }
+}
+
+fn hit_controls(
+    layout: &SettingsLayout,
+    viewport: Vec2,
+    state: &SettingsUi,
+    point: Vec2,
+) -> Option<SettingsAction> {
+    let controls = controls_layout(layout, viewport);
+    for (index, rect) in controls.sections.iter().enumerate() {
+        if rect.contains(point) {
+            return Some(SettingsAction::ControlsSection(if index == 0 {
+                ControlsSection::Touch
+            } else {
+                ControlsSection::Keyboard
+            }));
+        }
+    }
+    if state.controls_section == ControlsSection::Touch {
+        if controls.vibration.contains(point) {
+            return Some(SettingsAction::Vibration);
+        }
+        if controls.preview.contains(point) {
+            return Some(SettingsAction::PreviewHaptic);
+        }
+        for (index, rect) in controls.sizes.iter().enumerate() {
+            if rect.contains(point) {
+                return Some(SettingsAction::ButtonSize([85, 100, 110][index]));
+            }
+        }
+    } else {
+        if controls.previous.contains(point) {
+            return Some(SettingsAction::BindingsPage(false));
+        }
+        if controls.next.contains(point) {
+            return Some(SettingsAction::BindingsPage(true));
+        }
+        for (row, rect) in controls.bindings.iter().enumerate() {
+            if rect.contains(point) {
+                return Some(SettingsAction::CaptureBinding(row));
+            }
+        }
+    }
+    None
+}
+
+fn render_controls(
+    root: &mut ChildSpawnerCommands,
+    layout: &SettingsLayout,
+    viewport: Vec2,
+    state: &SettingsUi,
+    prefs: &ControlPreferences,
+    language: Language,
+    font: &UiFont,
+) {
+    let controls = controls_layout(layout, viewport);
+    let rect = |r: ScreenRect| [r.min.x, r.min.y, r.max.x, r.max.y];
+    println!(
+        "DTCONTROLS layout={}",
+        serde_json::json!({"viewport":[viewport.x,viewport.y],"sections":controls.sections.map(rect),"vibration":rect(controls.vibration),"preview":rect(controls.preview),"sizes":controls.sizes.map(rect),"bindings":controls.bindings.map(rect),"previous":rect(controls.previous),"next":rect(controls.next),"page":state.bindings_page})
+    );
+    let short = viewport.y < 500.0;
+    for (index, title) in [
+        tr(language, "觸控", "Touch"),
+        tr(language, "鍵盤", "Keyboard"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        button(
+            root,
+            controls.sections[index],
+            title,
+            if (index == 0) == (state.controls_section == ControlsSection::Touch) {
+                GOLD
+            } else {
+                MUTED
+            },
+            font,
+        );
+    }
+    if state.controls_section == ControlsSection::Touch {
+        button(
+            root,
+            controls.vibration,
+            if prefs.vibration {
+                tr(language, "震動回饋：開啟", "Haptics: on")
+            } else {
+                tr(language, "震動回饋：關閉", "Haptics: off")
+            },
+            if prefs.vibration { GOLD } else { MUTED },
+            font,
+        );
+        button(
+            root,
+            controls.preview,
+            tr(language, "測試震動", "Test haptic"),
+            MUTED,
+            font,
+        );
+        label(
+            root,
+            ScreenRect::new(
+                controls.sizes[0].min.x,
+                controls.sizes[0].min.y - 20.0,
+                layout.frame.width() - 24.0,
+                18.0,
+            ),
+            tr(language, "觸控按鈕大小", "Touch button size"),
+            12.0,
+            PAPER,
+            font,
+        );
+        for (index, title) in [
+            tr(language, "小 85%", "Small 85%"),
+            tr(language, "標準 100%", "Standard"),
+            tr(language, "大 110%", "Large 110%"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            button(
+                root,
+                controls.sizes[index],
+                title,
+                if prefs.button_percent == [85, 100, 110][index] {
+                    GOLD
+                } else {
+                    MUTED
+                },
+                font,
+            );
+        }
+        bounded_label(
+            root,
+            controls.touch_help,
+            tr(
+                language,
+                "點按攻擊或蹲低按鈕會產生短震動；裝置不支援時略過。\n載具：搖桿決定方向與倒車，按住煞車停止；點互動下車。裝甲載具可使用射擊、裝填與切換武器按鈕。",
+                "Attack and crouch taps produce short pulses when the device supports vibration.\nVehicles: steer or reverse with the pad; hold Brake to stop and tap Use to exit. Armored vehicles also have Fire, Reload and Switch buttons.",
+            ),
+            if short { 10.0 } else { 13.0 },
+            MUTED,
+            font,
+        );
+    } else {
+        button(
+            root,
+            controls.previous,
+            tr(language, "上一頁", "Previous"),
+            MUTED,
+            font,
+        );
+        button(
+            root,
+            controls.next,
+            tr(language, "下一頁", "Next"),
+            MUTED,
+            font,
+        );
+        label(
+            root,
+            controls.page_label,
+            &format!(
+                "{} / {}",
+                state.bindings_page + 1,
+                CONTROL_ACTIONS.len().div_ceil(BINDING_ROWS)
+            ),
+            13.0,
+            PAPER,
+            font,
+        );
+        for (row, action) in CONTROL_ACTIONS
+            .iter()
+            .skip(state.bindings_page * BINDING_ROWS)
+            .take(BINDING_ROWS)
+            .enumerate()
+        {
+            bounded_label(
+                root,
+                controls.binding_labels[row],
+                action.label(language),
+                if short { 11.0 } else { 13.0 },
+                PAPER,
+                font,
+            );
+            let waiting = state.binding_capture == Some(*action);
+            let label = if waiting {
+                tr(language, "按下新按鍵…", "Press a key…").into()
+            } else {
+                prefs.key_label(*action)
+            };
+            button_sized(
+                root,
+                controls.bindings[row],
+                &label,
+                if waiting { GOLD } else { MUTED },
+                if short { 11.0 } else { 13.0 },
+                font,
+            );
+        }
+        let help = if !state.binding_notice.is_empty() {
+            state.binding_notice.as_str()
+        } else {
+            tr(
+                language,
+                "點選後按新鍵；Esc 取消，重複按鍵互換。",
+                "Click a binding, then press a key. Esc cancels; duplicates swap.",
+            )
+        };
+        bounded_label(
+            root,
+            controls.key_help,
+            help,
+            if short { 10.0 } else { 12.0 },
+            MUTED,
+            font,
+        );
+    }
+}
+
 fn volume(audio: &AudioSettings, index: usize) -> f32 {
     match index {
         0 => audio.master,
@@ -352,6 +682,9 @@ fn hit(
             }
         }
     } else if page == SettingsPage::Game {
+        if layout.controls_open.contains(point) {
+            return Some(SettingsAction::Page(SettingsPage::Controls));
+        }
         for (i, rect) in layout.languages.iter().enumerate() {
             if rect.contains(point) {
                 return Some(SettingsAction::Language(if i == 0 {
@@ -366,7 +699,7 @@ fn hit(
                 return Some(SettingsAction::DayHours([1, 2, 4][i]));
             }
         }
-    } else {
+    } else if page == SettingsPage::Performance {
         for (i, rect) in layout.performance_sections.iter().enumerate() {
             if rect.contains(point) {
                 return Some(SettingsAction::PerformanceSection(if i == 0 {
@@ -428,7 +761,7 @@ pub(super) fn pointer_actions(
     mut mouse_events: MessageReader<MouseButtonInput>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut touch_events: MessageReader<TouchInput>,
-    keys: Res<ButtonInput<KeyCode>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
     mut actions: MessageWriter<SettingsAction>,
     mut focus: MessageReader<WindowFocused>,
     mut lifecycle: MessageReader<AppLifecycle>,
@@ -442,6 +775,7 @@ pub(super) fn pointer_actions(
         .any(|event| matches!(event, AppLifecycle::WillSuspend | AppLifecycle::Suspended));
     state.captured = state.open;
     if unfocused || suspending {
+        state.binding_capture = None;
         state.drag = None;
         return;
     }
@@ -490,7 +824,21 @@ pub(super) fn pointer_actions(
     let resized = state.viewport != Vec2::ZERO && state.viewport != viewport;
     state.viewport = viewport;
     if resized {
+        state.binding_capture = None;
         state.drag = None;
+        return;
+    }
+    if let Some(action) = state.binding_capture {
+        if keys.just_pressed(KeyCode::Escape) {
+            keys.clear_just_pressed(KeyCode::Escape);
+            actions.write(SettingsAction::CancelBinding);
+        } else {
+            let key = keys.get_just_pressed().next().copied();
+            if let Some(key) = key {
+                keys.clear_just_pressed(key);
+                actions.write(SettingsAction::Bind(action, key));
+            }
+        }
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
@@ -509,6 +857,12 @@ pub(super) fn pointer_actions(
             && let Some(index) = layout.sliders.iter().position(|r| r.contains(point))
         {
             state.drag = Some((id, index));
+        }
+        if state.page == SettingsPage::Controls
+            && let Some(action) = hit_controls(&layout, viewport, state, point)
+        {
+            actions.write(action);
+            return;
         }
         if let Some(action) = hit(
             &layout,
@@ -580,6 +934,7 @@ pub(super) fn apply_actions(
     mut audio: ResMut<AudioSettings>,
     mut preferences: ResMut<GamePreferences>,
     mut performance: ResMut<PerformancePreferences>,
+    mut controls: ResMut<ControlPreferences>,
     mut performance_actions: MessageWriter<PerformanceAction>,
     mut language: ResMut<Language>,
     mut sfx: MessageWriter<SfxEvent>,
@@ -603,12 +958,14 @@ pub(super) fn apply_actions(
                 state.open = false;
                 state.captured = true;
                 state.drag = None;
+                state.binding_capture = None;
                 flush.write(FlushSettings);
                 println!("DTUI action=SettingsClose");
             }
             SettingsAction::Page(page) => {
                 state.page = page;
                 state.drag = None;
+                state.binding_capture = None;
                 println!("DTSETTINGS action=page value={page:?}");
             }
             SettingsAction::Volume(index, value) | SettingsAction::AdjustVolume(index, value) => {
@@ -643,6 +1000,76 @@ pub(super) fn apply_actions(
             SettingsAction::DayHours(value) if matches!(value, 1 | 2 | 4) => {
                 preferences.day_hours = value;
                 println!("DTSETTINGS action=day_hours value={value}");
+            }
+            SettingsAction::ControlsSection(section) => {
+                state.controls_section = section;
+                state.binding_capture = None;
+                println!("DTSETTINGS action=controls_section value={section:?}");
+            }
+            SettingsAction::Vibration => {
+                controls.vibration = !controls.vibration;
+                if !controls.vibration {
+                    crate::device::clear_haptic_request();
+                }
+                println!("DTSETTINGS action=vibration value={}", controls.vibration);
+            }
+            SettingsAction::PreviewHaptic => {
+                let queued = controls.haptic(15);
+                println!(
+                    "DTSETTINGS action=haptic_preview queued={queued} enabled={}",
+                    controls.vibration
+                );
+            }
+            SettingsAction::ButtonSize(value) if matches!(value, 85 | 100 | 110) => {
+                controls.button_percent = value;
+                println!("DTSETTINGS action=button_size value={value}");
+            }
+            SettingsAction::BindingsPage(next) => {
+                let pages = CONTROL_ACTIONS.len().div_ceil(BINDING_ROWS);
+                state.bindings_page = if next {
+                    (state.bindings_page + 1) % pages
+                } else {
+                    (state.bindings_page + pages - 1) % pages
+                };
+                state.binding_capture = None;
+                println!(
+                    "DTSETTINGS action=bindings_page value={}",
+                    state.bindings_page
+                );
+            }
+            SettingsAction::CaptureBinding(row) => {
+                state.binding_capture = CONTROL_ACTIONS
+                    .get(state.bindings_page * BINDING_ROWS + row)
+                    .copied();
+                state.binding_notice.clear();
+                println!(
+                    "DTSETTINGS action=binding_capture value={:?}",
+                    state.binding_capture
+                );
+            }
+            SettingsAction::Bind(action, key) => {
+                state.binding_notice = match controls.rebind(action, key) {
+                    Ok(Some(other)) => {
+                        format!("{} ↔ {}", action.label(*language), other.label(*language))
+                    }
+                    Ok(None) => format!(
+                        "{} = {}",
+                        action.label(*language),
+                        controls.key_label(action)
+                    ),
+                    Err(_) => tr(
+                        *language,
+                        "此按鍵保留，請選擇其他按鍵。",
+                        "This key is reserved. Choose another key.",
+                    )
+                    .into(),
+                };
+                state.binding_capture = None;
+                println!("DTSETTINGS action=rebind action_id={action:?} key={key:?}");
+            }
+            SettingsAction::CancelBinding => {
+                state.binding_capture = None;
+                println!("DTSETTINGS action=binding_cancel");
             }
             SettingsAction::PerformanceSection(section) => {
                 state.performance_section = section;
@@ -687,6 +1114,11 @@ pub(super) fn apply_actions(
                     *language = Language::ZhTw;
                 }
                 SettingsPage::Performance => *performance = PerformancePreferences::default(),
+                SettingsPage::Controls => {
+                    *controls = ControlPreferences::default();
+                    state.binding_capture = None;
+                    state.binding_notice.clear();
+                }
             },
             _ => {}
         }
@@ -703,6 +1135,7 @@ pub(super) fn render(
     audio: Res<AudioSettings>,
     preferences: Res<GamePreferences>,
     performance: Res<PerformancePreferences>,
+    controls: Res<ControlPreferences>,
     performance_status: Option<Res<PerformanceStatus>>,
     campaign: Option<Res<Campaign>>,
     flow: Res<State<GameFlow>>,
@@ -729,6 +1162,11 @@ pub(super) fn render(
         page: state.page,
         performance_section: state.performance_section,
         performance: *performance,
+        controls: (*controls).clone(),
+        controls_section: state.controls_section,
+        bindings_page: state.bindings_page,
+        binding_capture: state.binding_capture,
+        binding_notice: state.binding_notice.clone(),
         capture_active: state.page == SettingsPage::Performance
             && state.performance_section == PerformanceSection::Diagnostics
             && performance_status
@@ -785,13 +1223,13 @@ pub(super) fn render(
         let rect = |r: ScreenRect| [r.min.x, r.min.y, r.max.x, r.max.y];
         println!(
             "DTSETTINGS layout={}",
-            serde_json::json!({"viewport":[viewport.x,viewport.y],"tabs":l.tabs.map(rect),"sliders":l.sliders.map(rect),"minus":l.minus.map(rect),"plus":l.plus.map(rect),"audio_actions":l.audio_actions.map(rect),"languages":l.languages.map(rect),"durations":l.durations.map(rect),"reset":rect(l.reset),"close":rect(l.close),"performance_sections":l.performance_sections.map(rect),"profiles":l.profiles.map(rect),"frame_caps":l.frame_caps.map(rect),"render_scales":l.render_scales.map(rect),"performance_overlay":rect(l.performance_overlay),"capture":rect(l.capture),"export":rect(l.export)})
+            serde_json::json!({"viewport":[viewport.x,viewport.y],"tabs":l.tabs.map(rect),"sliders":l.sliders.map(rect),"minus":l.minus.map(rect),"plus":l.plus.map(rect),"audio_actions":l.audio_actions.map(rect),"languages":l.languages.map(rect),"durations":l.durations.map(rect),"controls_open":rect(l.controls_open),"reset":rect(l.reset),"close":rect(l.close),"performance_sections":l.performance_sections.map(rect),"profiles":l.profiles.map(rect),"frame_caps":l.frame_caps.map(rect),"render_scales":l.render_scales.map(rect),"performance_overlay":rect(l.performance_overlay),"capture":rect(l.capture),"export":rect(l.export)})
         );
     }
     commands.spawn((SettingsRoot,Node{position_type:PositionType::Absolute,width:percent(100.0),height:percent(100.0),..default()},BackgroundColor(Color::srgba(0.01,0.015,0.012,0.96)),GlobalZIndex(90))).with_children(|root|{
         root.spawn((node(l.frame),BackgroundColor(PANEL),BorderColor::all(GOLD)));
         label(root,ScreenRect::new(l.frame.min.x+12.0,l.frame.min.y+4.0,l.frame.width()-24.0,28.0),tr(lang,"設定","Settings"),if short{20.0}else{24.0},PAPER,&font);
-        for(i,title)in [tr(lang,"聲音","Audio"),tr(lang,"遊戲","Game"),tr(lang,"效能","Performance")].iter().enumerate(){button(root,l.tabs[i],title,if [SettingsPage::Audio,SettingsPage::Game,SettingsPage::Performance][i]==state.page{GOLD}else{MUTED},&font);}
+        for(i,title)in [tr(lang,"聲音","Audio"),tr(lang,"遊戲","Game"),tr(lang,"效能","Performance")].iter().enumerate(){button(root,l.tabs[i],title,if [SettingsPage::Audio,SettingsPage::Game,SettingsPage::Performance][i]==state.page || (i==1 && state.page==SettingsPage::Controls){GOLD}else{MUTED},&font);}
         if state.page==SettingsPage::Audio{
             let names=[tr(lang,"總音量","Master"),tr(lang,"音效","Effects"),tr(lang,"音樂／環境","Music / ambience"),tr(lang,"廣播音效","Radio effects")];
             for(i,name)in names.iter().enumerate(){let value=volume(&audio,i);label(root,l.labels[i],&format!("{name}    {:.0}%",value*100.0),13.0,PAPER,&font);button(root,l.minus[i],"−",MUTED,&font);button(root,l.plus[i],"+",MUTED,&font);let bar=l.sliders[i];root.spawn((node(ScreenRect::new(bar.min.x,bar.min.y+15.0,bar.width(),6.0)),BackgroundColor(Color::srgb(0.19,0.23,0.2))));root.spawn((node(ScreenRect::new(bar.min.x,bar.min.y+15.0,bar.width()*value,6.0)),BackgroundColor(GOLD)));root.spawn((node(ScreenRect::new((bar.min.x+bar.width()*value-7.0).clamp(bar.min.x,bar.max.x-14.0),bar.min.y+5.0,14.0,26.0)),BackgroundColor(PAPER)));}
@@ -803,8 +1241,11 @@ pub(super) fn render(
             label(root,ScreenRect::new(l.durations[0].min.x,l.durations[0].min.y-22.0,l.frame.width()-24.0,20.0),tr(lang,"新遊戲：一天的現實時間（1×）","New run: real hours per day (1×)"),13.0,PAPER,&font);
             for(i,hours)in [1,2,4].iter().enumerate(){button(root,l.durations[i],&format!("{} {}",hours,tr(lang,"小時",if *hours==1{"hour"}else{"hours"})),if preferences.day_hours==*hours{GOLD}else{MUTED},&font);}
             let text=if let Some(hours)=key.active_day_hours {format!("{} {} {}。{}",tr(lang,"本局維持","This run keeps"),hours,tr(lang,"小時",if hours==1{"hour"}else{"hours"}),tr(lang,"下次出發時套用新設定。","The new value applies on your next departure."))}else{tr(lang,"日長只在開始新局時套用，繼續遊戲保留原設定。","Day length applies when starting a new run. Continue keeps the saved value.").to_owned()};
-            label(root,l.detail,&text,if short{10.0}else{13.0},MUTED,&font);
+            button(root,l.controls_open,tr(lang,"操作設定","Controls"),GOLD,&font);
+            let detail=ScreenRect::new(l.detail.min.x,l.controls_open.max.y+4.0,l.detail.width(),(l.detail.max.y-l.controls_open.max.y-4.0).max(0.0));
+            bounded_label(root,detail,&text,if short{10.0}else{13.0},MUTED,&font);
         }
+        if state.page==SettingsPage::Controls { render_controls(root,&l,viewport,&state,&controls,lang,&font); }
         if state.page==SettingsPage::Performance {
             render_performance(root, &l, state.performance_section, &performance, performance_status.as_deref(), flow.get()==&GameFlow::Playing, lang, short, &font);
         }
@@ -1150,6 +1591,7 @@ mod tests {
             .init_resource::<AudioSettings>()
             .init_resource::<GamePreferences>()
             .init_resource::<PerformancePreferences>()
+            .init_resource::<ControlPreferences>()
             .init_resource::<PerformanceStatus>()
             .add_message::<PerformanceAction>()
             .init_resource::<Language>()
@@ -1185,6 +1627,172 @@ mod tests {
             position,
             force: None,
         });
+    }
+
+    #[test]
+    fn controls_accept_short_taps_and_capture_or_cancel_exactly_one_binding() {
+        let (mut app, window) = input_app();
+        let layout = settings_layout(Vec2::new(390.0, 844.0));
+        app.world_mut()
+            .write_message(SettingsAction::Page(SettingsPage::Game));
+        app.update();
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Started,
+            layout.controls_open.center(),
+        );
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Ended,
+            layout.controls_open.center(),
+        );
+        app.update();
+        assert_eq!(
+            app.world().resource::<SettingsUi>().page,
+            SettingsPage::Controls
+        );
+        let controls = controls_layout(&layout, Vec2::new(390.0, 844.0));
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Started,
+            controls.vibration.center(),
+        );
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Ended,
+            controls.vibration.center(),
+        );
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Started,
+            controls.sizes[2].center(),
+        );
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Ended,
+            controls.sizes[2].center(),
+        );
+        app.update();
+        assert!(!app.world().resource::<ControlPreferences>().vibration);
+        assert_eq!(
+            app.world().resource::<ControlPreferences>().button_percent,
+            110
+        );
+        app.world_mut()
+            .write_message(SettingsAction::ControlsSection(ControlsSection::Keyboard));
+        app.world_mut()
+            .write_message(SettingsAction::CaptureBinding(0));
+        app.update();
+        assert_eq!(
+            app.world().resource::<SettingsUi>().binding_capture,
+            Some(ControlAction::Up)
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyE);
+        app.update();
+        let prefs = app.world().resource::<ControlPreferences>();
+        assert_eq!(prefs.key(ControlAction::Up), KeyCode::KeyE);
+        assert_eq!(prefs.key(ControlAction::Interact), KeyCode::KeyW);
+        assert!(
+            app.world()
+                .resource::<SettingsUi>()
+                .binding_capture
+                .is_none()
+        );
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .just_pressed(KeyCode::KeyE)
+        );
+        app.world_mut()
+            .write_message(SettingsAction::CaptureBinding(1));
+        app.update();
+        let before = app.world().resource::<ControlPreferences>().clone();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update();
+        assert_eq!(*app.world().resource::<ControlPreferences>(), before);
+        assert!(app.world().resource::<SettingsUi>().open);
+        assert!(
+            app.world()
+                .resource::<SettingsUi>()
+                .binding_capture
+                .is_none()
+        );
+        assert!(
+            !app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .just_pressed(KeyCode::Escape)
+        );
+    }
+
+    #[test]
+    fn controls_pages_fit_both_orientations_without_overlapping_actions() {
+        for viewport in [
+            Vec2::new(390.0, 844.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(360.0, 640.0),
+            Vec2::new(640.0, 360.0),
+        ] {
+            let page = settings_layout(viewport);
+            let layout = controls_layout(&page, viewport);
+            for group in [
+                vec![
+                    layout.sections[0],
+                    layout.sections[1],
+                    layout.vibration,
+                    layout.preview,
+                    layout.sizes[0],
+                    layout.sizes[1],
+                    layout.sizes[2],
+                    page.close,
+                    page.reset,
+                ],
+                vec![
+                    layout.sections[0],
+                    layout.sections[1],
+                    layout.previous,
+                    layout.next,
+                    layout.bindings[0],
+                    layout.bindings[1],
+                    layout.bindings[2],
+                    layout.bindings[3],
+                    page.close,
+                    page.reset,
+                ],
+            ] {
+                for (index, rect) in group.iter().enumerate() {
+                    assert!(
+                        rect.min.x >= 0.0
+                            && rect.min.y >= 0.0
+                            && rect.max.x <= viewport.x
+                            && rect.max.y <= viewport.y,
+                        "{viewport:?}: {rect:?}"
+                    );
+                    for other in group.iter().skip(index + 1) {
+                        assert!(
+                            !rect.intersects(*other),
+                            "{viewport:?}: {rect:?} vs {other:?}"
+                        );
+                    }
+                }
+            }
+            assert!(layout.bindings[3].max.y <= page.status.min.y);
+        }
     }
     #[test]
     fn settings_entry_accepts_short_taps_without_repeating_held_input() {

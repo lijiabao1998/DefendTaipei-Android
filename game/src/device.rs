@@ -49,6 +49,10 @@ pub struct DeviceSnapshot {
     pub media_volume: Option<u32>,
     pub media_max_volume: Option<u32>,
     pub media_muted: Option<bool>,
+    pub has_vibrator: Option<bool>,
+    /// Accepted Android API calls, not a claim that physical vibration was felt.
+    pub haptic_issued_count: u64,
+    pub haptic_last_duration_ms: Option<u32>,
     pub sampled_at_elapsed_ms: Option<u64>,
     pub requested_frame_rate: u32,
     pub applied_refresh_hint_hz: Option<f32>,
@@ -85,6 +89,9 @@ impl Default for DeviceSnapshot {
             media_volume: None,
             media_max_volume: None,
             media_muted: None,
+            has_vibrator: None,
+            haptic_issued_count: 0,
+            haptic_last_duration_ms: None,
             sampled_at_elapsed_ms: None,
             requested_frame_rate: 0,
             applied_refresh_hint_hz: None,
@@ -126,6 +133,52 @@ static REVISION: AtomicU64 = AtomicU64::new(0);
 static REQUESTED_FRAME_RATE: AtomicU32 = AtomicU32::new(0);
 static SHARE_REQUESTED: AtomicBool = AtomicBool::new(false);
 static SHARE_STATUS: AtomicU8 = AtomicU8::new(0);
+static HAPTIC_REQUEST: OnceLock<Mutex<Option<HapticRequest>>> = OnceLock::new();
+
+struct HapticRequest {
+    duration_ms: u32,
+    requested: Instant,
+}
+
+/// Short, coalesced touch feedback. Desktop rejects requests. Android returns
+/// whether it queued a request; the Java bridge reports actual API invocation
+/// or an unsupported device. Requests expire after 150 ms and never replay
+/// after background/resume.
+pub fn request_haptic(duration_ms: u32) -> bool {
+    if !cfg!(target_os = "android") || !(1..=50).contains(&duration_ms) {
+        return false;
+    }
+    let Ok(mut pending) = HAPTIC_REQUEST.get_or_init(|| Mutex::new(None)).try_lock() else {
+        return false;
+    };
+    let duration_ms = pending
+        .as_ref()
+        .filter(|old| old.requested.elapsed().as_millis() <= 150)
+        .map_or(duration_ms, |old| old.duration_ms.max(duration_ms));
+    *pending = Some(HapticRequest {
+        duration_ms,
+        requested: Instant::now(),
+    });
+    true
+}
+
+pub fn clear_haptic_request() {
+    if let Some(store) = HAPTIC_REQUEST.get()
+        && let Ok(mut pending) = store.try_lock()
+    {
+        *pending = None;
+    }
+}
+
+/// Polled by the foreground Android UI thread, independently of diagnostics.
+pub fn take_haptic_request() -> u32 {
+    HAPTIC_REQUEST
+        .get()
+        .and_then(|store| store.try_lock().ok())
+        .and_then(|mut pending| pending.take())
+        .filter(|request| request.requested.elapsed().as_millis() <= 150)
+        .map_or(0, |request| request.duration_ms)
+}
 
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DeviceSet;
@@ -229,6 +282,9 @@ fn parse_android_snapshot(json: &str) -> Result<DeviceSnapshot, &'static str> {
                 .media_max_volume
                 .is_none_or(|maximum| *v <= maximum)
     });
+    snapshot.haptic_last_duration_ms = snapshot
+        .haptic_last_duration_ms
+        .filter(|value| (1..=50).contains(value));
     snapshot.requested_frame_rate = normalize_frame_rate_hint(snapshot.requested_frame_rate);
     Ok(snapshot)
 }

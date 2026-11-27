@@ -1,0 +1,4597 @@
+{
+  "source_commit": "b9b0a2736642b37dd45925a4719dfef08b8f36b4",
+  "source": "src/systems/avgun.ts",
+  "loadouts": {
+    "zbl08": {
+      "main": {
+        "name": "30 毫米機砲",
+        "cd": 0.2,
+        "ready": 200,
+        "reserve": 200,
+        "reload": 9,
+        "heat": 1.6,
+        "cool": 2.5,
+        "dmg": 150,
+        "splash": 2.4,
+        "range": 90,
+        "antiArmor": 6,
+        "air": 8,
+        "sound": "at",
+        "noise": 95
+      },
+      "coax": {
+        "name": "7.62 毫米同軸機槍",
+        "cd": 0.086,
+        "ready": 250,
+        "reserve": 1750,
+        "reload": 6,
+        "heat": 0.55,
+        "cool": 1.75,
+        "dmg": 58,
+        "splash": 0,
+        "range": 70,
+        "antiArmor": 0,
+        "air": 0.6,
+        "sound": "mg",
+        "noise": 70
+      },
+      "traverse": 1.1
+    },
+    "zbd05": {
+      "main": {
+        "name": "30 毫米機砲",
+        "cd": 0.2,
+        "ready": 200,
+        "reserve": 200,
+        "reload": 9,
+        "heat": 1.6,
+        "cool": 2.5,
+        "dmg": 150,
+        "splash": 2.4,
+        "range": 90,
+        "antiArmor": 6,
+        "air": 8,
+        "sound": "at",
+        "noise": 95
+      },
+      "coax": {
+        "name": "7.62 毫米同軸機槍",
+        "cd": 0.086,
+        "ready": 250,
+        "reserve": 1750,
+        "reload": 6,
+        "heat": 0.55,
+        "cool": 1.75,
+        "dmg": 58,
+        "splash": 0,
+        "range": 70,
+        "antiArmor": 0,
+        "air": 0.6,
+        "sound": "mg",
+        "noise": 70
+      },
+      "traverse": 1.1
+    },
+    "ztd05": {
+      "main": {
+        "name": "105 毫米砲",
+        "cd": 7.5,
+        "ready": 8,
+        "reserve": 37,
+        "reload": 22,
+        "heat": 6,
+        "cool": 0.5,
+        "dmg": 400,
+        "splash": 8,
+        "range": 120,
+        "antiArmor": 70,
+        "air": 34,
+        "sound": "at",
+        "noise": 150
+      },
+      "coax": {
+        "name": "7.62 毫米同軸機槍",
+        "cd": 0.086,
+        "ready": 250,
+        "reserve": 1750,
+        "reload": 6,
+        "heat": 0.55,
+        "cool": 1.75,
+        "dmg": 58,
+        "splash": 0,
+        "range": 70,
+        "antiArmor": 0,
+        "air": 0.6,
+        "sound": "mg",
+        "noise": 70
+      },
+      "traverse": 0.7
+    },
+    "mengshi": {
+      "main": {
+        "name": "12.7 毫米重機槍",
+        "cd": 0.11,
+        "ready": 60,
+        "reserve": 240,
+        "reload": 7,
+        "heat": 0.7,
+        "cool": 1.9,
+        "dmg": 110,
+        "splash": 0,
+        "range": 85,
+        "antiArmor": 1,
+        "air": 2.5,
+        "sound": "mg",
+        "noise": 85
+      },
+      "coax": null,
+      "traverse": 1.8
+    }
+  },
+  "cases": [
+    {
+      "kind": "zbl08",
+      "scenario": "burst",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 179,
+              "reserve": 200,
+              "heat": 21.100000000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 169,
+              "reserve": 200,
+              "heat": 30.85000000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 159,
+              "reserve": 200,
+              "heat": 40.60000000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 149,
+              "reserve": 200,
+              "heat": 50.350000000000044,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 139,
+              "reserve": 200,
+              "heat": 60.10000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 129,
+              "reserve": 200,
+              "heat": 69.85000000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 119,
+              "reserve": 200,
+              "heat": 79.59999999999997,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 109,
+              "reserve": 200,
+              "heat": 89.34999999999991,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 99,
+              "reserve": 200,
+              "heat": 99.09999999999985,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 98,
+              "reserve": 200,
+              "heat": 94.375,
+              "jammed": true,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 98,
+              "reserve": 200,
+              "heat": 88.4375,
+              "jammed": true,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbl08",
+      "scenario": "partial_reload",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 19.500000000000004,
+              "jammed": false,
+              "reload_remaining": 8.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 13.250000000000004,
+              "jammed": false,
+              "reload_remaining": 6.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 7.0000000000000036,
+              "jammed": false,
+              "reload_remaining": 3.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 0.7500000000000036,
+              "jammed": false,
+              "reload_remaining": 1.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 195,
+              "reserve": 180,
+              "heat": 5.1875,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 185,
+              "reserve": 180,
+              "heat": 14.937499999999996,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 175,
+              "reserve": 180,
+              "heat": 24.68750000000001,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 165,
+              "reserve": 180,
+              "heat": 34.43750000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 155,
+              "reserve": 180,
+              "heat": 44.187500000000036,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 145,
+              "reserve": 180,
+              "heat": 53.93750000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 135,
+              "reserve": 180,
+              "heat": 64.00000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbl08",
+      "scenario": "cool",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 179,
+              "reserve": 200,
+              "heat": 21.100000000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 169,
+              "reserve": 200,
+              "heat": 30.85000000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 159,
+              "reserve": 200,
+              "heat": 40.60000000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 149,
+              "reserve": 200,
+              "heat": 50.350000000000044,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 58.50000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 52.25000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 46.00000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 39.75000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 33.50000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 27.250000000000057,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 21.312500000000057,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbl08",
+      "scenario": "alternate",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 179,
+              "reserve": 200,
+              "heat": 21.100000000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 29.250000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 249,
+              "reserve": 1750,
+              "heat": 0.55,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 23.000000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 229,
+              "reserve": 1750,
+              "heat": 7.174999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 16.750000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 209,
+              "reserve": 1750,
+              "heat": 13.80000000000001,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 10.500000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 189,
+              "reserve": 1750,
+              "heat": 20.425000000000022,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 4.250000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 169,
+              "reserve": 1750,
+              "heat": 27.050000000000036,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 149,
+              "reserve": 1750,
+              "heat": 33.67500000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 129,
+              "reserve": 1750,
+              "heat": 40.299999999999976,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 109,
+              "reserve": 1750,
+              "heat": 46.92499999999992,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 89,
+              "reserve": 1750,
+              "heat": 53.54999999999986,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 70,
+              "reserve": 1750,
+              "heat": 59.84374999999981,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbd05",
+      "scenario": "burst",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 179,
+              "reserve": 200,
+              "heat": 21.100000000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 169,
+              "reserve": 200,
+              "heat": 30.85000000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 159,
+              "reserve": 200,
+              "heat": 40.60000000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 149,
+              "reserve": 200,
+              "heat": 50.350000000000044,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 139,
+              "reserve": 200,
+              "heat": 60.10000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 129,
+              "reserve": 200,
+              "heat": 69.85000000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 119,
+              "reserve": 200,
+              "heat": 79.59999999999997,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 109,
+              "reserve": 200,
+              "heat": 89.34999999999991,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 99,
+              "reserve": 200,
+              "heat": 99.09999999999985,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 98,
+              "reserve": 200,
+              "heat": 94.375,
+              "jammed": true,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 98,
+              "reserve": 200,
+              "heat": 88.4375,
+              "jammed": true,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbd05",
+      "scenario": "partial_reload",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 19.500000000000004,
+              "jammed": false,
+              "reload_remaining": 8.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 13.250000000000004,
+              "jammed": false,
+              "reload_remaining": 6.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 7.0000000000000036,
+              "jammed": false,
+              "reload_remaining": 3.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 380,
+              "heat": 0.7500000000000036,
+              "jammed": false,
+              "reload_remaining": 1.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 195,
+              "reserve": 180,
+              "heat": 5.1875,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 185,
+              "reserve": 180,
+              "heat": 14.937499999999996,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 175,
+              "reserve": 180,
+              "heat": 24.68750000000001,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 165,
+              "reserve": 180,
+              "heat": 34.43750000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 155,
+              "reserve": 180,
+              "heat": 44.187500000000036,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 145,
+              "reserve": 180,
+              "heat": 53.93750000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.07500000000000001
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 135,
+              "reserve": 180,
+              "heat": 64.00000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbd05",
+      "scenario": "cool",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 179,
+              "reserve": 200,
+              "heat": 21.100000000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 169,
+              "reserve": 200,
+              "heat": 30.85000000000002,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 159,
+              "reserve": 200,
+              "heat": 40.60000000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 149,
+              "reserve": 200,
+              "heat": 50.350000000000044,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 58.50000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 52.25000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 46.00000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 39.75000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 33.50000000000006,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 27.250000000000057,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 140,
+              "reserve": 200,
+              "heat": 21.312500000000057,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "zbd05",
+      "scenario": "alternate",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 199,
+              "reserve": 200,
+              "heat": 1.6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 189,
+              "reserve": 200,
+              "heat": 11.349999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 179,
+              "reserve": 200,
+              "heat": 21.100000000000005,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.2
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 29.250000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 249,
+              "reserve": 1750,
+              "heat": 0.55,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 23.000000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 229,
+              "reserve": 1750,
+              "heat": 7.174999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 16.750000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 209,
+              "reserve": 1750,
+              "heat": 13.80000000000001,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 10.500000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 189,
+              "reserve": 1750,
+              "heat": 20.425000000000022,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 4.250000000000018,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 169,
+              "reserve": 1750,
+              "heat": 27.050000000000036,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 149,
+              "reserve": 1750,
+              "heat": 33.67500000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 129,
+              "reserve": 1750,
+              "heat": 40.299999999999976,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 109,
+              "reserve": 1750,
+              "heat": 46.92499999999992,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 89,
+              "reserve": 1750,
+              "heat": 53.54999999999986,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 170,
+              "reserve": 200,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 70,
+              "reserve": 1750,
+              "heat": 59.84374999999981,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ztd05",
+      "scenario": "burst",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 4.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 3.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 8.25,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 7,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 5.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 5,
+              "reserve": 37,
+              "heat": 10.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 5,
+              "reserve": 37,
+              "heat": 9.25,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 5,
+              "reserve": 37,
+              "heat": 8,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 4,
+              "reserve": 37,
+              "heat": 12.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 4,
+              "reserve": 37,
+              "heat": 11.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 4,
+              "reserve": 37,
+              "heat": 10.25,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 4,
+              "reserve": 37,
+              "heat": 9.0625,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.125
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ztd05",
+      "scenario": "partial_reload",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 4.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 3.5,
+              "jammed": false,
+              "reload_remaining": 21.875,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 2.25,
+              "jammed": false,
+              "reload_remaining": 19.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 1,
+              "jammed": false,
+              "reload_remaining": 16.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 14.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 11.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 9.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 6.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 4.375,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 44,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 1.875,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 36,
+              "heat": 5.6875,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 6.875
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 36,
+              "heat": 4.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 4.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ztd05",
+      "scenario": "cool",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 4.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 3.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 8.25,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 7,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 5.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 4.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 3.25,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 2,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 0.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 6,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "ztd05",
+      "scenario": "alternate",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 6,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 7.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 4.75,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 3.5,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 2.5
+            },
+            {
+              "ready": 250,
+              "reserve": 1750,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 2.25,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 249,
+              "reserve": 1750,
+              "heat": 0.55,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 1,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 229,
+              "reserve": 1750,
+              "heat": 7.174999999999998,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 209,
+              "reserve": 1750,
+              "heat": 13.80000000000001,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 189,
+              "reserve": 1750,
+              "heat": 20.425000000000022,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 169,
+              "reserve": 1750,
+              "heat": 27.050000000000036,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 149,
+              "reserve": 1750,
+              "heat": 33.67500000000003,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 129,
+              "reserve": 1750,
+              "heat": 40.299999999999976,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 109,
+              "reserve": 1750,
+              "heat": 46.92499999999992,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 89,
+              "reserve": 1750,
+              "heat": 53.54999999999986,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 1,
+          "guns": [
+            {
+              "ready": 7,
+              "reserve": 37,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            },
+            {
+              "ready": 70,
+              "reserve": 1750,
+              "heat": 59.84374999999981,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.086
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "mengshi",
+      "scenario": "burst",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 59,
+              "reserve": 240,
+              "heat": 0.7,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 39,
+              "reserve": 240,
+              "heat": 9.95,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 19,
+              "reserve": 240,
+              "heat": 19.19999999999997,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 27.749999999999943,
+              "jammed": false,
+              "reload_remaining": 7,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 22.99999999999993,
+              "jammed": false,
+              "reload_remaining": 4.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 18.249999999999915,
+              "jammed": false,
+              "reload_remaining": 2,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 55,
+              "reserve": 180,
+              "heat": 16.999999999999897,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 35,
+              "reserve": 180,
+              "heat": 26.24999999999987,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 15,
+              "reserve": 180,
+              "heat": 35.49999999999989,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 180,
+              "heat": 41.24999999999999,
+              "jammed": false,
+              "reload_remaining": 6.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 180,
+              "heat": 36.50000000000005,
+              "jammed": false,
+              "reload_remaining": 4,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 180,
+              "heat": 31.7500000000001,
+              "jammed": false,
+              "reload_remaining": 1.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 52,
+              "reserve": 120,
+              "heat": 32.83750000000009,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "mengshi",
+      "scenario": "partial_reload",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 59,
+              "reserve": 240,
+              "heat": 0.7,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 39,
+              "reserve": 240,
+              "heat": 9.95,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 260,
+              "heat": 18.49999999999997,
+              "jammed": false,
+              "reload_remaining": 6.875,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 260,
+              "heat": 13.749999999999957,
+              "jammed": false,
+              "reload_remaining": 4.375,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 260,
+              "heat": 8.999999999999943,
+              "jammed": false,
+              "reload_remaining": 1.875,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 54,
+              "reserve": 200,
+              "heat": 8.449999999999944,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 34,
+              "reserve": 200,
+              "heat": 17.699999999999918,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 14,
+              "reserve": 200,
+              "heat": 26.94999999999989,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 200,
+              "heat": 31.999999999999897,
+              "jammed": false,
+              "reload_remaining": 6.375,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 200,
+              "heat": 27.249999999999883,
+              "jammed": false,
+              "reload_remaining": 3.875,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 200,
+              "heat": 22.49999999999987,
+              "jammed": false,
+              "reload_remaining": 1.375,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 50,
+              "reserve": 140,
+              "heat": 24.749999999999847,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 31,
+              "reserve": 140,
+              "heat": 33.53749999999984,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "mengshi",
+      "scenario": "cool",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 59,
+              "reserve": 240,
+              "heat": 0.7,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 39,
+              "reserve": 240,
+              "heat": 9.95,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 19,
+              "reserve": 240,
+              "heat": 19.19999999999997,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 27.749999999999943,
+              "jammed": false,
+              "reload_remaining": 7,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 22.99999999999993,
+              "jammed": false,
+              "reload_remaining": 4.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 18.249999999999915,
+              "jammed": false,
+              "reload_remaining": 2,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 16.299999999999898,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 11.549999999999883,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 6.799999999999875,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 2.049999999999878,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 56,
+              "reserve": 180,
+              "heat": 0,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "mengshi",
+      "scenario": "alternate",
+      "steps": [
+        {
+          "index": 0,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 59,
+              "reserve": 240,
+              "heat": 0.7,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 20,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 39,
+              "reserve": 240,
+              "heat": 9.95,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 40,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 19,
+              "reserve": 240,
+              "heat": 19.19999999999997,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 60,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 27.749999999999943,
+              "jammed": false,
+              "reload_remaining": 7,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 80,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 22.99999999999993,
+              "jammed": false,
+              "reload_remaining": 4.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 100,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 240,
+              "heat": 18.249999999999915,
+              "jammed": false,
+              "reload_remaining": 2,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 120,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 55,
+              "reserve": 180,
+              "heat": 16.999999999999897,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 140,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 35,
+              "reserve": 180,
+              "heat": 26.24999999999987,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 160,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 15,
+              "reserve": 180,
+              "heat": 35.49999999999989,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        },
+        {
+          "index": 180,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 180,
+              "heat": 41.24999999999999,
+              "jammed": false,
+              "reload_remaining": 6.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 200,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 180,
+              "heat": 36.50000000000005,
+              "jammed": false,
+              "reload_remaining": 4,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 220,
+          "fired": false,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 0,
+              "reserve": 180,
+              "heat": 31.7500000000001,
+              "jammed": false,
+              "reload_remaining": 1.5,
+              "cooldown_remaining": 0
+            }
+          ]
+        },
+        {
+          "index": 239,
+          "fired": true,
+          "selected": 0,
+          "guns": [
+            {
+              "ready": 52,
+              "reserve": 120,
+              "heat": 32.83750000000009,
+              "jammed": false,
+              "reload_remaining": 0,
+              "cooldown_remaining": 0.11
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

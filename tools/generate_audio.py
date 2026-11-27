@@ -489,6 +489,9 @@ def main() -> None:
     total = sum(entry["bytes"] for entry in manifest)
     (OUT/"manifest.json").write_text(json.dumps({"web_commit":"b9b0a2736642b37dd45925a4719dfef08b8f36b4",
                         "sample_rate":SR,"clips":manifest},ensure_ascii=False,indent=2)+"\n")
+    subprocess.run([sys.executable, str(Path(__file__).with_name("generate_armor_engine.py"))], check=True)
+    manifest = json.loads((OUT / "manifest.json").read_text())["clips"]
+    total = sum(entry["bytes"] for entry in manifest)
     if total > 5 * 1024 * 1024:
         raise RuntimeError(f"audio {total} bytes exceeds 5 MB")
     print(f"total_bytes {total} files {len(manifest)}")

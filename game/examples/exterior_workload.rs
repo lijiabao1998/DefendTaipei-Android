@@ -144,6 +144,7 @@ fn position_workload(world: &WorldData, name: &str, position: Vec2, kit: &Window
     let start = Instant::now();
     let mut lazy_detail = MeshTotals::default();
     let mut lazy_buildings = 0usize;
+    let mut temple_geometry = MeshTotals::default();
     for b in world
         .blds
         .iter()
@@ -152,6 +153,7 @@ fn position_workload(world: &WorldData, name: &str, position: Vec2, kit: &Window
         lazy_buildings += 1;
         lazy_detail.measure(&map::detail::near_detail(b, kit));
         lazy_detail.measure(&map::detail::near_roof(b));
+        temple_geometry.measure(&map::detail::temple_frontage(b));
     }
     let lazy_build_ms = start.elapsed().as_secs_f64() * 1000.0;
     let mut total = chunk_meshes.clone();
@@ -164,6 +166,7 @@ fn position_workload(world: &WorldData, name: &str, position: Vec2, kit: &Window
         "initial_lazy_detail_buildings_within70m": lazy_buildings,
         "chunk_meshes": chunk_meshes,
         "lazy_detail": lazy_detail,
+        "wave5_near_temple_added_geometry": temple_geometry,
         "planned_resident_total": total,
         "single_pass_cpu_generation_ms": {"chunks": chunk_build_ms, "lazy_detail": lazy_build_ms},
     })
@@ -342,6 +345,90 @@ fn street_features(world: &WorldData) -> Value {
     })
 }
 
+fn furnishing_features(world: &WorldData) -> Value {
+    use defend_taipei::map::{interiors, street::furnishings};
+    let plans = furnishings::plans(world);
+    let mut utility_meshes = MeshTotals::default();
+    let mut signal_meshes = MeshTotals::default();
+    let mut max_utility_vertices = 0;
+    let mut max_signal_vertices = 0;
+    for site in &plans.utilities {
+        let geometry = furnishings::utility_geometry(site);
+        max_utility_vertices = max_utility_vertices.max(geometry.vcount());
+        utility_meshes.measure(&geometry);
+    }
+    for site in &plans.signals {
+        let geometry = furnishings::signal_geometry(site);
+        max_signal_vertices = max_signal_vertices.max(geometry.vcount());
+        signal_meshes.measure(&geometry);
+    }
+    let carts: Vec<_> = world
+        .interiors
+        .iter()
+        .filter(|f| interiors::market_cart_fixture(&world.blds[f.building as usize], f.kind))
+        .collect();
+    let temples: Vec<_> = world
+        .blds
+        .iter()
+        .filter(|b| map::detail::temple_frontage(b).vcount() > 0)
+        .collect();
+    let mut temple_meshes = MeshTotals::default();
+    let mut max_temple_vertices = 0;
+    for building in &temples {
+        let geometry = map::detail::temple_frontage(building);
+        max_temple_vertices = max_temple_vertices.max(geometry.vcount());
+        temple_meshes.measure(&geometry);
+    }
+    let mut utility_targets: Vec<_> = plans
+        .utilities
+        .iter()
+        .filter(|site| site.cable_to.is_some())
+        .collect();
+    utility_targets.sort_by(|a, b| {
+        a.position
+            .distance_squared(world.spawn)
+            .total_cmp(&b.position.distance_squared(world.spawn))
+    });
+    let mut signal_targets: Vec<_> = plans.signals.iter().collect();
+    signal_targets.sort_by(|a, b| {
+        a.position
+            .distance_squared(world.spawn)
+            .total_cmp(&b.position.distance_squared(world.spawn))
+    });
+    json!({
+        "scope": "Render-only native adaptation of Web decay.ts/alley.ts/roads.ts. Utility equipment and signal heads reuse existing lamp anchors above head height; no extra ground obstacles. Market carts replace existing kitchen visual meshes within exactly their original collision/loot bounds. Native placement is deterministic and is not a claim of surveyed street furniture positions.",
+        "utility_anchors": plans.utilities.len(),
+        "transformer_housings": plans.utilities.iter().filter(|site| site.transformer).count(),
+        "admitted_same_curb_cable_spans": plans.utilities.iter().filter(|site| site.cable_to.is_some()).count(),
+        "signal_heads": plans.signals.len(),
+        "signal_axes": [plans.signals.iter().filter(|site| site.axis == 0).count(), plans.signals.iter().filter(|site| site.axis == 1).count()],
+        "shared_signal_materials": 6,
+        "additional_actual_light_entities": 0,
+        "utility_site_fingerprint": fingerprint(&plans.utilities),
+        "signal_site_fingerprint": fingerprint(&plans.signals),
+        "all_world_utility_assemblies_if_near_or_mid": utility_meshes,
+        "all_world_signal_assemblies_if_near_or_mid": signal_meshes,
+        "per_utility_max_vertices": max_utility_vertices,
+        "per_signal_max_vertices": max_signal_vertices,
+        "market_cart_fixtures": carts.len(),
+        "market_cart_body_vertices": interiors::market_cart_mesh().vcount(),
+        "named_temple_frontages": temples.len(),
+        "all_world_temple_ornaments_if_near": temple_meshes,
+        "per_temple_max_vertices": max_temple_vertices,
+        "temple_render_overrides": temples.iter().map(|b| json!({
+            "building":b.id,"original_name":b.name,"stored_sign_index":b.sign.map(|sign|sign.idx),
+            "plaque_style":"unbranded_dark_temple","displayed_shop_label":null,
+            "geometry_material_counts_preserved":true,
+        })).collect::<Vec<_>>(),
+        "qa_targets": {
+            "utility": utility_targets.iter().take(3).map(|site| json!({"prop_index":site.prop_index,"position":[site.position.x,site.position.y],"cable_to":site.cable_to.map(|p| [p.x,p.y])})).collect::<Vec<_>>(),
+            "signals": signal_targets.iter().take(3).map(|site| json!({"prop_index":site.prop_index,"position":[site.position.x,site.position.y],"direction":[site.direction.x,site.direction.y],"axis":site.axis})).collect::<Vec<_>>(),
+            "market_carts": carts.iter().take(3).map(|f| json!({"id":f.id,"building":f.building,"position":[f.pos.x,f.pos.y],"approach":[f.approach.x,f.approach.y]})).collect::<Vec<_>>(),
+            "temples": temples.iter().map(|b| json!({"building":b.id,"name":b.name,"door":b.door.map(|d| [d.p.x,d.p.y])})).collect::<Vec<_>>(),
+        },
+    })
+}
+
 fn main() {
     let started = Instant::now();
     let world = map::world();
@@ -354,12 +441,13 @@ fn main() {
     let _ = map::street::road_marking_plans(world);
     let street_plan_initialization_ms = street_plan_started.elapsed().as_secs_f64() * 1000.0;
     let mut result = json!({
-        "variant": "wave4_lighting",
-        "baseline_commit": "3418a19b2b1e2a4c0843ba59faead5a00af672a6",
+        "variant": "wave5_street_detail",
+        "baseline_commit": "70dd4659a62cb371cb626a94df31b6716118f7e6",
+        "wave3_baseline_commit": "3418a19b2b1e2a4c0843ba59faead5a00af672a6",
         "wave2_baseline_commit": "230c82d85b47ea47c9411721bf68f7a7f0528d76",
         "wave1_baseline_commit": "6d0bbd55964d802e2ddaae886baf9ca8dc17dcb0",
         "original_baseline_commit": "c17292889e884f8a13d4e14598a20b64dc490f81",
-        "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Wave 4 requires exact Wave 3 geometry and permits at most 1% more submitted material meshes for shared emission separation. These are not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, light components, materials/textures, actors, dynamic doors, interior runtime meshes, rain and UI. See lighting_workload and actual native QA for separate light-selection and runtime evidence. CPU time is one development-build pass, not a benchmark.",
+        "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Wave 5 preserves the complete world identity and allows at most 3% additional geometry/payload and 2% additional submitted material meshes for bounded street equipment/temple detail versus Wave 4. These are not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, light components, materials/textures, actors, dynamic doors, interior runtime meshes, driveable vehicles, bike docks, enemy armor, rain and UI. Existing static parked props remain included. See lighting_workload and vehicle_workload plus actual native QA for separate light-selection, dynamic-vehicle and runtime evidence. CPU time is one development-build pass, not a benchmark.",
         "world_identity": world_identity(world),
         "world_load_ms": world_load_ms,
         "street_plan_initialization_ms": street_plan_initialization_ms,
@@ -367,14 +455,18 @@ fn main() {
         "features": features(world),
         "commercial_features": commercial_features(world),
         "street_features": street_features(world),
+        "furnishing_features": furnishing_features(world),
         "positions": [
             position_workload(world, "spawn", world.spawn, &kit),
             position_workload(world, "existing_04a_streetscape", Vec2::new(161.94, -236.84), &kit),
         ],
     });
     let baseline: Value =
+        serde_json::from_str(include_str!("../../docs/street-detail-wave4-baseline.json"))
+            .expect("checked-in digest-verified CI81 wave-four audit JSON");
+    let wave3: Value =
         serde_json::from_str(include_str!("../../docs/lighting-wave3-baseline.json"))
-            .expect("checked-in digest-verified CI79 wave-three audit JSON");
+            .expect("checked-in CI79 wave-three audit JSON");
     let wave2: Value = serde_json::from_str(include_str!("../../docs/streets-wave2-baseline.json"))
         .expect("checked-in CI77 wave-two audit JSON");
     let wave1: Value =
@@ -403,9 +495,9 @@ fn main() {
     let streets_match = street_counts == baseline_street_counts;
     let mut comparisons = Vec::new();
     let mut original_comparisons = Vec::new();
-    let mut geometry_exact = true;
+    let mut geometry_budget_passed = true;
     let mut material_budget_passed = true;
-    for reference in [&baseline, &wave2, &wave1, &original] {
+    for reference in [&baseline, &wave3, &wave2, &wave1, &original] {
         assert_eq!(
             result["positions"].as_array().unwrap().len(),
             reference["positions"].as_array().unwrap().len(),
@@ -449,30 +541,39 @@ fn main() {
             current["initial_lazy_detail_buildings_within70m"],
             previous["initial_lazy_detail_buildings_within70m"]
         );
-        assert_eq!(current["lazy_detail"], previous["lazy_detail"]);
+        for metric in [
+            "vertices",
+            "indices",
+            "triangles",
+            "attribute_index_payload_bytes",
+        ] {
+            assert_eq!(
+                current["lazy_detail"][metric].as_u64().unwrap(),
+                previous["lazy_detail"][metric].as_u64().unwrap()
+                    + current["wave5_near_temple_added_geometry"][metric]
+                        .as_u64()
+                        .unwrap(),
+                "only the measured named-temple detail may change the inherited lazy geometry"
+            );
+        }
         let mut changes = serde_json::Map::new();
         let mut original_changes = serde_json::Map::new();
-        // Wave 4 changes light presentation/material ownership, not geometry.
-        // Keep all prior waves and the original comparison visible; the new
-        // baseline must not hide the cumulative cost of the completed streets.
+        // Keep every previous wave visible so the incremental equipment budget
+        // cannot hide the cumulative architecture/commercial/street cost.
         for (metric, maximum_baseline_percent) in [
-            ("vertices", 100),
-            ("indices", 100),
-            ("triangles", 100),
-            ("material_meshes", 101),
-            ("attribute_index_payload_bytes", 100),
+            ("vertices", 103),
+            ("indices", 103),
+            ("triangles", 103),
+            ("material_meshes", 102),
+            ("attribute_index_payload_bytes", 103),
         ] {
             let before = previous["planned_resident_total"][metric].as_u64().unwrap();
             let after = current["planned_resident_total"][metric].as_u64().unwrap();
             let limit = before * maximum_baseline_percent / 100;
-            let exact = metric != "material_meshes";
-            let passes = if exact {
-                after == before
-            } else {
-                after <= limit
-            };
-            if exact {
-                geometry_exact &= passes;
+            let geometry = metric != "material_meshes";
+            let passes = after >= before && after <= limit;
+            if geometry {
+                geometry_budget_passed &= passes;
             } else {
                 material_budget_passed &= passes;
             }
@@ -484,7 +585,7 @@ fn main() {
                     "budget_limit": limit,
                     "budget_passed": passes,
                     "maximum_baseline_percent": maximum_baseline_percent,
-                    "required_relation": if exact { "equal" } else { "at_most" },
+                    "required_relation": "at_least_baseline_and_at_most_limit",
                     "change_percent": (after as f64 / before as f64 - 1.0) * 100.0,
                 }),
             );
@@ -497,7 +598,8 @@ fn main() {
                     "original_baseline": original_before,
                     "wave1": after_architecture["planned_resident_total"][metric],
                     "wave2": after_commerce["planned_resident_total"][metric],
-                    "wave3": before,
+                    "wave3": wave3["positions"][index]["planned_resident_total"][metric],
+                    "wave4": before,
                     "current": after,
                     "cumulative_change_percent": (after as f64 / original_before as f64 - 1.0) * 100.0,
                 }),
@@ -507,19 +609,19 @@ fn main() {
         original_comparisons.push(json!({"name": current["name"], "metrics": original_changes}));
     }
     result["baseline_comparison"] = json!({
-        "reference": "Verified wave-three CI79 resident geometry at merged main 3418a19; original archive/member digests and source/tested/main provenance in lighting-wave3-baseline.json",
+        "reference": "Verified wave-four CI81 resident geometry at merged main 70dd465; original archive/member digests and source/tested/main provenance in street-detail-wave4-baseline.json",
         "world_identity_matches": identity_matches,
         "wave1_feature_and_facade_vertex_counts_match": architecture_matches,
         "wave2_commercial_feature_and_vertex_counts_match": commerce_matches,
         "wave3_street_inventory_and_assembly_counts_match": streets_match,
         "street_comparison_excludes_only_explanatory_scope_text": true,
-        "geometry_counts_exact": geometry_exact,
+        "geometry_budget_passed_without_materials": geometry_budget_passed,
         "material_budget_passed": material_budget_passed,
-        "geometry_budget_passed": geometry_exact && material_budget_passed,
+        "geometry_budget_passed": geometry_budget_passed && material_budget_passed,
         "positions": comparisons,
     });
     result["original_baseline_comparison"] = json!({
-        "reference": "Pre-architecture main c172928; cumulative costs retain Wave 1, Wave 2 and Wave 3, separately from the Wave 4 material-only allowance",
+        "reference": "Pre-architecture main c172928; cumulative costs retain Waves 1, 2, 3 and 4 separately from the Wave 5 bounded equipment allowance",
         "world_identity_matches": original_identity_matches,
         "positions": original_comparisons,
     });
@@ -531,23 +633,23 @@ fn main() {
         );
         assert!(
             architecture_matches,
-            "lighting work changed the verified wave-one feature or facade vertex counts"
+            "street detail work changed the verified wave-one feature or facade vertex counts"
         );
         assert!(
             commerce_matches,
-            "lighting work changed the verified wave-two commercial feature or vertex counts"
+            "street detail work changed the verified wave-two commercial feature or vertex counts"
         );
         assert!(
             streets_match,
-            "lighting work changed the verified wave-three street geometry inventory"
+            "street detail work changed the verified wave-three street geometry inventory"
         );
         assert!(
-            geometry_exact,
-            "lighting work changed resident vertex/index geometry"
+            geometry_budget_passed,
+            "street detail work exceeded the 3% vertex/index/payload allowance"
         );
         assert!(
             material_budget_passed,
-            "lighting workload exceeded the 1% shared-material-batch allowance; inspect the JSON comparison"
+            "street detail workload exceeded the 2% shared-material-batch allowance; inspect the JSON comparison"
         );
     }
 }

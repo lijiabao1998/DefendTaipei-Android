@@ -62,6 +62,14 @@ pub fn run() {
             settings.effects = 0.0;
             settings.ambience = 0.7;
         }
+        "armor_engine"
+        | "armor_engine_live_muted"
+        | "armor_engine_live_paused"
+        | "armor_engine_live_background" => {
+            settings.effects = 0.0;
+            settings.ambience = 0.7;
+        }
+        "armor_engine_zero" => settings.effects = 0.0,
         "showcase" | "paused" | "title_preview" => {}
         _ => panic!("Unknown audio QA scenario: {name}"),
     }
@@ -76,6 +84,7 @@ pub fn run() {
     } else {
         0.0
     };
+    let engine_distance = name.starts_with("armor_engine").then_some(12.0);
     let mut app = App::new();
     app.add_plugins((
         MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_millis(16))),
@@ -94,6 +103,7 @@ pub fn run() {
     .insert_resource(settings)
     .insert_resource(audio::Ambience { rain, ..default() })
     .insert_resource(audio::AudioScheduleControl { automatic: false })
+    .insert_resource(audio::engine::ArmorEngineFixture(engine_distance))
     .insert_resource(Scene {
         name,
         output,
@@ -288,9 +298,13 @@ fn drive_scene(world: &mut World) {
     if elapsed >= 1.5 && !world.resource::<Scene>().transitioned {
         match name.as_str() {
             "resume" => world.resource_mut::<crate::ui::PauseOpen>().0 = false,
-            "live_muted" => world.resource_mut::<AudioSettings>().muted = true,
-            "live_paused" => world.resource_mut::<crate::ui::PauseOpen>().0 = true,
-            "live_background" => {
+            "live_muted" | "armor_engine_live_muted" => {
+                world.resource_mut::<AudioSettings>().muted = true
+            }
+            "live_paused" | "armor_engine_live_paused" => {
+                world.resource_mut::<crate::ui::PauseOpen>().0 = true
+            }
+            "live_background" | "armor_engine_live_background" => {
                 world.write_message(WindowFocused {
                     window: Entity::PLACEHOLDER,
                     focused: false,
@@ -300,7 +314,13 @@ fn drive_scene(world: &mut World) {
         }
         if matches!(
             name.as_str(),
-            "resume" | "live_muted" | "live_paused" | "live_background"
+            "resume"
+                | "live_muted"
+                | "live_paused"
+                | "live_background"
+                | "armor_engine_live_muted"
+                | "armor_engine_live_paused"
+                | "armor_engine_live_background"
         ) {
             world.resource_mut::<Scene>().transition_unix_seconds = Some(unix_seconds());
         }
@@ -314,20 +334,40 @@ fn drive_scene(world: &mut World) {
         4.5
     };
     if elapsed >= duration {
-        let error =
-            if name == "showcase" && world.resource::<AudioDiagnostics>().recorded_started < 6 {
-                Some("Recorded gun/boom dispatches were not exercised".into())
-            } else {
-                None
-            };
+        let error = if name == "showcase"
+            && world.resource::<AudioDiagnostics>().recorded_started < 6
+        {
+            Some("Recorded gun/boom dispatches were not exercised".into())
+        } else if name.starts_with("armor_engine")
+            && world
+                .resource::<AudioDiagnostics>()
+                .started
+                .get("armor_engine")
+                .copied()
+                .unwrap_or(0)
+                != u64::from(name != "armor_engine_zero")
+        {
+            Some("Armor engine fixture did not keep exactly one bounded voice (or zero at zero ambience)".into())
+        } else {
+            None
+        };
         finish(world, error);
         return;
     }
     if elapsed >= beat as f32 * interval {
         let event = match name.as_str() {
             "showcase" => events.get(beat).copied(),
-            "ambience" | "ambience_zero" | "resume" | "live_muted" | "live_paused"
-            | "live_background" => None,
+            "ambience"
+            | "ambience_zero"
+            | "resume"
+            | "live_muted"
+            | "live_paused"
+            | "live_background"
+            | "armor_engine"
+            | "armor_engine_zero"
+            | "armor_engine_live_muted"
+            | "armor_engine_live_paused"
+            | "armor_engine_live_background" => None,
             "title_preview" => Some(SfxEvent::Preview {
                 category: AudioCategory::Effects,
             }),

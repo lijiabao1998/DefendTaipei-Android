@@ -858,6 +858,108 @@ fn body_mesh(kind: FixtureKind) -> MeshBuf {
     m.jitter()
 }
 
+/// A render treatment of the existing, collision-backed kitchen fixture. A
+/// signed food shop may have native legacy `home` loot classification; this
+/// never changes that classification, the fixture ID, stock or interaction.
+pub fn market_cart_fixture(b: &Bld, kind: FixtureKind) -> bool {
+    kind == FixtureKind::Kitchen
+        && b.sign
+            .is_some_and(|sign| matches!(sign.idx, 0 | 2 | 6 | 14))
+}
+
+pub fn market_cart_mesh() -> MeshBuf {
+    let mut m = MeshBuf::default();
+    let (w, d) = (1.7, 0.65);
+    // Stainless pushcart silhouette, inside the old kitchen's 1.7 × 1.0 × 0.65
+    // collision box. Shelved crates and a recessed refuse bucket add no solids.
+    for x in [-0.66, 0.66] {
+        for z in [-0.215, 0.215] {
+            m.add(
+                &geom::cylinder(0.105, 0.105, 0.055, 8),
+                geom::at(x, 0.115, z) * Mat4::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                hex(0x262d2a),
+            );
+            box_part(
+                &mut m,
+                Vec3::new(0.045, 0.61, 0.045),
+                Vec3::new(x, 0.475, z),
+                0x949d96,
+            );
+        }
+    }
+    box_part(
+        &mut m,
+        Vec3::new(w - 0.05, 0.05, d - 0.03),
+        Vec3::new(0.0, 0.78, 0.0),
+        0xb6beb5,
+    );
+    box_part(
+        &mut m,
+        Vec3::new(w - 0.05, 0.045, d - 0.06),
+        Vec3::new(0.0, 0.24, 0.0),
+        0x657b6b,
+    );
+    for z in [-0.29, 0.29] {
+        box_part(
+            &mut m,
+            Vec3::new(w - 0.09, 0.11, 0.025),
+            Vec3::new(0.0, 0.68, z),
+            0x607c70,
+        );
+        box_part(
+            &mut m,
+            Vec3::new(w - 0.03, 0.035, 0.04),
+            Vec3::new(0.0, 0.817, z),
+            0xc4c8b6,
+        );
+    }
+    // Separate rectangular crate shells, deliberately empty. Actual food stocks
+    // continue to come exclusively from the saved container ledger below.
+    for (x, paint) in [(-0.43, 0x8d653f), (0.07, 0x496c60)] {
+        for y in [0.39, 0.55] {
+            box_part(
+                &mut m,
+                Vec3::new(0.42, 0.025, 0.43),
+                Vec3::new(x, y - 0.065, 0.0),
+                paint,
+            );
+            for z in [-0.205, 0.205] {
+                for dy in [-0.025, 0.035] {
+                    box_part(
+                        &mut m,
+                        Vec3::new(0.42, 0.028, 0.025),
+                        Vec3::new(x, y + dy, z),
+                        paint,
+                    );
+                }
+            }
+            for dx in [-0.195, 0.195] {
+                box_part(
+                    &mut m,
+                    Vec3::new(0.025, 0.13, 0.43),
+                    Vec3::new(x + dx, y, 0.0),
+                    paint,
+                );
+            }
+        }
+    }
+    cylinder_part(&mut m, 0.115, 0.33, Vec3::new(0.57, 0.43, 0.0), 0x37664f);
+    cylinder_part(&mut m, 0.12, 0.03, Vec3::new(0.57, 0.61, 0.0), 0x263e35);
+    box_part(
+        &mut m,
+        Vec3::new(0.36, 0.11, 0.2),
+        Vec3::new(0.49, 0.87, -0.12),
+        0xb4b7a9,
+    );
+    box_part(
+        &mut m,
+        Vec3::new(0.28, 0.035, 0.16),
+        Vec3::new(0.49, 0.941, -0.12),
+        0x424c45,
+    );
+    m.jitter()
+}
+
 #[derive(Resource)]
 struct InteriorArt {
     material: Handle<StandardMaterial>,
@@ -867,8 +969,16 @@ struct InteriorArt {
 #[derive(Component)]
 pub(crate) struct InteriorView {
     pub(crate) building: u32,
-    stock: Entity,
+    pub(crate) stock: Entity,
     fingerprint: u64,
+}
+
+/// Retained at the actual upload, since GPU-only meshes release CPU arrays.
+#[derive(Component, Clone, Copy)]
+pub(crate) struct InteriorGeometry {
+    pub(crate) vertices: usize,
+    pub(crate) min: Vec3,
+    pub(crate) max: Vec3,
 }
 
 #[derive(Resource, Default)]
@@ -985,32 +1095,56 @@ fn display_units(stock: &Stash) -> Vec<&str> {
 fn stock_mesh(fixtures: &[&Fixture], stocks: &[Stash]) -> MeshBuf {
     let mut m = MeshBuf::default();
     for (f, stock) in fixtures.iter().zip(stocks) {
+        let cart = super::world()
+            .blds
+            .get(f.building as usize)
+            .is_some_and(|b| market_cart_fixture(b, f.kind));
         if !matches!(
             f.kind,
             FixtureKind::Shelf | FixtureKind::Fridge | FixtureKind::Medicine
-        ) {
+        ) && !cart
+        {
             continue;
         }
         let size = f.kind.size();
         let transform = f.transform();
         for (i, id) in display_units(stock).into_iter().enumerate() {
+            if cart && i >= 5 {
+                break;
+            }
             let row = i / 5;
             let col = i % 5;
-            let p = Vec3::new(
-                (col as f32 - 2.0) * (size.x - 0.25) / 5.0,
-                0.163 + row as f32 * 0.43,
-                size.z * 0.24,
+            let p = if cart {
+                Vec3::new(-0.61 + i as f32 * 0.21, 0.81, 0.08)
+            } else {
+                Vec3::new(
+                    (col as f32 - 2.0) * (size.x - 0.25) / 5.0,
+                    0.163 + row as f32 * 0.43,
+                    size.z * 0.24,
+                )
+            };
+            let scale = if cart { Vec3::splat(0.7) } else { Vec3::ONE };
+            m.add_white(
+                &product_mesh(id),
+                transform * Mat4::from_translation(p) * Mat4::from_scale(scale),
             );
-            m.add_white(&product_mesh(id), transform * Mat4::from_translation(p));
         }
     }
     m
 }
 
-fn room_body(b: &Bld, fixtures: &[&Fixture], art: &InteriorArt) -> MeshBuf {
+pub(crate) fn stock_visual_geometry(fixtures: &[&Fixture], stocks: &[Stash]) -> MeshBuf {
+    stock_mesh(fixtures, stocks)
+}
+
+fn room_body(b: &Bld, fixtures: &[&Fixture], art: &HashMap<FixtureKind, MeshBuf>) -> MeshBuf {
     let mut mesh = MeshBuf::default();
     for f in fixtures {
-        mesh.add_white(&art.fixtures[&f.kind], f.transform());
+        if market_cart_fixture(b, f.kind) {
+            mesh.add_white(&market_cart_mesh(), f.transform());
+        } else {
+            mesh.add_white(&art[&f.kind], f.transform());
+        }
     }
     if b.kind == "home"
         && let Some(door) = b.door
@@ -1038,6 +1172,16 @@ fn room_body(b: &Bld, fixtures: &[&Fixture], art: &InteriorArt) -> MeshBuf {
     mesh
 }
 
+/// Regenerate the exact production room body for geometry audits; this is not
+/// an alternate display mesh and does not insert entities or change fixtures.
+pub(crate) fn room_visual_geometry(b: &Bld, fixtures: &[&Fixture]) -> MeshBuf {
+    let art = fixtures
+        .iter()
+        .map(|fixture| (fixture.kind, body_mesh(fixture.kind)))
+        .collect();
+    room_body(b, fixtures, &art)
+}
+
 fn stock_fingerprint(stocks: &[Stash]) -> u64 {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     for stock in stocks {
@@ -1057,12 +1201,20 @@ fn replace_stock_mesh(
     if stock.is_empty() {
         commands
             .entity(entity)
-            .remove::<Mesh3d>()
+            .remove::<(Mesh3d, InteriorGeometry)>()
             .insert(Visibility::Hidden);
     } else {
-        commands
-            .entity(entity)
-            .insert((Mesh3d(meshes.add(stock.into_mesh())), Visibility::Inherited));
+        let (min, max) = stock.aabb();
+        let geometry = InteriorGeometry {
+            vertices: stock.vcount(),
+            min,
+            max,
+        };
+        commands.entity(entity).insert((
+            Mesh3d(meshes.add(stock.into_mesh())),
+            geometry,
+            Visibility::Inherited,
+        ));
     }
 }
 
@@ -1171,6 +1323,13 @@ fn stream(
             stock,
             stock_mesh(&fixtures, &stocks),
         );
+        let body = room_body(building, &fixtures, &art.fixtures);
+        let (min, max) = body.aabb();
+        let geometry = InteriorGeometry {
+            vertices: body.vcount(),
+            min,
+            max,
+        };
         commands
             .spawn((
                 InteriorView {
@@ -1178,7 +1337,8 @@ fn stream(
                     stock,
                     fingerprint: stock_fingerprint(&stocks),
                 },
-                Mesh3d(meshes.add(room_body(building, &fixtures, &art).into_mesh())),
+                geometry,
+                Mesh3d(meshes.add(body.into_mesh())),
                 MeshMaterial3d(art.material.clone()),
                 Transform::default(),
                 Visibility::default(),
@@ -1361,6 +1521,37 @@ mod tests {
                 s
             }])
         );
+    }
+
+    #[test]
+    fn market_cart_treatment_preserves_the_existing_fixture_and_live_stock() {
+        let world = super::super::world();
+        let fixture = world
+            .interiors
+            .iter()
+            .find(|f| market_cart_fixture(&world.blds[f.building as usize], f.kind))
+            .expect("at least one original signed food frontage has a kitchen fixture");
+        let mesh = market_cart_mesh();
+        assert!(mesh.vcount() < 1_500);
+        let size = fixture.kind.size();
+        for vertex in &mesh.pos {
+            assert!(vertex[0].abs() <= size.x * 0.5 + 0.001);
+            assert!(vertex[2].abs() <= size.z * 0.5 + 0.001);
+            assert!((0.0..=size.y).contains(&vertex[1]));
+        }
+        let mut actual = Stash::default();
+        actual.add("water", 2);
+        actual.add("can", 3);
+        let displayed = stock_mesh(&[fixture], &[actual]);
+        assert!(!displayed.is_empty());
+        let inverse = fixture.transform().inverse();
+        for vertex in &displayed.pos {
+            let local = inverse.transform_point3(Vec3::from(*vertex));
+            assert!(local.x.abs() <= size.x * 0.5);
+            assert!(local.z.abs() <= size.z * 0.5);
+            assert!((0.80..=size.y).contains(&local.y));
+        }
+        assert!(stock_mesh(&[fixture], &[Stash::default()]).is_empty());
     }
     #[test]
     fn stock_renderer_removes_empty_meshes_and_restores_visible_products() {

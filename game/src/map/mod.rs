@@ -176,6 +176,10 @@ pub(crate) struct MapMeshGeometry {
     pub vertices: usize,
     pub min: Vec3,
     pub max: Vec3,
+    /// Exact constant texture coordinates retained for the desktop temple
+    /// plaque audit; ordinary lettered signs have varying coordinates.
+    #[cfg(not(target_os = "android"))]
+    pub flat_uv: Option<Vec2>,
 }
 
 /// The shared material slot used for this uploaded city batch. Unlike a handle,
@@ -197,6 +201,7 @@ fn material(m: &MapMaterials, k: Mat) -> Handle<StandardMaterial> {
         Mat::Lamp => m.lamp.clone(),
         Mat::WindowGlow => m.window_glow.clone(),
         Mat::ArcadeGlow => m.arcade_glow.clone(),
+        Mat::Signal(index) => m.signals[index as usize].clone(),
         Mat::VCol => m.vcol.clone(),
         Mat::Metal => m.metal.clone(),
         Mat::Glass => m.glass.clone(),
@@ -228,6 +233,13 @@ fn spawn_parts<B: Bundle + Clone>(
             vertices: m.vcount(),
             min,
             max,
+            #[cfg(not(target_os = "android"))]
+            flat_uv: m
+                .uv
+                .first()
+                .filter(|first| m.uv.iter().all(|uv| uv == *first))
+                .copied()
+                .map(Vec2::from_array),
         };
         c.spawn((
             Mesh3d(meshes.add(m.into_mesh())),
