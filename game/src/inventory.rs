@@ -104,9 +104,11 @@ impl ItemDef {
 
     pub fn usable(self) -> bool {
         self.kind.is_supply()
-            || (self.kind.is_weapon() && self.anti_armor == 0.0)
+            || (self.kind.is_weapon()
+                && (self.anti_armor == 0.0 || matches!(self.id, "at4" | "kestrel" | "jav")))
             || self.mag > 0
             || self.id == "cstove"
+            || matches!(self.id, "gas" | "patch" | "carbat" | "hose")
     }
 }
 
@@ -264,7 +266,8 @@ impl Inventory {
         self.stacks()
             .iter()
             .map(|(key, count)| item(key).map_or(0.0, |d| d.weight * *count as f32))
-            .sum()
+            // f32 Sum starts at -0.0. An empty bag must display positive zero.
+            .fold(0.0, |total, weight| total + weight)
     }
 
     pub fn is_valid(&self) -> bool {
@@ -341,7 +344,7 @@ impl Inventory {
             return Err(InventoryError::MissingItem);
         }
         if d.kind.is_weapon() {
-            if d.anti_armor != 0.0 {
+            if d.anti_armor != 0.0 && !matches!(d.id, "at4" | "kestrel" | "jav") {
                 return Err(InventoryError::Unsupported);
             }
             if self.equipped == key {
@@ -468,6 +471,46 @@ impl InventoryError {
 mod tests {
     use super::*;
     use crate::roles::ROLES;
+
+    #[test]
+    fn empty_bag_and_removing_last_item_never_render_negative_zero() {
+        let mut bag = Inventory::default();
+        assert_eq!(bag.weight().to_bits(), 0.0_f32.to_bits());
+        assert_eq!(format!("{:.2} kg", bag.weight()), "0.00 kg");
+        bag.add("rice", 1);
+        assert!(bag.weight() > 0.0);
+        assert!(bag.take("rice", 1));
+        assert_eq!(bag.weight().to_bits(), 0.0_f32.to_bits());
+        assert_eq!(format!("{:.1} kg", bag.weight()), "0.0 kg");
+    }
+
+    #[test]
+    fn implemented_anti_armor_weapons_equip_without_consuming_a_round() {
+        let mut bag = Inventory::default();
+        let mut vitals = Vitals {
+            hp: 100.0,
+            hunger: 100.0,
+            thirst: 100.0,
+            fatigue: 0.0,
+            bleeding: false,
+        };
+        for id in ["at4", "kestrel", "jav"] {
+            bag.add(id, 1);
+            assert!(item(id).unwrap().usable());
+            assert_eq!(
+                bag.use_item(id, &mut vitals, 1.0, 1.0),
+                Ok(UseResult::Equipped(true))
+            );
+            assert_eq!(bag.equipped, id);
+            assert_eq!(bag.count(id), 1);
+        }
+        for unsupported in ITEMS
+            .iter()
+            .filter(|item| item.anti_armor > 0.0 && !matches!(item.id, "at4" | "kestrel" | "jav"))
+        {
+            assert!(!unsupported.usable());
+        }
+    }
 
     #[test]
     fn soldier_drops_match_original_typescript_and_rng_consumption() {

@@ -18,6 +18,7 @@ use crate::city::{Lcg, Obstacles};
 use crate::inventory::{Inventory, ItemKind, item};
 use crate::player::{Player, resolve_collisions, spawn_point};
 
+pub mod armor;
 pub mod input;
 pub mod sfx;
 pub mod soldier;
@@ -47,7 +48,7 @@ pub enum EnemyKind {
     NightPatrol,
     /// 解放軍 outpost garrison: holds its post (`Sol.post`), does not answer the radio.
     Garrison,
-    /// Armor (ZBL-08 / ZBD-05 / 猛士 / ZTD-05): not ported yet — `SpawnEnemy` ignores these.
+    /// Armour is handled by the native ground-armour system.
     Zbl08,
     Zbd05,
     Mengshi,
@@ -266,6 +267,9 @@ pub(super) struct PlayerContext<'w> {
     campaign: Option<Res<'w, crate::game_flow::Campaign>>,
     language: Option<Res<'w, crate::i18n::Language>>,
     sound: MessageWriter<'w, crate::audio::SfxEvent>,
+    vehicles: Option<Res<'w, crate::vehicles::VehicleFleet>>,
+    armor: Option<ResMut<'w, armor::ArmorFleet>>,
+    obstacles: Option<Res<'w, crate::map::Obstacles>>,
 }
 
 impl PlayerContext<'_> {
@@ -292,6 +296,7 @@ struct AttackDef {
     ammo: Option<&'static str>,
     family: Option<GunFam>,
     cap: u32,
+    anti_armor: f32,
 }
 
 fn attack_def(
@@ -300,9 +305,7 @@ fn attack_def(
     lang: crate::i18n::Language,
 ) -> AttackDef {
     if let Some(bag) = inventory {
-        if let Some(d) = item(&bag.equipped)
-            .filter(|d| bag.count(d.id) > 0 && d.kind.is_weapon() && d.anti_armor == 0.0)
-        {
+        if let Some(d) = item(&bag.equipped).filter(|d| bag.count(d.id) > 0 && d.kind.is_weapon()) {
             return AttackDef {
                 id: d.id,
                 name: d.name(lang),
@@ -313,6 +316,7 @@ fn attack_def(
                 ammo: d.ammo,
                 family: (d.kind == ItemKind::Gun).then(|| gun_fam(d.id)),
                 cap: d.cap,
+                anti_armor: d.anti_armor,
             };
         }
         return AttackDef {
@@ -325,6 +329,7 @@ fn attack_def(
             ammo: None,
             family: None,
             cap: 0,
+            anti_armor: 0.0,
         };
     }
     AttackDef {
@@ -337,6 +342,7 @@ fn attack_def(
         ammo: None,
         family: Some(fallback.fam),
         cap: fallback.cap,
+        anti_armor: 0.0,
     }
 }
 
@@ -520,8 +526,7 @@ fn handle_spawn_requests(
             continue;
         }
         if !req.kind.is_soldier() {
-            // TODO(lijiabao2): armor (main.ts `armor`) is a later combat PR.
-            warn_once!("SpawnEnemy: armor {:?} not ported yet; ignored", req.kind);
+            // ArmorPlugin reads the same request stream independently.
             continue;
         }
         let id = timers.next_id;
@@ -1004,7 +1009,13 @@ fn player_fire(
             cap: attack.cap,
         };
     }
-    if state.over || context.pause.as_ref().is_some_and(|pause| pause.0) {
+    if state.over
+        || context.pause.as_ref().is_some_and(|pause| pause.0)
+        || context
+            .vehicles
+            .as_ref()
+            .is_some_and(|v| v.current.is_some())
+    {
         return;
     }
     let dt = time.delta_secs();
@@ -1085,10 +1096,32 @@ fn player_fire(
     let aim_pt = if input.fire {
         match input.aim.try_normalize() {
             Some(a) => Some(p0 + a * 5.0),
-            None => Some(foe(false).unwrap_or_else(|| {
-                let f = ptf.forward();
-                p0 + Vec2::new(f.x, f.z) * 5.0
-            })),
+            None => Some(
+                if attack.anti_armor > 0.0 {
+                    context
+                        .armor
+                        .as_ref()
+                        .and_then(|fleet| {
+                            fleet
+                                .units
+                                .iter()
+                                .filter(|a| a.active() && a.position().distance(p0) < attack.range)
+                                .min_by(|a, b| {
+                                    a.position()
+                                        .distance_squared(p0)
+                                        .total_cmp(&b.position().distance_squared(p0))
+                                })
+                                .map(|a| a.position())
+                        })
+                        .or_else(|| foe(false))
+                } else {
+                    foe(false)
+                }
+                .unwrap_or_else(|| {
+                    let f = ptf.forward();
+                    p0 + Vec2::new(f.x, f.z) * 5.0
+                }),
+            ),
         }
     } else if auto.0 {
         foe(true)
@@ -1120,6 +1153,93 @@ fn player_fire(
                 audible: false,
                 text: crate::i18n::tr(lang, "沒有子彈了", "Out of ammunition"),
             });
+            return;
+        }
+        if attack.anti_armor > 0.0 {
+            let mut end = p0 + dir * attack.range;
+            let target = context.armor.as_ref().and_then(|fleet| {
+                fleet
+                    .units
+                    .iter()
+                    .find(|a| {
+                        let to = a.position() - p0;
+                        let along = to.dot(dir);
+                        a.active()
+                            && along > 0.0
+                            && along < attack.range
+                            && (to - dir * along).length() < 2.6
+                            && (attack.id == "jav"
+                                || context.obstacles.as_deref().map_or_else(
+                                    || w.shot_ray(p0, a.position(), 1.6, 1.6, 0.0) >= 1.0,
+                                    |obstacles| {
+                                        obstacles
+                                            .segment_hit_except(
+                                                p0,
+                                                a.position(),
+                                                1.6,
+                                                1.6,
+                                                Some(0x1_0000_0000 + u64::from(a.id)),
+                                            )
+                                            .is_none()
+                                    },
+                                ))
+                    })
+                    .map(|a| a.position())
+            });
+            if let Some(target) = target {
+                end = target;
+                if context.armor.as_mut().is_some_and(|fleet| {
+                    fleet.hit_at(target, attack.anti_armor, true) == armor::ArmorImpact::Destroyed
+                }) {
+                    state.kills += 1;
+                }
+            } else {
+                end = p0 + dir * (attack.range * w.shot_ray(p0, end, 1.6, 1.6, 0.0));
+            }
+            tracer(
+                &mut commands,
+                Vec3::new(p0.x, 1.6, p0.y),
+                Vec3::new(end.x, 1.4, end.y),
+            );
+            context.sound.write(crate::audio::SfxEvent::Gunshot {
+                kind: crate::audio::GunKind::At,
+                dist: 0.0,
+                indoor: w.building_at(p0).is_some(),
+            });
+            context.sound.write(crate::audio::SfxEvent::ShellBoom {
+                dist: end.distance(p0),
+                indoor: w.building_at(end).is_some(),
+            });
+            for (entity, mut enemy, transform) in &mut enemies {
+                if enemy.0.alive()
+                    && enemy.0.pos.distance(end) < 4.5
+                    && soldier::damage(&mut enemy.0, attack.damage, p0)
+                {
+                    state.kills += 1;
+                    commands.entity(entity).insert(Body {
+                        kind: enemy.0.kind,
+                        t: BODY_SECS,
+                    });
+                    died.write(EnemyDied {
+                        id: enemy.0.id,
+                        kind: enemy.0.kind,
+                        pos: transform.translation,
+                    });
+                }
+            }
+            if attack.id == "at4"
+                && let Some(bag) = context.inventory.as_deref_mut()
+            {
+                bag.equipped.clear();
+            }
+            soldier::noise(
+                enemies.iter_mut().map(|(_, e, _)| &mut e.into_inner().0),
+                end,
+                50.0,
+                env.rain,
+                env.night,
+                &mut rng.0,
+            );
             return;
         }
         shots.write(Gunshot {

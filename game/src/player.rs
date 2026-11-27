@@ -76,6 +76,7 @@ fn keyboard_input(
     modal: Option<Res<crate::ui::UiModal>>,
     pause: Option<Res<crate::ui::PauseOpen>>,
     mut input: ResMut<MoveInput>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
 ) {
     if modal.is_some_and(|m| m.blocks_input()) || pause.is_some_and(|p| p.0) {
         input.keys = Vec2::ZERO;
@@ -83,16 +84,19 @@ fn keyboard_input(
         return;
     }
     let mut v = Vec2::ZERO;
-    if keys.any_pressed([KeyCode::KeyW, KeyCode::ArrowUp]) {
+    let defaults = crate::input::ControlPreferences::default();
+    let controls = controls.as_deref().unwrap_or(&defaults);
+    use crate::input::ControlAction;
+    if controls.pressed(&keys, ControlAction::Up) {
         v.y += 1.0;
     }
-    if keys.any_pressed([KeyCode::KeyS, KeyCode::ArrowDown]) {
+    if controls.pressed(&keys, ControlAction::Down) {
         v.y -= 1.0;
     }
-    if keys.any_pressed([KeyCode::KeyD, KeyCode::ArrowRight]) {
+    if controls.pressed(&keys, ControlAction::Right) {
         v.x += 1.0;
     }
-    if keys.any_pressed([KeyCode::KeyA, KeyCode::ArrowLeft]) {
+    if controls.pressed(&keys, ControlAction::Left) {
         v.x -= 1.0;
     }
     input.keys = v.normalize_or_zero();
@@ -118,8 +122,11 @@ fn move_player(
     inventory: Option<Res<crate::inventory::Inventory>>,
     selected: Option<Res<crate::roles::SelectedRole>>,
     mut player: Single<&mut Transform, With<Player>>,
+    vehicle: Option<Res<crate::vehicles::VehicleFleet>>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
 ) {
     if state.over
+        || vehicle.is_some_and(|fleet| fleet.current.is_some())
         || modal.is_some_and(|m| m.blocks_input())
         || pause.is_some_and(|p| p.0)
         || campaign.is_some_and(|c| c.sleeping)
@@ -134,7 +141,11 @@ fn move_player(
     let crouch = command.as_ref().is_some_and(|c| c.crouch);
     let running = !crouch
         && fatigue < 95.0
-        && (keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+        && (controls
+            .as_deref()
+            .cloned()
+            .unwrap_or_default()
+            .pressed(&keys, crate::input::ControlAction::Sprint)
             || command
                 .as_ref()
                 .is_some_and(|c| c.stick > 0.93 || c.retreat > 0.0));

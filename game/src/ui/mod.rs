@@ -58,6 +58,7 @@ impl Plugin for FlowUiPlugin {
             .init_resource::<settings::SettingsCache>()
             .init_resource::<crate::audio::AudioSettings>()
             .init_resource::<crate::settings::GamePreferences>()
+            .init_resource::<crate::input::ControlPreferences>()
             .init_resource::<crate::performance::PerformancePreferences>()
             .init_resource::<crate::settings::SettingsStatus>()
             .add_message::<crate::performance::PerformanceAction>()
@@ -126,16 +127,20 @@ impl Plugin for FlowUiPlugin {
 fn consume_ui_clicks(
     flow: Res<State<GameFlow>>,
     pause: Res<PauseOpen>,
-    windows: Query<&Window, With<PrimaryWindow>>,
+    windows: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut touch_events: MessageReader<bevy::input::touch::TouchInput>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut touches: ResMut<Touches>,
     mut consumed: ResMut<ConsumedPresses>,
     map: Option<Res<crate::worldmap::MapOpen>>,
     geometry: Option<Res<crate::hud::HudGeometry>>,
+    fleet: Option<Res<crate::vehicles::VehicleFleet>>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
     mut modal: ResMut<UiModal>,
 ) {
     consumed.points.clear();
-    let Some(window) = windows.iter().next() else {
+    let touch_events: Vec<_> = touch_events.read().copied().collect();
+    let Some((window_id, window)) = windows.iter().next() else {
         return;
     };
     let viewport = Vec2::new(window.width(), window.height());
@@ -148,10 +153,23 @@ fn consume_ui_clicks(
                         .as_ref()
                         .and_then(|g| g.banner)
                         .is_some_and(|rect| rect.contains(point))
+                    || crate::vehicles::ui::captures_pointer(
+                        viewport,
+                        point,
+                        fleet
+                            .as_ref()
+                            .and_then(|fleet| fleet.current())
+                            .is_some_and(|v| v.spec().armored),
+                        geometry.as_deref(),
+                    )
                     || crate::worldmap::captures_pointer(
                         viewport,
                         point,
                         map.as_ref().is_some_and(|m| m.0),
+                        controls
+                            .as_ref()
+                            .map_or(100, |controls| controls.button_percent),
+                        fleet.as_ref().is_some_and(|fleet| fleet.current.is_some()),
                     )))
     };
     if mouse.just_pressed(MouseButton::Left)
@@ -161,11 +179,26 @@ fn consume_ui_clicks(
         consumed.points.push(cursor);
         mouse.clear_just_pressed(MouseButton::Left);
     }
-    let touches_hit: Vec<_> = touches
-        .iter_just_pressed()
-        .filter(|touch| hit(touch.position()))
-        .map(|touch| (touch.id(), touch.position()))
-        .collect();
+    // Raw events preserve entire short taps on slow software-rendered frames.
+    // Do not also read the snapshot for the same batch: that would activate a
+    // captured Reload/Switch button twice.
+    let touches_hit: Vec<_> = if touch_events.is_empty() {
+        touches
+            .iter_just_pressed()
+            .filter(|touch| hit(touch.position()))
+            .map(|touch| (touch.id(), touch.position()))
+            .collect()
+    } else {
+        touch_events
+            .iter()
+            .filter(|event| {
+                event.window == window_id
+                    && event.phase == bevy::input::touch::TouchPhase::Started
+                    && hit(event.position)
+            })
+            .map(|event| (event.id, event.position))
+            .collect()
+    };
     for (id, position) in touches_hit {
         consumed.points.push(position);
         touches.clear_just_pressed(id);

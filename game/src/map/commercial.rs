@@ -1,7 +1,8 @@
 //! Render-only shopfronts on the existing ground-floor walls and entrances.
 //!
 //! Shop identity comes from the original sign cell, not from a new gameplay shop
-//! classification. Main and projecting signs share that cell. The planner leaves
+//! classification. Named temples retain that stored cell but render an unbranded
+//! plaque instead of a random shop name. Main and projecting signs agree. The planner leaves
 //! world RNG, footprints, collisions, loot and all saved identifiers untouched.
 //! Shallow closed display panels remain against solid walls; this layer creates
 //! neither extra entrances nor decorative objects that look like pickup fixtures.
@@ -111,6 +112,12 @@ pub const MAX_MID_VERTICES: usize = 600;
 const PANEL_Z: f32 = 0.205;
 const PANEL_FRONT: f32 = 0.285;
 const FASCIA_H: f32 = 1.02;
+
+/// Original map names identify these religious entrances. This affects only
+/// rendering: no building kind, fixture, sign index or saved ID is rewritten.
+pub fn is_named_temple(building: &Bld) -> bool {
+    matches!(building.name.chars().last(), Some('寺' | '宮' | '廟'))
+}
 
 fn family(index: usize) -> ShopFamily {
     match index {
@@ -581,7 +588,10 @@ pub fn covers_wall(plan: &CommercialPlan, wall: &WallBox) -> bool {
     })
 }
 
-fn colors(plan: &CommercialPlan) -> (u32, u32, u32) {
+fn colors(plan: &CommercialPlan, temple: bool) -> (u32, u32, u32) {
+    if temple {
+        return (0x8d3028, 0xba9650, 0x573528);
+    }
     let (paint, trim, shutter) = match plan.family {
         ShopFamily::Food => (0x884739, 0xd7c8a5, [0x78877c, 0xa58a6d, 0x8b7162]),
         ShopFamily::Traditional => (0x526b66, 0xc3b695, [0x808a82, 0x817e70, 0x8c7770]),
@@ -632,21 +642,36 @@ fn plane_at(parts: &mut Parts, t: Mat4, width: f32, height: f32, at: Vec3, color
     );
 }
 
-fn sign_face(parts: &mut Parts, t: Mat4, width: f32, height: f32, index: usize) {
+fn sign_face(parts: &mut Parts, t: Mat4, width: f32, height: f32, index: usize, temple: bool) {
     let col = (index % SIGN_COLS as usize) as f32;
     let row = (index / SIGN_COLS as usize) as f32;
     // Inset by half a texel to keep adjacent atlas identities out of the border.
     let face = geom::plane(width, height).map_uv(|uv, _| {
-        [
-            (col + (0.5 + uv[0] * 255.0) / 256.0) / SIGN_COLS,
-            (row + (0.5 + (1.0 - uv[1]) * 63.0) / 64.0) / SIGN_ROWS,
-        ]
+        if temple {
+            super::textures::unbranded_sign_uv(index)
+        } else {
+            [
+                (col + (0.5 + uv[0] * 255.0) / 256.0) / SIGN_COLS,
+                (row + (0.5 + (1.0 - uv[1]) * 63.0) / 64.0) / SIGN_ROWS,
+            ]
+        }
     });
-    parts.add(Mat::Sign, &face, t, WHITE);
+    parts.add(
+        Mat::Sign,
+        &face,
+        t,
+        if temple { hex(0x30241b) } else { WHITE },
+    );
 }
 
-fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut Parts) {
-    let (paint, trim, shutter) = colors(plan);
+fn panel_geometry(
+    panel: ShopPanel,
+    plan: &CommercialPlan,
+    lod: Lod,
+    temple: bool,
+    out: &mut Parts,
+) {
+    let (paint, trim, shutter) = colors(plan, temple);
     let t = place(
         panel.centre.x,
         0.0,
@@ -657,10 +682,14 @@ fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut P
     let top = bottom + panel.height;
     let detailed = lod == Lod::Near;
     let width = panel.width;
-    let panel_color = match panel.finish {
-        PanelFinish::Glazed => 0x293f42,
-        PanelFinish::Shutter => shutter,
-        PanelFinish::Timber => 0x70543f,
+    let panel_color = if temple {
+        0x573528
+    } else {
+        match panel.finish {
+            PanelFinish::Glazed => 0x293f42,
+            PanelFinish::Shutter => shutter,
+            PanelFinish::Timber => 0x70543f,
+        }
     };
     // Front and returns form a closed display/shutter on an existing wall. Dark
     // glazing is opaque on purpose: it is not a fake traversable interior opening.
@@ -713,7 +742,7 @@ fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut P
                         width * 0.44,
                         0.045,
                         Vec3::new(x, 2.12, PANEL_FRONT - 0.003),
-                        0x7a9292,
+                        if temple { 0xa78548 } else { 0x7a9292 },
                     );
                     plane_at(
                         out,
@@ -721,7 +750,7 @@ fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut P
                         width * 0.39,
                         0.30,
                         Vec3::new(x, 1.9, PANEL_FRONT - 0.006),
-                        0x40595a,
+                        if temple { 0x663a29 } else { 0x40595a },
                     );
                 }
                 box_at(
@@ -753,7 +782,7 @@ fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut P
                         width - 0.18,
                         0.022,
                         Vec3::new(0.0, 0.38 + rib as f32 * 0.17, PANEL_Z + 0.045),
-                        0x626b63,
+                        if temple { 0x39271c } else { 0x626b63 },
                     );
                 }
                 plane_at(
@@ -762,7 +791,7 @@ fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut P
                     (width * 0.18).min(0.55),
                     0.06,
                     Vec3::new(0.0, 0.34, PANEL_Z + 0.052),
-                    0x4e5853,
+                    if temple { 0xa78548 } else { 0x4e5853 },
                 );
             }
             PanelFinish::Timber => {
@@ -812,8 +841,8 @@ fn panel_geometry(panel: ShopPanel, plan: &CommercialPlan, lod: Lod, out: &mut P
     }
 }
 
-fn canopy_geometry(canopy: Canopy, plan: &CommercialPlan, lod: Lod, out: &mut Parts) {
-    let (paint, trim, _) = colors(plan);
+fn canopy_geometry(canopy: Canopy, plan: &CommercialPlan, lod: Lod, temple: bool, out: &mut Parts) {
+    let (paint, trim, _) = colors(plan, temple);
     let t = place(
         canopy.centre.x,
         0.0,
@@ -830,7 +859,7 @@ fn canopy_geometry(canopy: Canopy, plan: &CommercialPlan, lod: Lod, out: &mut Pa
     for strip in 0..count {
         let width = canopy.width / count as f32;
         let x = (strip as f32 + 0.5) * width - canopy.width * 0.5;
-        let color = if canopy.striped && strip % 2 == 1 {
+        let color = if !temple && canopy.striped && strip % 2 == 1 {
             trim
         } else {
             paint
@@ -891,12 +920,13 @@ fn canopy_geometry(canopy: Canopy, plan: &CommercialPlan, lod: Lod, out: &mut Pa
 }
 
 /// Exact mesh payload of the commercial assembly, also used by native visual QA.
-pub fn geometry(_b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
+pub fn geometry(b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
     let mut output = CommercialMeshes::default();
     if lod == Lod::Far {
         return output;
     }
-    let (paint, trim, _) = colors(plan);
+    let temple = is_named_temple(b);
+    let (paint, trim, _) = colors(plan, temple);
     let sign = plan.fascia;
     let t = place(sign.p.x, sign.p.y, sign.p.z, sign.ry);
     let detailed = lod == Lod::Near;
@@ -929,6 +959,7 @@ pub fn geometry(_b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
         sign.w,
         plan.fascia_height,
         plan.sign_index,
+        temple,
     );
     if detailed && plan.fascia_rim {
         plane_at(
@@ -951,7 +982,7 @@ pub fn geometry(_b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
         }
     }
     for &panel in &plan.panels {
-        panel_geometry(panel, plan, lod, &mut output.shell);
+        panel_geometry(panel, plan, lod, temple, &mut output.shell);
         let t = place(
             panel.centre.x,
             0.0,
@@ -968,7 +999,7 @@ pub fn geometry(_b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
         );
     }
     if let Some(canopy) = plan.canopy {
-        canopy_geometry(canopy, plan, lod, &mut output.shell);
+        canopy_geometry(canopy, plan, lod, temple, &mut output.shell);
     }
     if let Some(blade) = plan.blade {
         let bt = place(
@@ -994,6 +1025,7 @@ pub fn geometry(_b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
                 blade.width - 0.09,
                 blade.height - 0.025,
                 blade.sign_index,
+                temple,
             );
         }
         if detailed {
@@ -1034,6 +1066,7 @@ pub fn geometry(_b: &Bld, plan: &CommercialPlan, lod: Lod) -> CommercialMeshes {
             width,
             0.38,
             plan.sign_index,
+            temple,
         );
         for x in [-width * 0.42, width * 0.42] {
             output.shell.add(
@@ -1062,6 +1095,52 @@ pub fn building(b: &Bld, world: &WorldData, lod: Lod, out: &mut BuildingMeshes) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_temple_plaques_remove_shop_text_without_changing_commercial_payload() {
+        let world = super::super::world();
+        let mut checked = 0;
+        for building in world.blds.iter().filter(|b| is_named_temple(b)) {
+            let Some(plan) = plan(building, world) else {
+                continue;
+            };
+            let mut generic = building.clone();
+            generic.name.clear();
+            let blank = super::super::textures::unbranded_sign_uv(plan.sign_index);
+            for lod in [Lod::Near, Lod::Mid] {
+                let temple = geometry(building, &plan, lod);
+                let original = geometry(&generic, &plan, lod);
+                for (temple, original) in [
+                    (&temple.base, &original.base),
+                    (&temple.shell, &original.shell),
+                ] {
+                    assert_eq!(temple.0.len(), original.0.len());
+                    for (material, mesh) in &temple.0 {
+                        let unchanged = &original.0[material];
+                        assert_eq!(
+                            mesh.pos, unchanged.pos,
+                            "unchanged temple frontage envelope"
+                        );
+                        assert_eq!(mesh.idx, unchanged.idx, "unchanged temple geometry cost");
+                    }
+                }
+                let plaque = &temple.shell.0[&Mat::Sign];
+                assert!(plaque.uv.iter().all(|uv| *uv == blank));
+                assert!(
+                    original.shell.0[&Mat::Sign]
+                        .uv
+                        .windows(2)
+                        .any(|pair| pair[0] != pair[1])
+                );
+                assert_eq!(plan.sign_index, building.sign.unwrap().idx);
+            }
+            checked += 1;
+        }
+        assert!(
+            checked >= 3,
+            "named production temples must use the override"
+        );
+    }
 
     fn within_box(point: Vec3, origin: Vec3, normal: Vec2, lo: Vec3, hi: Vec3) -> bool {
         let relative = point - origin;

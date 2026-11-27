@@ -1,0 +1,2312 @@
+{
+  "armored": {
+    "armor": {
+      "units": [
+        {
+          "abandoned": false,
+          "alerted": false,
+          "captured_id": null,
+          "destroyed": false,
+          "direction": 1,
+          "fire_cd": 0.0,
+          "heading": 2.8895647525787354,
+          "hp": 100.0,
+          "id": 50000,
+          "kind": "zbl08",
+          "pos": [
+            427.75482177734375,
+            302.1781921386719
+          ],
+          "route": [
+            [
+              427.75482177734375,
+              302.1781921386719
+            ],
+            [
+              432.7421875,
+              282.8100280761719
+            ]
+          ],
+          "segment": 0,
+          "spot": 0.0,
+          "stop": 0.0,
+          "t": 0.0,
+          "turret_yaw": 0.0
+        }
+      ]
+    },
+    "drive_screen": [
+      0.8610982894897461,
+      0.5084384679794312
+    ],
+    "fleet": {
+      "current": null,
+      "vehicles": [
+        {
+          "battery": 0.734203577041626,
+          "docked": false,
+          "engine": 0.8095937371253967,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -1.8310606479644775,
+          "id": 0,
+          "key": false,
+          "kind": "bus",
+          "pos": [
+            325.0322570800781,
+            -190.1518096923828
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8032435178756714,
+          "docked": false,
+          "engine": 0.67376708984375,
+          "fuel": 1.0434415340423584,
+          "gun": null,
+          "heading": 1.7613143920898438,
+          "id": 1,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            190.67677307128906,
+            -22.513877868652344
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5409599542617798,
+          "docked": false,
+          "engine": 0.7002077698707581,
+          "fuel": 11.136711120605469,
+          "gun": null,
+          "heading": 6.155675888061523,
+          "id": 2,
+          "key": false,
+          "kind": "kei",
+          "pos": [
+            169.48133850097656,
+            -123.3259048461914
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9487794637680054,
+          "docked": false,
+          "engine": 0.9722440838813782,
+          "fuel": 1.9960219860076904,
+          "gun": null,
+          "heading": 1.6092387437820435,
+          "id": 3,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            301.86492919921875,
+            -96.05950927734375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6180635690689087,
+          "docked": false,
+          "engine": 0.6245344877243042,
+          "fuel": 3.0735602378845215,
+          "gun": null,
+          "heading": 4.478133201599121,
+          "id": 4,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            187.4751434326172,
+            -227.09217834472656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5637096166610718,
+          "docked": true,
+          "engine": 0.7737693786621094,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 5,
+          "key": true,
+          "kind": "ubike",
+          "pos": [
+            319.9375915527344,
+            -193.7852325439453
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8445399403572083,
+          "docked": true,
+          "engine": 0.8231667280197144,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 6,
+          "key": false,
+          "kind": "ubike",
+          "pos": [
+            319.0679016113281,
+            -194.016845703125
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.639357328414917,
+          "docked": true,
+          "engine": 0.9959810376167297,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 7,
+          "key": true,
+          "kind": "ubike",
+          "pos": [
+            318.1982116699219,
+            -194.24844360351562
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9534657001495361,
+          "docked": true,
+          "engine": 0.9191117286682129,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 8,
+          "key": true,
+          "kind": "ubike",
+          "pos": [
+            317.3285217285156,
+            -194.48004150390625
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8612761497497559,
+          "docked": false,
+          "engine": 0.8751890659332275,
+          "fuel": 22.63067626953125,
+          "gun": null,
+          "heading": 1.3208879232406616,
+          "id": 9,
+          "key": false,
+          "kind": "sedan",
+          "pos": [
+            234.19039916992188,
+            -214.49510192871094
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.714551568031311,
+          "docked": false,
+          "engine": 0.6948177218437195,
+          "fuel": 2.137948513031006,
+          "gun": null,
+          "heading": -0.26408445835113525,
+          "id": 10,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            36.76079177856445,
+            -267.0809326171875
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6229445338249207,
+          "docked": false,
+          "engine": 0.7190685272216797,
+          "fuel": 1.686015248298645,
+          "gun": null,
+          "heading": 0.02499479427933693,
+          "id": 11,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            292.8345947265625,
+            -160.58534240722656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7923412322998047,
+          "docked": false,
+          "engine": 0.7836524248123169,
+          "fuel": 1.6161150932312012,
+          "gun": null,
+          "heading": 1.4732052087783813,
+          "id": 12,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            51.67445373535156,
+            -46.92662048339844
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5279479026794434,
+          "docked": false,
+          "engine": 0.7853440046310425,
+          "fuel": 1.7464182376861572,
+          "gun": null,
+          "heading": 0.11189024895429611,
+          "id": 13,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            298.1584777832031,
+            -68.56945037841797
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7260785698890686,
+          "docked": false,
+          "engine": 0.9671081304550171,
+          "fuel": 2.2703983783721924,
+          "gun": null,
+          "heading": -0.2896900177001953,
+          "id": 14,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            331.5481262207031,
+            -153.27984619140625
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8266392946243286,
+          "docked": false,
+          "engine": 0.9650781154632568,
+          "fuel": 2.7975120544433594,
+          "gun": null,
+          "heading": 1.579026460647583,
+          "id": 15,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            219.36834716796875,
+            -108.88630676269531
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9824939370155334,
+          "docked": false,
+          "engine": 0.9869470596313477,
+          "fuel": 1.7669647932052612,
+          "gun": null,
+          "heading": 3.2738802433013916,
+          "id": 16,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            170.03897094726562,
+            -59.92560958862305
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.882443904876709,
+          "docked": false,
+          "engine": 0.9289160966873169,
+          "fuel": 4.520903587341309,
+          "gun": null,
+          "heading": 3.333470344543457,
+          "id": 17,
+          "key": true,
+          "kind": "moto",
+          "pos": [
+            223.76211547851562,
+            -28.927688598632812
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5684854984283447,
+          "docked": false,
+          "engine": 0.9948158264160156,
+          "fuel": 2.7890748977661133,
+          "gun": null,
+          "heading": -0.2946780323982239,
+          "id": 18,
+          "key": true,
+          "kind": "delivery",
+          "pos": [
+            251.04530334472656,
+            -241.90771484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.8984324932098389,
+          "docked": false,
+          "engine": 0.8163427710533142,
+          "fuel": 5.437480449676514,
+          "gun": null,
+          "heading": -1.8662375211715698,
+          "id": 19,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            177.73291015625,
+            -220.29452514648438
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5458419919013977,
+          "docked": false,
+          "engine": 0.8540893197059631,
+          "fuel": 2.0145962238311768,
+          "gun": null,
+          "heading": -1.815255880355835,
+          "id": 20,
+          "key": true,
+          "kind": "delivery",
+          "pos": [
+            90.26834106445312,
+            -307.8397521972656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6245464086532593,
+          "docked": false,
+          "engine": 0.9991631507873535,
+          "fuel": 3.4788618087768555,
+          "gun": null,
+          "heading": -1.6033291816711426,
+          "id": 21,
+          "key": false,
+          "kind": "kei",
+          "pos": [
+            149.4333038330078,
+            -91.11837005615234
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.810687243938446,
+          "docked": false,
+          "engine": 0.9489574432373047,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": 4.471724510192871,
+          "id": 22,
+          "key": true,
+          "kind": "basket",
+          "pos": [
+            132.2574462890625,
+            -271.197509765625
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6072247624397278,
+          "docked": false,
+          "engine": 0.6905646324157715,
+          "fuel": 5.170613765716553,
+          "gun": null,
+          "heading": 4.448129653930664,
+          "id": 23,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            306.3632507324219,
+            -120.05107879638672
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8113917112350464,
+          "docked": false,
+          "engine": 0.94440758228302,
+          "fuel": 0.2604590952396393,
+          "gun": null,
+          "heading": 1.667714238166809,
+          "id": 24,
+          "key": true,
+          "kind": "escooter",
+          "pos": [
+            303.7381896972656,
+            -137.557373046875
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5157976746559143,
+          "docked": false,
+          "engine": 0.6685539484024048,
+          "fuel": 5.536080360412598,
+          "gun": null,
+          "heading": 3.063102960586548,
+          "id": 25,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            186.2425994873047,
+            -219.92909240722656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.7803007364273071,
+          "docked": false,
+          "engine": 0.9998748302459717,
+          "fuel": 18.37589454650879,
+          "gun": null,
+          "heading": 1.327789306640625,
+          "id": 26,
+          "key": false,
+          "kind": "taxi",
+          "pos": [
+            87.30077362060547,
+            -243.72671508789062
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.9691464900970459,
+          "docked": false,
+          "engine": 0.8844286203384399,
+          "fuel": 1.086825966835022,
+          "gun": null,
+          "heading": 3.119856834411621,
+          "id": 27,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            158.95596313476562,
+            -59.210243225097656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6189707517623901,
+          "docked": false,
+          "engine": 0.7332465052604675,
+          "fuel": 2.1210408210754395,
+          "gun": null,
+          "heading": -0.1524229347705841,
+          "id": 28,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            126.28355407714844,
+            -68.19210815429688
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.7696841955184937,
+          "docked": false,
+          "engine": 0.937674880027771,
+          "fuel": 0.854547917842865,
+          "gun": null,
+          "heading": 1.5500524044036865,
+          "id": 29,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            219.16294860839844,
+            -76.67988586425781
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.8430686593055725,
+          "docked": false,
+          "engine": 0.7003340125083923,
+          "fuel": 3.771904706954956,
+          "gun": null,
+          "heading": 2.891697883605957,
+          "id": 30,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            141.17337036132812,
+            -307.0054016113281
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8686107397079468,
+          "docked": false,
+          "engine": 0.90987229347229,
+          "fuel": 2.514106035232544,
+          "gun": null,
+          "heading": 2.9206604957580566,
+          "id": 31,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            325.695556640625,
+            -90.61515045166016
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.52584308385849,
+          "docked": false,
+          "engine": 0.8185184001922607,
+          "fuel": 4.527383327484131,
+          "gun": null,
+          "heading": -0.2629941701889038,
+          "id": 32,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            133.1248321533203,
+            -296.8159484863281
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.62090665102005,
+          "docked": false,
+          "engine": 0.7160725593566895,
+          "fuel": 21.002952575683594,
+          "gun": null,
+          "heading": 1.3073992729187012,
+          "id": 33,
+          "key": true,
+          "kind": "taxi",
+          "pos": [
+            298.8127136230469,
+            -187.7354278564453
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5979156494140625,
+          "docked": false,
+          "engine": 0.821367621421814,
+          "fuel": 0.3715200126171112,
+          "gun": null,
+          "heading": 1.3239943981170654,
+          "id": 34,
+          "key": true,
+          "kind": "escooter",
+          "pos": [
+            212.69216918945312,
+            -201.0634307861328
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9475517868995667,
+          "docked": false,
+          "engine": 0.7088318467140198,
+          "fuel": 3.6944210529327393,
+          "gun": null,
+          "heading": 1.462936520576477,
+          "id": 35,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            140.8197021484375,
+            -60.00802230834961
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.7049734592437744,
+          "docked": false,
+          "engine": 0.614032506942749,
+          "fuel": 0.9638504981994629,
+          "gun": null,
+          "heading": 3.0148866176605225,
+          "id": 36,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            31.719573974609375,
+            -65.2085189819336
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7193673849105835,
+          "docked": false,
+          "engine": 0.8588690757751465,
+          "fuel": 1.1671051979064941,
+          "gun": null,
+          "heading": 3.2309765815734863,
+          "id": 37,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            232.4838104248047,
+            -119.66352081298828
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7435740232467651,
+          "docked": false,
+          "engine": 0.8231725692749023,
+          "fuel": 2.732088327407837,
+          "gun": null,
+          "heading": 4.458463191986084,
+          "id": 38,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            67.43563842773438,
+            -293.0360412597656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9333727359771729,
+          "docked": false,
+          "engine": 0.9683932662010193,
+          "fuel": 2.881063461303711,
+          "gun": null,
+          "heading": 3.3171849250793457,
+          "id": 39,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            292.6147766113281,
+            -41.856689453125
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9727268218994141,
+          "docked": false,
+          "engine": 0.600253164768219,
+          "fuel": 3.889618158340454,
+          "gun": null,
+          "heading": 1.4284272193908691,
+          "id": 40,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            13.996132850646973,
+            -26.70958709716797
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5284328460693359,
+          "docked": false,
+          "engine": 0.8304598927497864,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -1.8777432441711426,
+          "id": 41,
+          "key": true,
+          "kind": "garbage",
+          "pos": [
+            205.6184844970703,
+            -212.4993896484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7784910202026367,
+          "docked": false,
+          "engine": 0.9559646248817444,
+          "fuel": 2.1052803993225098,
+          "gun": null,
+          "heading": 2.949392557144165,
+          "id": 42,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            147.56002807617188,
+            6.059570789337158
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.9871960878372192,
+          "docked": false,
+          "engine": 0.841582179069519,
+          "fuel": 2.509157657623291,
+          "gun": null,
+          "heading": 1.2975053787231445,
+          "id": 43,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            317.1778869628906,
+            -141.35255432128906
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9385000467300415,
+          "docked": false,
+          "engine": 0.819108784198761,
+          "fuel": 13.604177474975586,
+          "gun": null,
+          "heading": -0.3595946729183197,
+          "id": 44,
+          "key": false,
+          "kind": "kei",
+          "pos": [
+            323.156982421875,
+            -148.69857788085938
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9937337040901184,
+          "docked": false,
+          "engine": 0.8124655485153198,
+          "fuel": 0.4147849678993225,
+          "gun": null,
+          "heading": -0.26756441593170166,
+          "id": 45,
+          "key": true,
+          "kind": "escooter",
+          "pos": [
+            170.88800048828125,
+            -286.4958801269531
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8153839707374573,
+          "docked": false,
+          "engine": 0.9969325065612793,
+          "fuel": 6.7088165283203125,
+          "gun": null,
+          "heading": 1.394087553024292,
+          "id": 46,
+          "key": true,
+          "kind": "moto",
+          "pos": [
+            203.7500762939453,
+            -156.118896484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.663266658782959,
+          "docked": false,
+          "engine": 0.9046350717544556,
+          "fuel": 4.494785308837891,
+          "gun": null,
+          "heading": -2.9775266647338867,
+          "id": 47,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            194.693115234375,
+            32.9708137512207
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5817154049873352,
+          "docked": false,
+          "engine": 0.7475003004074097,
+          "fuel": 48.40065002441406,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 60,
+                "reload_remaining": 0.0,
+                "reserve": 193,
+                "weapon": "heavy127"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": -1.831538438796997,
+          "id": 48,
+          "key": true,
+          "kind": "mengshi",
+          "pos": [
+            265.53118896484375,
+            -205.51478576660156
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6061131954193115,
+          "docked": false,
+          "engine": 0.8408744931221008,
+          "fuel": 177.6424560546875,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 200,
+                "reload_remaining": 0.0,
+                "reserve": 153,
+                "weapon": "autocannon30"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1335,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 1.038939118385315,
+          "id": 49,
+          "key": true,
+          "kind": "zbl08",
+          "pos": [
+            -187.02853393554688,
+            -368.2025146484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6954886317253113,
+          "docked": false,
+          "engine": 0.8108693361282349,
+          "fuel": 294.2371520996094,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 200,
+                "reload_remaining": 0.0,
+                "reserve": 187,
+                "weapon": "autocannon30"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1637,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 2.2976677417755127,
+          "id": 50,
+          "key": true,
+          "kind": "zbd05",
+          "pos": [
+            -167.29824829101562,
+            -422.7192077636719
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7166192531585693,
+          "docked": false,
+          "engine": 0.9926016330718994,
+          "fuel": 125.28363037109375,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 8,
+                "reload_remaining": 0.0,
+                "reserve": 28,
+                "weapon": "cannon105"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1344,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": -0.4796251356601715,
+          "id": 51,
+          "key": true,
+          "kind": "ztd05",
+          "pos": [
+            -299.5601806640625,
+            -169.23013305664062
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7050544619560242,
+          "docked": false,
+          "engine": 0.7064618468284607,
+          "fuel": 85.34149169921875,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 60,
+                "reload_remaining": 0.0,
+                "reserve": 203,
+                "weapon": "heavy127"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": -0.7853983044624329,
+          "id": 52,
+          "key": true,
+          "kind": "mengshi",
+          "pos": [
+            -330.8497619628906,
+            -111.24974822998047
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7632999420166016,
+          "docked": false,
+          "engine": 0.6078510880470276,
+          "fuel": 212.35888671875,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 200,
+                "reload_remaining": 0.0,
+                "reserve": 129,
+                "weapon": "autocannon30"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1129,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 2.8836276531219482,
+          "id": 53,
+          "key": true,
+          "kind": "zbl08",
+          "pos": [
+            452.25146484375,
+            274.88067626953125
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 1.0,
+          "docked": false,
+          "engine": 1.0,
+          "fuel": 120.0,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 8,
+                "reload_remaining": 0.0,
+                "reserve": 30,
+                "weapon": "cannon105"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1400,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 2.8895649909973145,
+          "id": 50000,
+          "key": true,
+          "kind": "ztd05",
+          "pos": [
+            421.7699890136719,
+            325.4200134277344
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        }
+      ]
+    },
+    "heading": 2.8895649909973145,
+    "player": [
+      420.4358825683594,
+      0.0,
+      330.60101318359375
+    ],
+    "source": "controlled QA state on an unobstructed original road; production vehicle models, input, collision and save systems",
+    "target_id": 50000,
+    "vehicle_id": 50000
+  },
+  "civilian": {
+    "armor": {
+      "units": []
+    },
+    "drive_screen": [
+      0.8610982894897461,
+      0.5084384679794312
+    ],
+    "fleet": {
+      "current": null,
+      "vehicles": [
+        {
+          "battery": 0.734203577041626,
+          "docked": false,
+          "engine": 0.8095937371253967,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -1.8310606479644775,
+          "id": 0,
+          "key": false,
+          "kind": "bus",
+          "pos": [
+            325.0322570800781,
+            -190.1518096923828
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8032435178756714,
+          "docked": false,
+          "engine": 0.67376708984375,
+          "fuel": 1.0434415340423584,
+          "gun": null,
+          "heading": 1.7613143920898438,
+          "id": 1,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            190.67677307128906,
+            -22.513877868652344
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5409599542617798,
+          "docked": false,
+          "engine": 0.7002077698707581,
+          "fuel": 11.136711120605469,
+          "gun": null,
+          "heading": 6.155675888061523,
+          "id": 2,
+          "key": false,
+          "kind": "kei",
+          "pos": [
+            169.48133850097656,
+            -123.3259048461914
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9487794637680054,
+          "docked": false,
+          "engine": 0.9722440838813782,
+          "fuel": 1.9960219860076904,
+          "gun": null,
+          "heading": 1.6092387437820435,
+          "id": 3,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            301.86492919921875,
+            -96.05950927734375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6180635690689087,
+          "docked": false,
+          "engine": 0.6245344877243042,
+          "fuel": 3.0735602378845215,
+          "gun": null,
+          "heading": 4.478133201599121,
+          "id": 4,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            187.4751434326172,
+            -227.09217834472656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5637096166610718,
+          "docked": true,
+          "engine": 0.7737693786621094,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 5,
+          "key": true,
+          "kind": "ubike",
+          "pos": [
+            319.9375915527344,
+            -193.7852325439453
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8445399403572083,
+          "docked": true,
+          "engine": 0.8231667280197144,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 6,
+          "key": false,
+          "kind": "ubike",
+          "pos": [
+            319.0679016113281,
+            -194.016845703125
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.639357328414917,
+          "docked": true,
+          "engine": 0.9959810376167297,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 7,
+          "key": true,
+          "kind": "ubike",
+          "pos": [
+            318.1982116699219,
+            -194.24844360351562
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9534657001495361,
+          "docked": true,
+          "engine": 0.9191117286682129,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -0.2602642774581909,
+          "id": 8,
+          "key": true,
+          "kind": "ubike",
+          "pos": [
+            317.3285217285156,
+            -194.48004150390625
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8612761497497559,
+          "docked": false,
+          "engine": 0.8751890659332275,
+          "fuel": 22.63067626953125,
+          "gun": null,
+          "heading": 1.3208879232406616,
+          "id": 9,
+          "key": false,
+          "kind": "sedan",
+          "pos": [
+            234.19039916992188,
+            -214.49510192871094
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.714551568031311,
+          "docked": false,
+          "engine": 0.6948177218437195,
+          "fuel": 2.137948513031006,
+          "gun": null,
+          "heading": -0.26408445835113525,
+          "id": 10,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            36.76079177856445,
+            -267.0809326171875
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6229445338249207,
+          "docked": false,
+          "engine": 0.7190685272216797,
+          "fuel": 1.686015248298645,
+          "gun": null,
+          "heading": 0.02499479427933693,
+          "id": 11,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            292.8345947265625,
+            -160.58534240722656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7923412322998047,
+          "docked": false,
+          "engine": 0.7836524248123169,
+          "fuel": 1.6161150932312012,
+          "gun": null,
+          "heading": 1.4732052087783813,
+          "id": 12,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            51.67445373535156,
+            -46.92662048339844
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5279479026794434,
+          "docked": false,
+          "engine": 0.7853440046310425,
+          "fuel": 1.7464182376861572,
+          "gun": null,
+          "heading": 0.11189024895429611,
+          "id": 13,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            298.1584777832031,
+            -68.56945037841797
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7260785698890686,
+          "docked": false,
+          "engine": 0.9671081304550171,
+          "fuel": 2.2703983783721924,
+          "gun": null,
+          "heading": -0.2896900177001953,
+          "id": 14,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            331.5481262207031,
+            -153.27984619140625
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8266392946243286,
+          "docked": false,
+          "engine": 0.9650781154632568,
+          "fuel": 2.7975120544433594,
+          "gun": null,
+          "heading": 1.579026460647583,
+          "id": 15,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            219.36834716796875,
+            -108.88630676269531
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9824939370155334,
+          "docked": false,
+          "engine": 0.9869470596313477,
+          "fuel": 1.7669647932052612,
+          "gun": null,
+          "heading": 3.2738802433013916,
+          "id": 16,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            170.03897094726562,
+            -59.92560958862305
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.882443904876709,
+          "docked": false,
+          "engine": 0.9289160966873169,
+          "fuel": 4.520903587341309,
+          "gun": null,
+          "heading": 3.333470344543457,
+          "id": 17,
+          "key": true,
+          "kind": "moto",
+          "pos": [
+            223.76211547851562,
+            -28.927688598632812
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5684854984283447,
+          "docked": false,
+          "engine": 0.9948158264160156,
+          "fuel": 2.7890748977661133,
+          "gun": null,
+          "heading": -0.2946780323982239,
+          "id": 18,
+          "key": true,
+          "kind": "delivery",
+          "pos": [
+            251.04530334472656,
+            -241.90771484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.8984324932098389,
+          "docked": false,
+          "engine": 0.8163427710533142,
+          "fuel": 5.437480449676514,
+          "gun": null,
+          "heading": -1.8662375211715698,
+          "id": 19,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            177.73291015625,
+            -220.29452514648438
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.5458419919013977,
+          "docked": false,
+          "engine": 0.8540893197059631,
+          "fuel": 2.0145962238311768,
+          "gun": null,
+          "heading": -1.815255880355835,
+          "id": 20,
+          "key": true,
+          "kind": "delivery",
+          "pos": [
+            90.26834106445312,
+            -307.8397521972656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6245464086532593,
+          "docked": false,
+          "engine": 0.9991631507873535,
+          "fuel": 3.4788618087768555,
+          "gun": null,
+          "heading": -1.6033291816711426,
+          "id": 21,
+          "key": false,
+          "kind": "kei",
+          "pos": [
+            149.4333038330078,
+            -91.11837005615234
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.810687243938446,
+          "docked": false,
+          "engine": 0.9489574432373047,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": 4.471724510192871,
+          "id": 22,
+          "key": true,
+          "kind": "basket",
+          "pos": [
+            132.2574462890625,
+            -271.197509765625
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6072247624397278,
+          "docked": false,
+          "engine": 0.6905646324157715,
+          "fuel": 5.170613765716553,
+          "gun": null,
+          "heading": 4.448129653930664,
+          "id": 23,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            306.3632507324219,
+            -120.05107879638672
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8113917112350464,
+          "docked": false,
+          "engine": 0.94440758228302,
+          "fuel": 0.2604590952396393,
+          "gun": null,
+          "heading": 1.667714238166809,
+          "id": 24,
+          "key": true,
+          "kind": "escooter",
+          "pos": [
+            303.7381896972656,
+            -137.557373046875
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5157976746559143,
+          "docked": false,
+          "engine": 0.6685539484024048,
+          "fuel": 5.536080360412598,
+          "gun": null,
+          "heading": 3.063102960586548,
+          "id": 25,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            186.2425994873047,
+            -219.92909240722656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.7803007364273071,
+          "docked": false,
+          "engine": 0.9998748302459717,
+          "fuel": 18.37589454650879,
+          "gun": null,
+          "heading": 1.327789306640625,
+          "id": 26,
+          "key": false,
+          "kind": "taxi",
+          "pos": [
+            87.30077362060547,
+            -243.72671508789062
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.9691464900970459,
+          "docked": false,
+          "engine": 0.8844286203384399,
+          "fuel": 1.086825966835022,
+          "gun": null,
+          "heading": 3.119856834411621,
+          "id": 27,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            158.95596313476562,
+            -59.210243225097656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6189707517623901,
+          "docked": false,
+          "engine": 0.7332465052604675,
+          "fuel": 2.1210408210754395,
+          "gun": null,
+          "heading": -0.1524229347705841,
+          "id": 28,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            126.28355407714844,
+            -68.19210815429688
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.7696841955184937,
+          "docked": false,
+          "engine": 0.937674880027771,
+          "fuel": 0.854547917842865,
+          "gun": null,
+          "heading": 1.5500524044036865,
+          "id": 29,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            219.16294860839844,
+            -76.67988586425781
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.8430686593055725,
+          "docked": false,
+          "engine": 0.7003340125083923,
+          "fuel": 3.771904706954956,
+          "gun": null,
+          "heading": 2.891697883605957,
+          "id": 30,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            141.17337036132812,
+            -307.0054016113281
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8686107397079468,
+          "docked": false,
+          "engine": 0.90987229347229,
+          "fuel": 2.514106035232544,
+          "gun": null,
+          "heading": 2.9206604957580566,
+          "id": 31,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            325.695556640625,
+            -90.61515045166016
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.52584308385849,
+          "docked": false,
+          "engine": 0.8185184001922607,
+          "fuel": 4.527383327484131,
+          "gun": null,
+          "heading": -0.2629941701889038,
+          "id": 32,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            133.1248321533203,
+            -296.8159484863281
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.62090665102005,
+          "docked": false,
+          "engine": 0.7160725593566895,
+          "fuel": 21.002952575683594,
+          "gun": null,
+          "heading": 1.3073992729187012,
+          "id": 33,
+          "key": true,
+          "kind": "taxi",
+          "pos": [
+            298.8127136230469,
+            -187.7354278564453
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5979156494140625,
+          "docked": false,
+          "engine": 0.821367621421814,
+          "fuel": 0.3715200126171112,
+          "gun": null,
+          "heading": 1.3239943981170654,
+          "id": 34,
+          "key": true,
+          "kind": "escooter",
+          "pos": [
+            212.69216918945312,
+            -201.0634307861328
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9475517868995667,
+          "docked": false,
+          "engine": 0.7088318467140198,
+          "fuel": 3.6944210529327393,
+          "gun": null,
+          "heading": 1.462936520576477,
+          "id": 35,
+          "key": false,
+          "kind": "moto",
+          "pos": [
+            140.8197021484375,
+            -60.00802230834961
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.7049734592437744,
+          "docked": false,
+          "engine": 0.614032506942749,
+          "fuel": 0.9638504981994629,
+          "gun": null,
+          "heading": 3.0148866176605225,
+          "id": 36,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            31.719573974609375,
+            -65.2085189819336
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7193673849105835,
+          "docked": false,
+          "engine": 0.8588690757751465,
+          "fuel": 1.1671051979064941,
+          "gun": null,
+          "heading": 3.2309765815734863,
+          "id": 37,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            232.4838104248047,
+            -119.66352081298828
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7435740232467651,
+          "docked": false,
+          "engine": 0.8231725692749023,
+          "fuel": 2.732088327407837,
+          "gun": null,
+          "heading": 4.458463191986084,
+          "id": 38,
+          "key": true,
+          "kind": "scooter",
+          "pos": [
+            67.43563842773438,
+            -293.0360412597656
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9333727359771729,
+          "docked": false,
+          "engine": 0.9683932662010193,
+          "fuel": 2.881063461303711,
+          "gun": null,
+          "heading": 3.3171849250793457,
+          "id": 39,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            292.6147766113281,
+            -41.856689453125
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9727268218994141,
+          "docked": false,
+          "engine": 0.600253164768219,
+          "fuel": 3.889618158340454,
+          "gun": null,
+          "heading": 1.4284272193908691,
+          "id": 40,
+          "key": false,
+          "kind": "delivery",
+          "pos": [
+            13.996132850646973,
+            -26.70958709716797
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5284328460693359,
+          "docked": false,
+          "engine": 0.8304598927497864,
+          "fuel": 0.0,
+          "gun": null,
+          "heading": -1.8777432441711426,
+          "id": 41,
+          "key": true,
+          "kind": "garbage",
+          "pos": [
+            205.6184844970703,
+            -212.4993896484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7784910202026367,
+          "docked": false,
+          "engine": 0.9559646248817444,
+          "fuel": 2.1052803993225098,
+          "gun": null,
+          "heading": 2.949392557144165,
+          "id": 42,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            147.56002807617188,
+            6.059570789337158
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.9871960878372192,
+          "docked": false,
+          "engine": 0.841582179069519,
+          "fuel": 2.509157657623291,
+          "gun": null,
+          "heading": 1.2975053787231445,
+          "id": 43,
+          "key": false,
+          "kind": "scooter",
+          "pos": [
+            317.1778869628906,
+            -141.35255432128906
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9385000467300415,
+          "docked": false,
+          "engine": 0.819108784198761,
+          "fuel": 13.604177474975586,
+          "gun": null,
+          "heading": -0.3595946729183197,
+          "id": 44,
+          "key": false,
+          "kind": "kei",
+          "pos": [
+            323.156982421875,
+            -148.69857788085938
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.9937337040901184,
+          "docked": false,
+          "engine": 0.8124655485153198,
+          "fuel": 0.4147849678993225,
+          "gun": null,
+          "heading": -0.26756441593170166,
+          "id": 45,
+          "key": true,
+          "kind": "escooter",
+          "pos": [
+            170.88800048828125,
+            -286.4958801269531
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.8153839707374573,
+          "docked": false,
+          "engine": 0.9969325065612793,
+          "fuel": 6.7088165283203125,
+          "gun": null,
+          "heading": 1.394087553024292,
+          "id": 46,
+          "key": true,
+          "kind": "moto",
+          "pos": [
+            203.7500762939453,
+            -156.118896484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.663266658782959,
+          "docked": false,
+          "engine": 0.9046350717544556,
+          "fuel": 4.494785308837891,
+          "gun": null,
+          "heading": -2.9775266647338867,
+          "id": 47,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            194.693115234375,
+            32.9708137512207
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 0.30000001192092896
+        },
+        {
+          "battery": 0.5817154049873352,
+          "docked": false,
+          "engine": 0.7475003004074097,
+          "fuel": 48.40065002441406,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 60,
+                "reload_remaining": 0.0,
+                "reserve": 193,
+                "weapon": "heavy127"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": -1.831538438796997,
+          "id": 48,
+          "key": true,
+          "kind": "mengshi",
+          "pos": [
+            265.53118896484375,
+            -205.51478576660156
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6061131954193115,
+          "docked": false,
+          "engine": 0.8408744931221008,
+          "fuel": 177.6424560546875,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 200,
+                "reload_remaining": 0.0,
+                "reserve": 153,
+                "weapon": "autocannon30"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1335,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 1.038939118385315,
+          "id": 49,
+          "key": true,
+          "kind": "zbl08",
+          "pos": [
+            -187.02853393554688,
+            -368.2025146484375
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.6954886317253113,
+          "docked": false,
+          "engine": 0.8108693361282349,
+          "fuel": 294.2371520996094,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 200,
+                "reload_remaining": 0.0,
+                "reserve": 187,
+                "weapon": "autocannon30"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1637,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 2.2976677417755127,
+          "id": 50,
+          "key": true,
+          "kind": "zbd05",
+          "pos": [
+            -167.29824829101562,
+            -422.7192077636719
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7166192531585693,
+          "docked": false,
+          "engine": 0.9926016330718994,
+          "fuel": 125.28363037109375,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 8,
+                "reload_remaining": 0.0,
+                "reserve": 28,
+                "weapon": "cannon105"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1344,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": -0.4796251356601715,
+          "id": 51,
+          "key": true,
+          "kind": "ztd05",
+          "pos": [
+            -299.5601806640625,
+            -169.23013305664062
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7050544619560242,
+          "docked": false,
+          "engine": 0.7064618468284607,
+          "fuel": 85.34149169921875,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 60,
+                "reload_remaining": 0.0,
+                "reserve": 203,
+                "weapon": "heavy127"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": -0.7853983044624329,
+          "id": 52,
+          "key": true,
+          "kind": "mengshi",
+          "pos": [
+            -330.8497619628906,
+            -111.24974822998047
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 0.7632999420166016,
+          "docked": false,
+          "engine": 0.6078510880470276,
+          "fuel": 212.35888671875,
+          "gun": {
+            "guns": [
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 200,
+                "reload_remaining": 0.0,
+                "reserve": 129,
+                "weapon": "autocannon30"
+              },
+              {
+                "cooldown_remaining": 0.0,
+                "heat": 0.0,
+                "jammed": false,
+                "ready": 250,
+                "reload_remaining": 0.0,
+                "reserve": 1129,
+                "weapon": "coax762"
+              }
+            ],
+            "selected": 0
+          },
+          "heading": 2.8836276531219482,
+          "id": 53,
+          "key": true,
+          "kind": "zbl08",
+          "pos": [
+            452.25146484375,
+            274.88067626953125
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        },
+        {
+          "battery": 1.0,
+          "docked": false,
+          "engine": 1.0,
+          "fuel": 10.0,
+          "gun": null,
+          "heading": 2.8895649909973145,
+          "id": 50000,
+          "key": true,
+          "kind": "kei",
+          "pos": [
+            421.7699890136719,
+            325.4200134277344
+          ],
+          "speed": 0.0,
+          "turret_yaw": 0.0,
+          "tyre": 1.0
+        }
+      ]
+    },
+    "heading": 2.8895649909973145,
+    "player": [
+      420.27862548828125,
+      0.0,
+      325.0359802246094
+    ],
+    "source": "controlled QA state on an unobstructed original road; production vehicle models, input, collision and save systems",
+    "target_id": null,
+    "vehicle_id": 50000
+  },
+  "source_commit": "b9b0a2736642b37dd45925a4719dfef08b8f36b4",
+  "version": 1
+}

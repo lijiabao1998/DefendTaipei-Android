@@ -25,6 +25,9 @@ use bevy::{
 };
 use serde::Serialize;
 
+mod wave5;
+mod wave5_exterior;
+
 use crate::camera::{CameraZoom, GameCamera};
 use crate::game_flow::{Campaign, GameFlow, SkipPrologue};
 use crate::i18n::UiFont;
@@ -53,6 +56,8 @@ enum Action {
     Commercial(CommercialScene),
     Streets(StreetScene),
     Lighting(LightingScene),
+    Wave5(wave5::Scene),
+    StreetDetail(wave5_exterior::Scene),
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -586,6 +591,78 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "09w01-utility-signals-landscape",
+        size: [1280, 720],
+        action: Action::StreetDetail(wave5_exterior::Scene::Utilities),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w02-market-cart-landscape",
+        size: [1280, 720],
+        action: Action::StreetDetail(wave5_exterior::Scene::Market),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w03-temple-entrance-landscape",
+        size: [1280, 720],
+        action: Action::StreetDetail(wave5_exterior::Scene::Temple),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w04-controls-portrait",
+        size: [390, 844],
+        action: Action::Wave5(wave5::Scene::Controls),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w05-vehicle-inspect-landscape",
+        size: [1280, 720],
+        action: Action::Wave5(wave5::Scene::Inspect),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w06-vehicle-board-portrait",
+        size: [390, 844],
+        action: Action::Wave5(wave5::Scene::Board),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w07-vehicle-drive-landscape",
+        size: [1280, 720],
+        action: Action::Wave5(wave5::Scene::Drive),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w08-vehicle-service-portrait",
+        size: [390, 844],
+        action: Action::Wave5(wave5::Scene::Service),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w09-scooter-rider-portrait",
+        size: [390, 844],
+        action: Action::Wave5(wave5::Scene::Rider),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w10-armored-board-landscape",
+        size: [1280, 720],
+        action: Action::Wave5(wave5::Scene::Armor),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w11-armored-capture-landscape",
+        size: [1280, 720],
+        action: Action::Wave5(wave5::Scene::Capture),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "09w12-mounted-controls-portrait",
+        size: [390, 844],
+        action: Action::Wave5(wave5::Scene::Mounted),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "10-title-with-save",
         size: [1280, 720],
         action: Action::SaveMenu,
@@ -616,6 +693,8 @@ struct Capture {
     lighting: Option<LightingEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     map_workload: Option<MapWorkload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wave5: Option<serde_json::Value>,
 }
 
 /// Counts of map geometry retained at upload, with the real game camera's
@@ -901,6 +980,8 @@ struct Checkpoint {
     barricaded_doors: Vec<u32>,
     loot: Vec<(String, Stash)>,
     fixtures_version: u8,
+    vehicles: crate::vehicles::VehicleFleet,
+    armor: crate::combat::armor::ArmorFleet,
 }
 
 #[derive(Resource)]
@@ -931,6 +1012,8 @@ struct QaRun {
     captured: bool,
     checkpoint: Option<Checkpoint>,
     continuation_checked: bool,
+    transport_continuation_checked: bool,
+    transport_restore: Option<serde_json::Value>,
     started: Instant,
     report: QaReport,
     finished: bool,
@@ -949,6 +1032,7 @@ struct CaptureTicket {
     lighting: Option<LightingEvidence>,
     lighting_pixels: Vec<LightingPixelProbe>,
     map_workload: Option<MapWorkload>,
+    wave5: Option<serde_json::Value>,
 }
 
 struct SettingsPixels {
@@ -971,11 +1055,17 @@ impl Plugin for QaPlugin {
             std::env::var_os("DEFEND_TAIPEI_QA_STREETS_ONLY").is_some_and(|value| value == "1");
         let lighting_only =
             std::env::var_os("DEFEND_TAIPEI_QA_LIGHTING_ONLY").is_some_and(|value| value == "1");
+        let wave5_only =
+            std::env::var_os("DEFEND_TAIPEI_QA_WAVE5_ONLY").is_some_and(|value| value == "1");
         let stages: Vec<_> = STAGES
             .iter()
             .enumerate()
             .filter_map(|(index, stage)| {
-                ((!exterior_only && !commercial_only && !streets_only && !lighting_only)
+                ((!exterior_only
+                    && !commercial_only
+                    && !streets_only
+                    && !lighting_only
+                    && !wave5_only)
                     || index == 0
                     || matches!(
                         stage.action,
@@ -984,6 +1074,14 @@ impl Plugin for QaPlugin {
                             | Action::Depart
                             | Action::Skip
                     )
+                    || (wave5_only
+                        && matches!(
+                            stage.action,
+                            Action::Wave5(_)
+                                | Action::StreetDetail(_)
+                                | Action::SaveMenu
+                                | Action::Continue
+                        ))
                     || (lighting_only && matches!(stage.action, Action::Lighting(_)))
                     || (!lighting_only
                         && streets_only
@@ -1000,7 +1098,9 @@ impl Plugin for QaPlugin {
                 .then_some(index)
             })
             .collect();
-        let scope = if lighting_only {
+        let scope = if wave5_only {
+            "wave5_subset"
+        } else if lighting_only {
             "lighting_subset"
         } else if streets_only {
             "streets_subset"
@@ -1013,49 +1113,53 @@ impl Plugin for QaPlugin {
         };
         let expected_captures = stages.len();
         println!("DTQA scope={scope} expected_captures={expected_captures}");
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
-            1.0 / 60.0,
-        )))
-        .insert_resource(QaRun {
-            output,
-            stages,
-            target: None,
-            stage: 0,
-            entered: false,
-            frame: 0,
-            ready_frames: 0,
-            wait_logged: Instant::now(),
-            scene_chunk: None,
-            entrance_building: None,
-            interior_building: None,
-            exterior: None,
-            commercial: None,
-            streets: None,
-            lighting: None,
-            lighting_reference_probes: Vec::new(),
-            lighting_observations: Vec::new(),
-            door_test_id: None,
-            barricade_planks: None,
-            loot_fixture: None,
-            loot_expected: None,
-            loot_inventory: None,
-            waiting_capture: false,
-            captured: false,
-            checkpoint: None,
-            continuation_checked: false,
-            started: Instant::now(),
-            report: QaReport {
-                success: false,
-                scope,
-                expected_captures,
-                renderer: String::new(),
-                captures: Vec::new(),
-                assertions: Vec::new(),
-                error: None,
-            },
-            finished: false,
-        })
-        .add_systems(Last, drive.after(crate::save::service_requests));
+        app.init_resource::<wave5::Progress>()
+            .insert_resource(crate::combat::armor::ArmorQaFreeze(true))
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f64(
+                1.0 / 60.0,
+            )))
+            .insert_resource(QaRun {
+                output,
+                stages,
+                target: None,
+                stage: 0,
+                entered: false,
+                frame: 0,
+                ready_frames: 0,
+                wait_logged: Instant::now(),
+                scene_chunk: None,
+                entrance_building: None,
+                interior_building: None,
+                exterior: None,
+                commercial: None,
+                streets: None,
+                lighting: None,
+                lighting_reference_probes: Vec::new(),
+                lighting_observations: Vec::new(),
+                door_test_id: None,
+                barricade_planks: None,
+                loot_fixture: None,
+                loot_expected: None,
+                loot_inventory: None,
+                waiting_capture: false,
+                captured: false,
+                checkpoint: None,
+                continuation_checked: false,
+                transport_continuation_checked: false,
+                transport_restore: None,
+                started: Instant::now(),
+                report: QaReport {
+                    success: false,
+                    scope,
+                    expected_captures,
+                    renderer: String::new(),
+                    captures: Vec::new(),
+                    assertions: Vec::new(),
+                    error: None,
+                },
+                finished: false,
+            })
+            .add_systems(Last, drive.after(crate::save::service_requests));
     }
 }
 
@@ -1146,6 +1250,9 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     run.streets = None;
     run.lighting = None;
     run.lighting_observations.clear();
+    world
+        .resource_mut::<crate::map::street::furnishings::SignalPhase>()
+        .qa_fixed = matches!(stage.action, Action::Lighting(_)).then_some(0.0);
     println!("DTQA entering {}", stage.name);
     if run.stage > 0
         && matches!(
@@ -1159,6 +1266,16 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             crate::performance::PerformancePreferences::default();
     }
     match stage.action {
+        Action::Wave5(scene) => {
+            let position = wave5::enter(world, scene)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(position));
+        }
+        Action::StreetDetail(scene) => {
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+            let position = wave5_exterior::enter(world, scene)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(position));
+        }
         Action::None => {}
         Action::SettingsAudio => {
             use crate::ui::settings::SettingsAction as A;
@@ -1672,6 +1789,10 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             // Open after the settings close pointer has cleared modal capture.
         }
         Action::SaveMenu => {
+            // Stop simulated consumption/cooling between this checkpoint and
+            // the following Last-schedule save. Verify the restored values in
+            // the same Last schedule as load, before gameplay can advance.
+            world.resource_mut::<crate::ui::PauseOpen>().0 = true;
             let position = player_position(world)?;
             run.checkpoint = Some(Checkpoint {
                 day: world.resource::<Shelter>().day,
@@ -1696,6 +1817,8 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                 fixtures_version: world
                     .resource::<crate::worldplay::ScavengeState>()
                     .fixtures_version,
+                vehicles: world.resource::<crate::vehicles::VehicleFleet>().clone(),
+                armor: world.resource::<crate::combat::armor::ArmorFleet>().clone(),
             });
             world.write_message(OpenPanel(PanelKind::Close));
             world.write_message(SaveAndMenu);
@@ -4626,7 +4749,48 @@ fn street_evidence(
     ))
 }
 
+fn check_loaded_transport(world: &World, run: &mut QaRun) -> Result<(), String> {
+    let checkpoint = run
+        .checkpoint
+        .as_ref()
+        .ok_or("Missing transport checkpoint")?;
+    let mut expected = checkpoint.vehicles.clone();
+    if let Some(vehicle) = expected.current_mut() {
+        vehicle.speed = 0.0;
+    }
+    let saved_vehicles = serde_json::to_value(&checkpoint.vehicles).unwrap();
+    let expected_vehicles = serde_json::to_value(&expected).unwrap();
+    let restored_vehicles =
+        serde_json::to_value(world.resource::<crate::vehicles::VehicleFleet>()).unwrap();
+    let saved_armor = serde_json::to_value(&checkpoint.armor).unwrap();
+    let restored_armor =
+        serde_json::to_value(world.resource::<crate::combat::armor::ArmorFleet>()).unwrap();
+    if restored_vehicles != expected_vehicles {
+        return Err("Continue did not restore the exact fleet, occupied vehicle, fuel, damage, keys, turret and mounted ammunition before simulation resumed".into());
+    }
+    if restored_armor != saved_armor {
+        return Err(
+            "Continue changed hostile armour, destruction or captured-vehicle links".into(),
+        );
+    }
+    run.transport_continuation_checked = true;
+    run.transport_restore = Some(serde_json::json!({
+        "saved_vehicles": saved_vehicles,
+        "expected_vehicles": expected_vehicles,
+        "restored_vehicles": restored_vehicles,
+        "saved_armor": saved_armor,
+        "restored_armor": restored_armor,
+    }));
+    run.report.assertions.push("Continue restored exact vehicle fleet, fuel, chassis damage, keys, occupied vehicle, turret, mounted ammunition and armour/capture links before simulation resumed; moving vehicle speed resets safely to zero".into());
+    Ok(())
+}
+
 fn check_continuation(world: &mut World, run: &mut QaRun) -> Result<(), String> {
+    if !run.transport_continuation_checked {
+        return Err(
+            "Continue did not expose a verified transport restore before simulation resumed".into(),
+        );
+    }
     let checkpoint = run.checkpoint.as_ref().ok_or("Missing checkpoint")?;
     let position = player_position(world)?;
     let shelter = world.resource::<Shelter>();
@@ -4726,9 +4890,9 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // CI79's full 62-scene suite completed in about 21 minutes. Retain all of
-    // those stages and their gates while adding six real-world lighting states;
-    // the complete 68-capture route keeps the existing 30-minute deadline.
+    // Retain the complete 68-scene Wave 4 route and its gates. Twelve new
+    // Wave 5 scenes share the existing 30-minute deadline, which must be
+    // validated by the full run rather than silently relaxed.
     if run.started.elapsed() > Duration::from_secs(1800) {
         return Err("Visual QA exceeded its 30-minute deadline".into());
     }
@@ -4759,6 +4923,17 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         enter_stage(world, run, stage)?;
     }
     run.frame += 1;
+    if matches!(stage.action, Action::Continue)
+        && !run.transport_continuation_checked
+        && !world
+            .resource::<bevy::ecs::message::Messages<crate::save::LoadCompleted>>()
+            .is_empty()
+    {
+        check_loaded_transport(world, run)?;
+    }
+    if let Action::Wave5(scene) = stage.action {
+        wave5::frame(world, scene, run.frame)?;
+    }
     if let Some(fixture) = run.lighting {
         // This is the only direct-light override. It lives in the native QA
         // plugin, runs after production lighting, and never changes power,
@@ -4902,6 +5077,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             | Action::Commercial(_)
             | Action::Streets(_)
             | Action::Lighting(_)
+            | Action::Wave5(_)
+            | Action::StreetDetail(_)
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -5357,6 +5534,49 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     } else {
         (None, Vec::new())
     };
+    let wave5 = match stage.action {
+        Action::Wave5(scene) => Some(wave5::evidence(world, scene)?),
+        Action::Continue => {
+            let mut evidence = run
+                .transport_restore
+                .clone()
+                .ok_or("Missing transport load-frame evidence")?;
+            evidence["scene"] = serde_json::json!("Continued");
+            evidence["transport_restore_exact"] =
+                serde_json::json!(run.transport_continuation_checked);
+            evidence["measurement"] = serde_json::json!(
+                "saved, expected and restored states captured and compared in load frame before simulation resumed; expected differs only by zeroing occupied vehicle speed"
+            );
+            evidence["vehicles"] =
+                serde_json::to_value(world.resource::<crate::vehicles::VehicleFleet>()).unwrap();
+            evidence["current"] =
+                serde_json::json!(world.resource::<crate::vehicles::VehicleFleet>().current);
+            evidence["armor"] =
+                serde_json::to_value(world.resource::<crate::combat::armor::ArmorFleet>()).unwrap();
+            Some(evidence)
+        }
+        Action::StreetDetail(scene) => match wave5_exterior::evidence(world, scene) {
+            Ok(evidence) => Some(evidence),
+            Err(reason) => {
+                if run.frame > 900 {
+                    return Err(reason);
+                }
+                if run.wait_logged.elapsed() > Duration::from_secs(15) {
+                    println!("DTQA wave5 pending: {reason}");
+                    run.wait_logged = Instant::now();
+                }
+                return Ok(());
+            }
+        },
+        _ => None,
+    };
+    if let Some(evidence) = &wave5 {
+        run.report.assertions.push(format!(
+            "{}: native Wave 5 {:?} action/state/upload/main-view evidence passed",
+            stage.name,
+            evidence.get("scene")
+        ));
+    }
     let map_workload = matches!(stage.flow, ExpectedFlow::Playing)
         .then(|| map_workload(world))
         .flatten();
@@ -5384,6 +5604,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 lighting,
                 lighting_pixels,
                 map_workload,
+                wave5,
             },
         ))
         .observe(capture_finished);
@@ -5433,7 +5654,7 @@ fn settings_pixels(world: &mut World, size: [u32; 2]) -> Result<Option<SettingsP
     let layout = crate::ui::settings::settings_layout(Vec2::new(size[0] as f32, size[1] as f32));
     let selected = match page {
         SettingsPage::Audio => layout.tabs[0],
-        SettingsPage::Game => layout.tabs[1],
+        SettingsPage::Game | SettingsPage::Controls => layout.tabs[1],
         SettingsPage::Performance if section == PerformanceSection::Diagnostics => {
             layout.performance_sections[1]
         }
@@ -5615,6 +5836,7 @@ fn capture_finished(
             streets,
             lighting,
             map_workload: ticket.map_workload.clone(),
+            wave5: ticket.wave5.clone(),
         })
     })();
     match result {
@@ -5676,7 +5898,7 @@ mod exterior_tests {
                 .count(),
             6
         );
-        assert_eq!(STAGES.len(), 68);
+        assert_eq!(STAGES.len(), 80);
         eprintln!(
             "Lighting fixture lot={} player={:?} zoom={} selected={slots:?}",
             day.building, day.position, day.zoom

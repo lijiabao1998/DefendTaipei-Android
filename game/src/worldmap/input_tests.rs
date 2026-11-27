@@ -219,6 +219,74 @@ fn tap_events(app: &mut App, window: Entity, p: Vec2) {
     touch(app, window, 0, TouchPhase::Ended, p);
 }
 
+#[test]
+fn real_driving_brake_and_map_touches_are_distinct_at_large_button_size() {
+    for viewport in [
+        Vec2::new(390.0, 844.0),
+        Vec2::new(844.0, 390.0),
+        Vec2::new(1280.0, 720.0),
+    ] {
+        let (mut app, window) = input_app();
+        let position = player_position(&mut app).xz();
+        let car = crate::vehicles::VehicleState::new(
+            9,
+            crate::vehicles::VehicleKind::Kei,
+            position,
+            0.0,
+            &mut || 0.5,
+        );
+        app.insert_resource(crate::vehicles::VehicleFleet {
+            vehicles: vec![car],
+            current: Some(9),
+        });
+        app.world_mut()
+            .resource_mut::<crate::input::ControlPreferences>()
+            .button_percent = 110;
+        app.world_mut()
+            .get_mut::<Window>(window)
+            .unwrap()
+            .resolution
+            .set_physical_resolution(viewport.x as u32, viewport.y as u32);
+        app.update();
+        let pads = HudLayout::for_controls(viewport, 110, true);
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Started,
+            pads.act.unwrap().center(),
+        );
+        app.update();
+        assert!(
+            app.world().resource::<PlayerInput>().vehicle_brake,
+            "{viewport:?}: actual Brake touch was intercepted"
+        );
+        assert!(!app.world().resource::<PlayerInput>().fire);
+        assert!(!app.world().resource::<MapOpen>().0);
+        touch(
+            &mut app,
+            window,
+            0,
+            TouchPhase::Ended,
+            pads.act.unwrap().center(),
+        );
+        app.update();
+        assert!(!app.world().resource::<PlayerInput>().vehicle_brake);
+        tap_events(
+            &mut app,
+            window,
+            toggle_rect_for_controls(viewport, 110, true).center(),
+        );
+        app.update();
+        assert!(
+            app.world().resource::<MapOpen>().0,
+            "{viewport:?}: actual Map touch did not open it"
+        );
+        assert!(!app.world().resource::<PlayerInput>().vehicle_brake);
+        assert!(!app.world().resource::<PlayerInput>().fire);
+    }
+}
+
 fn open_with_supplies(app: &mut App, window: Entity) {
     let viewport = Vec2::new(390.0, 844.0);
     tap_events(app, window, toggle_rect(viewport).center());

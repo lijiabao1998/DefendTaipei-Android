@@ -112,6 +112,51 @@ pub struct HudLayout {
 }
 
 impl HudLayout {
+    /// Existing button centers remain usable touch points.
+    /// Original Web sizes scale only the two thumb buttons, not the joystick.
+    /// A driver needs both buttons in either orientation.
+    pub fn for_controls(viewport: Vec2, button_percent: u8, driving: bool) -> Self {
+        let mut layout = Self::from_viewport(viewport);
+        if driving && layout.orientation == Orientation::Landscape {
+            let bottom = viewport.y - layout.insets.bottom - 54.0;
+            let right = viewport.x - layout.insets.right - 16.0;
+            layout.act = Some(ScreenRect::new(
+                right - ACT_SIZE,
+                bottom - ACT_SIZE,
+                ACT_SIZE,
+                ACT_SIZE,
+            ));
+            layout.sec = Some(ScreenRect::new(
+                right - SEC_SIZE - 14.0,
+                bottom - ACT_SIZE - SEC_SIZE - 8.0,
+                SEC_SIZE,
+                SEC_SIZE,
+            ));
+        }
+        let scale = match button_percent {
+            85 => 0.85,
+            110 => 1.1,
+            _ => 1.0,
+        };
+        for rect in [&mut layout.act, &mut layout.sec].into_iter().flatten() {
+            let center = rect.center();
+            let size = (rect.max - rect.min) * scale;
+            rect.min = center - size * 0.5;
+            rect.max = center + size * 0.5;
+        }
+        // The scaled target stays clear of the bottom toolbar. The original
+        // portrait CSS otherwise overlaps its lower edge by six pixels.
+        let bottom = viewport.y - layout.insets.bottom - 50.0;
+        let shift = layout
+            .act
+            .map_or(0.0, |rect| (rect.max.y - bottom).max(0.0));
+        for rect in [&mut layout.act, &mut layout.sec].into_iter().flatten() {
+            rect.min.y -= shift;
+            rect.max.y -= shift;
+        }
+        layout
+    }
+
     pub fn from_viewport(viewport: Vec2) -> Self {
         let orientation = orientation(viewport);
         let insets = safe_insets(viewport);
@@ -190,5 +235,42 @@ mod tests {
         let insets = safe_insets(Vec2::new(200.0, 180.0));
         assert!(insets.left + insets.right < 200.0);
         assert!(insets.top + insets.bottom < 180.0);
+    }
+
+    #[test]
+    fn driver_buttons_scale_without_touching_each_other_or_the_toolbar() {
+        for size in [
+            Vec2::new(390.0, 844.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(360.0, 640.0),
+        ] {
+            for percent in [85, 100, 110] {
+                let layout = HudLayout::for_controls(size, percent, true);
+                let act = layout.act.unwrap();
+                let sec = layout.sec.unwrap();
+                assert!(!act.intersects(sec));
+                assert!(!act.intersects(layout.joy));
+                assert!(!sec.intersects(layout.joy));
+                assert!(act.max.y < size.y - layout.insets.bottom - 46.0);
+                assert!(
+                    act.min.x >= layout.insets.left && act.max.x <= size.x - layout.insets.right
+                );
+            }
+        }
+        let default = HudLayout::for_controls(Vec2::new(390.0, 844.0), 100, false);
+        let original = HudLayout::from_viewport(Vec2::new(390.0, 844.0));
+        assert_eq!(default.joy, original.joy);
+        assert!(
+            default
+                .act
+                .unwrap()
+                .contains(original.act.unwrap().center())
+        );
+        assert!(
+            default
+                .sec
+                .unwrap()
+                .contains(original.sec.unwrap().center())
+        );
     }
 }

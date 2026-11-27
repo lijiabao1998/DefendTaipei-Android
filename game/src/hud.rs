@@ -88,11 +88,39 @@ pub(crate) fn survival_hud_layout(viewport: Vec2, conditions: bool) -> SurvivalH
     SurvivalHudLayout { card, banner, hint }
 }
 
+pub(crate) fn survival_hud_layout_for_controls(
+    viewport: Vec2,
+    conditions: bool,
+    button_percent: u8,
+    driving: bool,
+) -> SurvivalHudLayout {
+    let mut layout = survival_hud_layout(viewport, conditions);
+    let controls = HudLayout::for_controls(viewport, button_percent, driving);
+    let controls_top = controls
+        .sec
+        .map_or(controls.joy.min.y, |sec| sec.min.y.min(controls.joy.min.y));
+    layout.hint.min.y = controls_top - 48.0;
+    layout.hint.max.y = controls_top - 8.0;
+    if driving
+        && orientation(viewport) == Orientation::Portrait
+        && controls.joy.min.y - layout.banner.max.y < 70.0
+    {
+        // Very short phones retain a one-line report preview and the journal
+        // link, leaving an independent mounted-control row above the joystick.
+        layout.banner.max.y = layout.banner.min.y + 50.0;
+    }
+    layout
+}
+
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct HudSet;
 
 #[derive(Resource, Default)]
 pub(crate) struct HudGeometry {
+    pub viewport: Vec2,
+    pub button_percent: u8,
+    /// Actual presented instruments, including only active condition rows.
+    pub card: Option<ScreenRect>,
     /// The visible, presented radio card. Input consumes this exact rectangle.
     pub banner: Option<ScreenRect>,
 }
@@ -106,6 +134,7 @@ impl Plugin for HudPlugin {
                 PostUpdate,
                 update_hud
                     .in_set(HudSet)
+                    .before(crate::vehicles::ui::update)
                     .before(bevy::ui::UiSystems::Prepare),
             );
     }
@@ -265,6 +294,8 @@ struct HudWorld<'w> {
     hint: Option<Res<'w, InteractionHint>>,
     notice: Option<Res<'w, WorldNotice>>,
     lang: Res<'w, Language>,
+    controls: Option<Res<'w, crate::input::ControlPreferences>>,
+    fleet: Option<Res<'w, crate::vehicles::VehicleFleet>>,
 }
 
 fn update_hud(
@@ -343,6 +374,8 @@ fn update_hud(
         hint,
         notice,
         lang,
+        controls,
+        fleet,
     } = world;
     let conditions = condition_text(
         &game,
@@ -352,7 +385,16 @@ fn update_hud(
         scavenge.as_ref().map_or(0.0, |s| s.weather.wet),
         *lang,
     );
-    let layout = survival_hud_layout(viewport, !conditions.is_empty());
+    let button_percent = controls.as_ref().map_or(100, |prefs| prefs.button_percent);
+    let layout = survival_hud_layout_for_controls(
+        viewport,
+        !conditions.is_empty(),
+        button_percent,
+        fleet.as_ref().is_some_and(|fleet| fleet.current.is_some()),
+    );
+    geometry.viewport = viewport;
+    geometry.button_percent = button_percent;
+    geometry.card = playing.then_some(layout.card);
     geometry.banner = (playing && campaign.notice_t > 0.0 && !campaign.notice.is_empty())
         .then_some(layout.banner);
     for (mut visible, mut node) in &mut roots {
@@ -371,7 +413,15 @@ fn update_hud(
     if flow.get() != &GameFlow::Playing {
         toast.remaining = 0.0;
     }
-    let occluded = campaign.notice_t > 0.0 && layout.banner.intersects(layout.hint);
+    let vehicle_occluded = fleet
+        .as_ref()
+        .and_then(|fleet| fleet.current())
+        .is_some_and(|vehicle| {
+            crate::vehicles::ui::panel_layout(viewport, Some(&geometry), vehicle.spec().armored)
+                .intersects(layout.hint)
+        });
+    let occluded =
+        (campaign.notice_t > 0.0 && layout.banner.intersects(layout.hint)) || vehicle_occluded;
     if playing && !occluded {
         toast.remaining = (toast.remaining - time.delta_secs()).max(0.0);
     }
@@ -687,5 +737,44 @@ mod tests {
         assert!(!banner.intersects(ScreenRect::new(x, y, w, h)));
         let mut query = app.world_mut().query_filtered::<&Text, With<HintText>>();
         assert_eq!(query.single(app.world()).unwrap().0, "Door closed");
+
+        // The shortest supported phone keeps the report/journal target and
+        // mounted buttons distinct; its contextual toast yields that slot.
+        app.insert_resource(crate::input::ControlPreferences {
+            button_percent: 110,
+            ..default()
+        });
+        let vehicle = crate::vehicles::VehicleState::new(
+            9,
+            crate::vehicles::VehicleKind::Zbl08,
+            Vec2::ZERO,
+            0.0,
+            &mut || 0.5,
+        );
+        app.insert_resource(crate::vehicles::VehicleFleet {
+            vehicles: vec![vehicle],
+            current: Some(9),
+        });
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&mut Window, With<PrimaryWindow>>();
+        query
+            .single_mut(app.world_mut())
+            .unwrap()
+            .resolution
+            .set_physical_resolution(320, 568);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<HudGeometry>()
+                .banner
+                .unwrap()
+                .height(),
+            50.0
+        );
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<HintRoot>>();
+        assert_eq!(*query.single(app.world()).unwrap(), Visibility::Hidden);
     }
 }

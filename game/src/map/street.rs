@@ -3,6 +3,7 @@
 //! trucks (VehicleSystem spots) and street trees (trees.ts: 台灣欒樹, 樟樹, 茄苳 crowns of many
 //! small lumpy clumps, darker at the heart, lighter on top).
 
+pub mod furnishings;
 mod markings;
 pub use markings::{
     JunctionApproach, ParkingPlan, RoadMarkingPlan, approach_geometry, parking_geometry,
@@ -225,6 +226,7 @@ pub fn roads(
         for plan in markings::parking_plans_in(w, min, max) {
             out.merge(parking_geometry(&plan));
         }
+        furnishings::build_chunk(w, min, max, out);
     }
 }
 

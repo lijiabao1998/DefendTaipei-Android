@@ -56,6 +56,22 @@ mod device_bridge {
     }
 
     #[unsafe(no_mangle)]
+    pub extern "system" fn Java_tw_lijiabao_defendtaipei_MainActivity_nativeTakeHapticRequest(
+        _env: JNIEnv<'_>,
+        _class: JClass<'_>,
+    ) -> jint {
+        defend_taipei::device::take_haptic_request() as jint
+    }
+
+    #[unsafe(no_mangle)]
+    pub extern "system" fn Java_tw_lijiabao_defendtaipei_MainActivity_nativeClearHapticRequest(
+        _env: JNIEnv<'_>,
+        _class: JClass<'_>,
+    ) {
+        defend_taipei::device::clear_haptic_request();
+    }
+
+    #[unsafe(no_mangle)]
     pub extern "system" fn Java_tw_lijiabao_defendtaipei_MainActivity_nativeTakeReportShareRequest(
         _env: JNIEnv<'_>,
         _class: JClass<'_>,

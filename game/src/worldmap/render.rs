@@ -15,7 +15,7 @@ use crate::ui::{PauseOpen, UiModal};
 
 use super::{
     Button, CELL, GRID_H, GRID_W, MAX_NOTES, MapOpen, MapProgress, MapTool, MapView, NoteKind,
-    ORIGIN, map_layout, toggle_rect,
+    ORIGIN, map_layout, toggle_rect_for_controls,
 };
 
 const PAPER: Color = Color::srgb(0.91, 0.87, 0.77);
@@ -34,6 +34,8 @@ struct RenderKey {
     progress_tick: u32,
     home: Vec2,
     evac: Option<Vec2>,
+    toggle: ScreenRect,
+    toggle_key: String,
 }
 
 #[derive(Resource, Default)]
@@ -101,10 +103,15 @@ pub(super) fn render(
     font: Res<UiFont>,
     shelter: Res<Shelter>,
     evac: Res<EvacSites>,
-    time: Res<Time<Real>>,
+    context: (
+        Res<Time<Real>>,
+        Option<Res<crate::input::ControlPreferences>>,
+        Option<Res<crate::vehicles::VehicleFleet>>,
+    ),
     mut images: ResMut<Assets<Image>>,
     mut cache: ResMut<MapCache>,
 ) {
+    let (time, controls, fleet) = context;
     let visible = flow.get() == &GameFlow::Playing && !pause.0 && (open.0 || !modal.open);
     if !visible {
         if let Some(root) = cache.root.take() {
@@ -123,6 +130,9 @@ pub(super) fn render(
     let p = Vec2::new(transform.translation.x, transform.translation.z);
     let forward = transform.rotation * Vec3::NEG_Z;
     let heading = forward.x.atan2(forward.z);
+    let controls = controls
+        .as_deref()
+        .unwrap_or_else(|| crate::input::ControlPreferences::default_ref());
     let key = RenderKey {
         open: open.0,
         viewport,
@@ -144,6 +154,12 @@ pub(super) fn render(
             .map(Vec2::from_array)
             .unwrap_or(crate::map::world().spawn),
         evac: (open.0 && evac.heli_open).then_some(evac.heli),
+        toggle: toggle_rect_for_controls(
+            viewport,
+            controls.button_percent,
+            fleet.as_ref().is_some_and(|fleet| fleet.current.is_some()),
+        ),
+        toggle_key: controls.key_label(crate::input::ControlAction::Map),
     };
     if cache.key.as_ref() == Some(&key) {
         return;
@@ -175,8 +191,8 @@ pub(super) fn render(
             .with_children(|root| {
                 button(
                     root,
-                    toggle_rect(viewport),
-                    tr(*lang, "地圖 M", "Map M"),
+                    key.toggle,
+                    &format!("{} {}", tr(*lang, "地圖", "Map"), key.toggle_key),
                     false,
                     &font,
                 )

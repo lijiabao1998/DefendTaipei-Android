@@ -1004,6 +1004,7 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
     }
     let exterior = super::exterior::plan(b, super::world());
     let commercial = super::commercial::plan(b, super::world()).is_some();
+    let temple = super::commercial::is_named_temple(b);
     let u = (w.c - w.a) / l;
     let n = wall_normal(b, w);
     let ry = n.x.atan2(n.y);
@@ -1027,9 +1028,21 @@ pub fn walkup(b: &Bld, out: &mut Parts) {
         {
             // The old random blade identity is replaced by the shop's own atlas
             // label. Its draws above remain, preserving the following AC layout.
-            let g = geom::cuboid(0.1, 2.8, 0.75)
-                .map_uv(|uv, _| [(idx as f32 + uv[0]) / VSIGN_N as f32, 1.0 - uv[1]]);
-            out.add(Mat::VSign, &g, transform, WHITE);
+            let g = geom::cuboid(0.1, 2.8, 0.75).map_uv(|uv, _| {
+                if temple {
+                    // The blank background outside the vertical atlas border;
+                    // no random restaurant/clinic text on a named temple.
+                    [(idx as f32 + 1.5 / 64.0) / VSIGN_N as f32, 1.5 / 256.0]
+                } else {
+                    [(idx as f32 + uv[0]) / VSIGN_N as f32, 1.0 - uv[1]]
+                }
+            });
+            out.add(
+                Mat::VSign,
+                &g,
+                transform,
+                if temple { hex(0x30241b) } else { WHITE },
+            );
         }
     }
     let floors = ((b.h - GF) / FH).floor() as i32;
@@ -1284,6 +1297,120 @@ fn frontage_life(b: &Bld, world: &WorldData, out: &mut Parts) {
     }
 }
 
+/// The source already names these places of worship. Ornament only their
+/// existing solid entry flanks; this does not replace the original building
+/// with a fabricated landmark or create another shrine/loot container.
+pub fn temple_frontage(b: &Bld) -> Parts {
+    let mut out = Parts::default();
+    if !super::commercial::is_named_temple(b) {
+        return out;
+    }
+    let Some(door) = b.door else { return out };
+    let mut walls: Vec<_> = b
+        .walls
+        .iter()
+        .filter(|w| {
+            w.y0 < 0.01
+                && w.y1 >= 3.0
+                && w.a.distance(w.c) >= 0.9
+                && wall_normal(b, w).dot(door.n) > 0.95
+        })
+        .collect();
+    walls.sort_by(|a, c| {
+        ((a.a + a.c) * 0.5)
+            .distance_squared(door.p)
+            .total_cmp(&((c.a + c.c) * 0.5).distance_squared(door.p))
+    });
+    let canopy = super::commercial::plan(b, super::world()).and_then(|plan| plan.canopy);
+    for (index, wall) in walls.into_iter().take(2).enumerate() {
+        let normal = wall_normal(b, wall);
+        let mid = (wall.a + wall.c) * 0.5;
+        let t = place(mid.x, 0.0, mid.y, normal.x.atan2(normal.y));
+        // Red lacquer and restrained gold trim sit on the original wall plane.
+        out.add(
+            Mat::VCol,
+            &geom::plane(0.23, 1.35),
+            t * geom::at(0.0, 1.73, 0.16),
+            hex(0x7c2722),
+        );
+        for x in [-0.095, 0.095] {
+            out.add(
+                Mat::Metal,
+                &geom::plane(0.012, 1.25),
+                t * geom::at(x, 1.73, 0.166),
+                hex(0xb79649),
+            );
+        }
+        // A wall lantern beneath a deep canopy is hidden by its own soffit in
+        // the normal high camera. Hang it at an existing canopy flank, outside
+        // the plaque width, while retaining exactly the same bounded assembly.
+        let lantern_t = if let Some(canopy) = canopy {
+            let side = if (mid - canopy.centre).dot(canopy.u) < 0.0
+                || ((mid - canopy.centre).dot(canopy.u).abs() < 0.01 && index == 0)
+            {
+                -1.0
+            } else {
+                1.0
+            };
+            let centre = canopy.centre
+                + canopy.u * (side * (canopy.width * 0.5 - 0.28))
+                + canopy.n * (canopy.depth + 0.12);
+            let anchor = centre - canopy.n * 0.46;
+            place(anchor.x, 0.0, anchor.y, canopy.n.x.atan2(canopy.n.y))
+        } else {
+            t
+        };
+        let edge = lantern_t.transform_point3(Vec3::new(0.0, 0.0, 0.72)).xz();
+        let world = super::world();
+        if world.road_dist(edge) <= 0.1 || world.bld_at(edge).is_some_and(|other| other.id != b.id)
+        {
+            continue;
+        }
+        out.add(
+            Mat::Metal,
+            &bx(0.035, 0.035, 0.34, 0.0, 3.02, 0.31),
+            lantern_t,
+            hex(0x4b463a),
+        );
+        out.add(
+            Mat::Metal,
+            &bx(
+                0.018,
+                if canopy.is_some() { 0.46 } else { 0.18 },
+                0.018,
+                0.0,
+                if canopy.is_some() { 3.08 } else { 2.94 },
+                0.46,
+            ),
+            lantern_t,
+            hex(0x716047),
+        );
+        let globe =
+            geom::sphere(0.185, 8, 5).transformed(Mat4::from_scale(Vec3::new(1.0, 1.22, 1.0)));
+        out.add(
+            Mat::VCol,
+            &globe,
+            lantern_t * geom::at(0.0, 2.65, 0.46),
+            hex(0xb9442b),
+        );
+        for y in [2.45, 2.85] {
+            out.add(
+                Mat::Metal,
+                &geom::cylinder(0.085, 0.085, 0.035, 8),
+                lantern_t * geom::at(0.0, y, 0.46),
+                hex(0xb1914c),
+            );
+        }
+        out.add(
+            Mat::VCol,
+            &bx(0.032, 0.13, 0.032, 0.0, 2.36, 0.46),
+            lantern_t,
+            hex(0x843321),
+        );
+    }
+    out
+}
+
 /// Everything the near layer adds to a building.
 pub fn near_detail(b: &Bld, kit: &WindowKit) -> Parts {
     let mut p = Parts::default();
@@ -1291,6 +1418,7 @@ pub fn near_detail(b: &Bld, kit: &WindowKit) -> Parts {
     walkup(b, &mut p);
     frontage_wear(b, &mut p);
     frontage_life(b, super::world(), &mut p);
+    p.merge(temple_frontage(b));
     p
 }
 
@@ -1302,6 +1430,32 @@ pub fn near_roof(b: &Bld) -> Parts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_temple_accents_keep_existing_door_apertures_clear() {
+        let world = super::super::world();
+        let mut dressed = 0;
+        for b in &world.blds {
+            let geometry = temple_frontage(b);
+            if geometry.vcount() == 0 {
+                continue;
+            }
+            dressed += 1;
+            assert!(geometry.vcount() < 1_000);
+            assert!(matches!(b.name.chars().last(), Some('寺' | '宮' | '廟')));
+            let door = b.door.unwrap();
+            for mesh in geometry.0.values() {
+                assert!(mesh.pos.iter().all(|p| p.iter().all(|v| v.is_finite())));
+                for p in &mesh.pos {
+                    let delta = Vec2::new(p[0], p[2]) - door.p;
+                    if p[1] < 2.25 {
+                        assert!(delta.dot(door.tangent()).abs() > DOOR_W * 0.5);
+                    }
+                }
+            }
+        }
+        assert!(dressed >= 3);
+    }
 
     #[test]
     fn every_tin_roof_shape_stays_over_its_walls_in_both_lot_orientations() {

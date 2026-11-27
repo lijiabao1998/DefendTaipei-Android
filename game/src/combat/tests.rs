@@ -174,7 +174,7 @@ fn spawn_message_spawns_soldier() {
 }
 
 #[test]
-fn armor_spawn_is_ignored_until_ported() {
+fn soldier_spawn_handler_leaves_armor_requests_for_armor_plugin() {
     let mut app = test_app();
     app.add_systems(Update, handle_spawn_requests);
     for kind in [
@@ -695,4 +695,389 @@ fn modal_capture_pause_and_sleep_never_spend_carried_ammo() {
         .sleeping = false;
     step(&mut app, 0.5);
     assert_eq!(app.world().resource::<Inventory>().count("a556"), 3);
+}
+
+// These fixtures exercise the carried-item player_fire path, not the pure
+// armor damage/spec helpers. The native collider tests keep the real map and
+// insert only the isolated target/cover hulls needed for each shot.
+fn armor_target(id: u32, position: Vec2, direction: Vec2) -> armor::ArmorState {
+    armor::ArmorState::new(
+        id,
+        crate::vehicles::VehicleKind::Zbl08,
+        vec![position, position + direction * 10.0],
+        0,
+    )
+}
+
+fn handheld_app(
+    weapon_id: &str,
+    ammunition: u32,
+    origin: Vec2,
+    direction: Vec2,
+    units: Vec<armor::ArmorState>,
+) -> App {
+    let mut app = test_app();
+    let definition = item(weapon_id).unwrap();
+    let ammo = definition.ammo.unwrap();
+    let mut bag = Inventory::default();
+    if ammo != weapon_id {
+        bag.add(weapon_id, 1);
+    }
+    bag.add(ammo, ammunition);
+    bag.add("a556", 9);
+    bag.equipped = weapon_id.into();
+    app.insert_resource(bag)
+        .insert_resource(armor::ArmorFleet { units })
+        .add_systems(Update, player_fire);
+    let world = app.world_mut();
+    world
+        .query_filtered::<&mut Transform, With<Player>>()
+        .single_mut(world)
+        .unwrap()
+        .translation = Vec3::new(origin.x, 0.0, origin.y);
+    let mut input = world.resource_mut::<WeaponInput>();
+    input.fire = true;
+    input.aim = direction;
+    app
+}
+
+fn clear_native_firing_lane() -> (crate::map::Obstacles, Vec2, Vec2) {
+    let data = crate::map::world();
+    let obstacles = crate::map::Obstacles::new(data.clone());
+    for road in &data.roads {
+        for edge in road.p.windows(2) {
+            if edge[0].distance(edge[1]) < 24.0 {
+                continue;
+            }
+            let direction = (edge[1] - edge[0]).normalize();
+            let origin = edge[0] + direction * 4.0;
+            let target = origin + direction * 14.0;
+            if [origin, target].into_iter().any(|point| {
+                !point.cmpge(data.min + 1.0).all()
+                    || !point.cmple(data.max - 1.0).all()
+                    || data.bld_at(point).is_some()
+            }) {
+                continue;
+            }
+            if obstacles
+                .segment_hit_except(origin, target, 1.6, 1.6, None)
+                .is_none()
+            {
+                return (obstacles, origin, target);
+            }
+        }
+    }
+    panic!("original map needs one clear 14 m road ray for the AT integration test");
+}
+
+fn native_hull(id: u64, centre: Vec2, forward: Vec2) -> crate::map::collide::DynamicCollider {
+    let side = Vec2::new(forward.y, -forward.x);
+    crate::map::collide::DynamicCollider {
+        id,
+        corners: [
+            centre + forward * 3.0 + side * 1.4,
+            centre - forward * 3.0 + side * 1.4,
+            centre - forward * 3.0 - side * 1.4,
+            centre + forward * 3.0 - side * 1.4,
+        ],
+        height: 2.5,
+    }
+}
+
+fn install_native_shot_world(app: &mut App, obstacles: crate::map::Obstacles) {
+    app.world_mut()
+        .resource_mut::<CombatWorldRes>()
+        .set(obstacles.clone());
+    app.insert_resource(obstacles);
+}
+
+#[test]
+fn handheld_at_uses_carried_ammunition_and_hits_the_native_target_hull() {
+    for weapon_id in ["kestrel", "at4", "jav"] {
+        let (obstacles, origin, target) = clear_native_firing_lane();
+        let direction = (target - origin).normalize();
+        let target_id = 73;
+        obstacles.replace_dynamic(
+            2,
+            vec![native_hull(
+                0x1_0000_0000 + u64::from(target_id),
+                target,
+                direction,
+            )],
+        );
+        assert!(
+            obstacles
+                .segment_hit_except(origin, target, 1.6, 1.6, None)
+                .is_some(),
+            "the positive case must include an actual target hull, not empty space"
+        );
+        let mut app = handheld_app(
+            weapon_id,
+            1,
+            origin,
+            direction,
+            vec![armor_target(target_id, target, direction)],
+        );
+        install_native_shot_world(&mut app, obstacles);
+        let mut sounds = MessageCursor::<crate::audio::SfxEvent>::default();
+        step(&mut app, 0.01);
+        let unit = &app.world().resource::<armor::ArmorFleet>().units[0];
+        assert!(unit.destroyed && !unit.abandoned, "{weapon_id}");
+        assert_eq!(unit.hp, 0.0, "{weapon_id}");
+        assert_eq!(app.world().resource::<GameState>().kills, 1, "{weapon_id}");
+        let bag = app.world().resource::<Inventory>();
+        assert_eq!(bag.count(item(weapon_id).unwrap().ammo.unwrap()), 0);
+        assert_eq!(bag.count("a556"), 9, "unrelated ammunition must survive");
+        assert_eq!(bag.count(weapon_id), u32::from(weapon_id != "at4"));
+        assert_eq!(
+            bag.equipped,
+            if weapon_id == "at4" { "" } else { weapon_id }
+        );
+        assert_eq!(app.world().resource::<PlayerWeaponState>().rounds, 0);
+        let emitted = drain(&app, &mut sounds);
+        assert_eq!(
+            emitted
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    crate::audio::SfxEvent::Gunshot {
+                        kind: crate::audio::GunKind::At,
+                        ..
+                    }
+                ))
+                .count(),
+            1,
+            "{weapon_id}: one actual trigger produces one launcher sound"
+        );
+        assert_eq!(
+            emitted
+                .iter()
+                .filter(|event| matches!(event, crate::audio::SfxEvent::ShellBoom { .. }))
+                .count(),
+            1,
+            "{weapon_id}: one impact"
+        );
+    }
+}
+
+#[test]
+fn carried_small_arms_fire_does_not_damage_native_armor() {
+    let (obstacles, origin, target) = clear_native_firing_lane();
+    let direction = (target - origin).normalize();
+    obstacles.replace_dynamic(2, vec![native_hull(0x1_0000_0000 + 81, target, direction)]);
+    let mut app = handheld_app(
+        "t65k2",
+        2,
+        origin,
+        direction,
+        vec![armor_target(81, target, direction)],
+    );
+    install_native_shot_world(&mut app, obstacles);
+    let mut shots = MessageCursor::<Gunshot>::default();
+    for _ in 0..2 {
+        step(&mut app, 0.5);
+        assert_eq!(drain(&app, &mut shots).len(), 1);
+    }
+    let unit = &app.world().resource::<armor::ArmorFleet>().units[0];
+    assert_eq!(unit.hp, 100.0);
+    assert!(unit.active());
+    assert_eq!(app.world().resource::<GameState>().kills, 0);
+    assert_eq!(app.world().resource::<Inventory>().count("a556n"), 0);
+}
+
+#[test]
+fn handheld_target_hull_exemption_keeps_intervening_native_cover() {
+    for weapon_id in ["kestrel", "at4", "jav"] {
+        let (obstacles, origin, target) = clear_native_firing_lane();
+        let direction = (target - origin).normalize();
+        let target_id = 92;
+        obstacles.replace_dynamic(
+            2,
+            vec![native_hull(
+                0x1_0000_0000 + u64::from(target_id),
+                target,
+                direction,
+            )],
+        );
+        obstacles.replace_dynamic(
+            1,
+            vec![native_hull(17, origin.lerp(target, 0.5), direction)],
+        );
+        assert!(
+            obstacles
+                .segment_hit_except(
+                    origin,
+                    target,
+                    1.6,
+                    1.6,
+                    Some(0x1_0000_0000 + u64::from(target_id)),
+                )
+                .is_some()
+        );
+        let mut app = handheld_app(
+            weapon_id,
+            1,
+            origin,
+            direction,
+            vec![armor_target(target_id, target, direction)],
+        );
+        install_native_shot_world(&mut app, obstacles);
+        step(&mut app, 0.01);
+        let unit = &app.world().resource::<armor::ArmorFleet>().units[0];
+        assert_eq!(
+            unit.hp,
+            if weapon_id == "jav" { 0.0 } else { 100.0 },
+            "{weapon_id}"
+        );
+        assert_eq!(unit.destroyed, weapon_id == "jav", "{weapon_id}");
+        assert_eq!(
+            app.world()
+                .resource::<Inventory>()
+                .count(item(weapon_id).unwrap().ammo.unwrap()),
+            0
+        );
+    }
+}
+
+#[test]
+fn handheld_rockets_stop_at_an_original_wall_but_javelin_clears_it() {
+    let data = crate::map::world();
+    let obstacles = crate::map::Obstacles::new(data.clone());
+    let (origin, target) = data
+        .segs
+        .iter()
+        .filter(|segment| segment.bld.is_some() && segment.h.is_none_or(|h| h > 1.6))
+        .find_map(|segment| {
+            let edge = segment.b - segment.a;
+            let normal = Vec2::new(-edge.y, edge.x).normalize_or_zero();
+            let middle = (segment.a + segment.b) * 0.5;
+            [-1.0, 1.0].into_iter().find_map(|side| {
+                let origin = middle + normal * side * 4.0;
+                let target = middle - normal * side * 10.0;
+                (data.bld_at(origin).is_none()
+                    && data.free(origin, 0.6)
+                    && obstacles
+                        .segment_hit_except(origin, target, 1.6, 1.6, None)
+                        .is_some())
+                .then_some((origin, target))
+            })
+        })
+        .expect("one original exterior wall with a clear standing point");
+    let direction = (target - origin).normalize();
+    for weapon_id in ["kestrel", "at4", "jav"] {
+        let mut app = handheld_app(
+            weapon_id,
+            1,
+            origin,
+            direction,
+            vec![armor_target(105, target, direction)],
+        );
+        install_native_shot_world(&mut app, obstacles.clone());
+        step(&mut app, 0.01);
+        let unit = &app.world().resource::<armor::ArmorFleet>().units[0];
+        assert_eq!(
+            unit.hp,
+            if weapon_id == "jav" { 0.0 } else { 100.0 },
+            "{weapon_id}"
+        );
+        assert_eq!(unit.destroyed, weapon_id == "jav");
+        assert_eq!(
+            app.world()
+                .resource::<Inventory>()
+                .count(item(weapon_id).unwrap().ammo.unwrap()),
+            0
+        );
+    }
+}
+
+#[test]
+fn handheld_at_skips_captured_and_destroyed_units_without_repeat_kills() {
+    let mut captured = armor_target(1, Vec2::X * 12.0, Vec2::X);
+    captured.hp = 30.0;
+    captured.abandoned = true;
+    captured.captured_id = Some(900);
+    let mut wreck = armor_target(2, Vec2::X * 24.0, Vec2::X);
+    wreck.hp = 0.0;
+    wreck.destroyed = true;
+    let mut app = handheld_app(
+        "kestrel",
+        3,
+        Vec2::ZERO,
+        Vec2::X,
+        vec![captured, wreck, armor_target(3, Vec2::X * 36.0, Vec2::X)],
+    );
+    for _ in 0..2 {
+        step(&mut app, 3.0);
+        let units = &app.world().resource::<armor::ArmorFleet>().units;
+        assert_eq!((units[0].hp, units[0].captured_id), (30.0, Some(900)));
+        assert!(units[0].abandoned && !units[0].destroyed);
+        assert_eq!(units[1].hp, 0.0);
+        assert!(units[1].destroyed && !units[1].abandoned);
+        assert!(
+            units[2].destroyed,
+            "inactive front units must not absorb the live-target hit"
+        );
+        assert_eq!(app.world().resource::<GameState>().kills, 1);
+    }
+    assert_eq!(app.world().resource::<Inventory>().count("r67"), 1);
+}
+
+#[test]
+fn at4_stack_consumes_one_tube_and_requires_re_equipping_the_next() {
+    let mut app = handheld_app(
+        "at4",
+        2,
+        Vec2::ZERO,
+        Vec2::X,
+        vec![
+            armor_target(1, Vec2::X * 12.0, Vec2::X),
+            armor_target(2, Vec2::X * 24.0, Vec2::X),
+        ],
+    );
+    step(&mut app, 0.01);
+    assert_eq!(app.world().resource::<Inventory>().count("at4"), 1);
+    assert!(app.world().resource::<Inventory>().equipped.is_empty());
+    assert_eq!(app.world().resource::<GameState>().kills, 1);
+    // Keep holding the trigger beyond the launcher cooldown. Empty hands may
+    // swing, but they cannot spend the unselected remaining launcher tube.
+    for _ in 0..2 {
+        step(&mut app, 3.0);
+    }
+    assert_eq!(app.world().resource::<Inventory>().count("at4"), 1);
+    assert_eq!(app.world().resource::<PlayerWeaponState>().weapon, "");
+    assert_eq!(
+        app.world().resource::<armor::ArmorFleet>().units[1].hp,
+        100.0
+    );
+    app.world_mut().resource_mut::<Inventory>().equipped = "at4".into();
+    step(&mut app, 3.0);
+    assert_eq!(app.world().resource::<Inventory>().count("at4"), 0);
+    assert!(app.world().resource::<Inventory>().equipped.is_empty());
+    assert_eq!(app.world().resource::<GameState>().kills, 2);
+    assert!(app.world().resource::<armor::ArmorFleet>().units[1].destroyed);
+}
+
+#[test]
+fn an_empty_reusable_at_launcher_cannot_damage_armor_or_emit_an_impact() {
+    for weapon_id in ["kestrel", "jav"] {
+        let mut app = handheld_app(
+            weapon_id,
+            0,
+            Vec2::ZERO,
+            Vec2::X,
+            vec![armor_target(1, Vec2::X * 12.0, Vec2::X)],
+        );
+        let mut sounds = MessageCursor::<crate::audio::SfxEvent>::default();
+        step(&mut app, 0.01);
+        assert!(matches!(
+            drain(&app, &mut sounds).as_slice(),
+            [crate::audio::SfxEvent::DryFire]
+        ));
+        assert_eq!(
+            app.world().resource::<armor::ArmorFleet>().units[0].hp,
+            100.0
+        );
+        assert_eq!(app.world().resource::<GameState>().kills, 0);
+        assert_eq!(app.world().resource::<Inventory>().count(weapon_id), 1);
+    }
 }

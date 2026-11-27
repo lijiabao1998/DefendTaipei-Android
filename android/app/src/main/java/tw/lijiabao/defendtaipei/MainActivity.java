@@ -13,6 +13,9 @@ import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.util.Log;
 import android.view.Display;
 import android.view.View;
@@ -48,6 +51,8 @@ public class MainActivity extends GameActivity {
 
     private static native void nativePublishDeviceSnapshot(String json);
     private static native int nativeRequestedFrameRate();
+    private static native int nativeTakeHapticRequest();
+    private static native void nativeClearHapticRequest();
     private static native boolean nativeTakeReportShareRequest();
     private static native void nativeReportShareResult(int result);
 
@@ -57,6 +62,10 @@ public class MainActivity extends GameActivity {
     private PowerManager powerManager;
     private ActivityManager activityManager;
     private AudioManager audioManager;
+    private Vibrator vibrator;
+    private volatile Boolean hasVibrator;
+    private volatile long hapticIssuedCount;
+    private volatile Integer hapticLastDurationMs;
     private volatile boolean resumed;
     private volatile boolean focused;
     private volatile boolean destroyed;
@@ -72,6 +81,51 @@ public class MainActivity extends GameActivity {
         thermalStatus = validThermalStatus(status);
         publishSoon(false);
     };
+
+    // Short touch pulses must not wait for the two-second diagnostics poll.
+    // One tiny JNI atomic/mutex read per foreground UI frame; no background loop.
+    private final Runnable hapticPump = new Runnable() {
+        @Override
+        public void run() {
+            if (destroyed || !resumed || !focused) {
+                nativeClearHapticRequest();
+                return;
+            }
+            int duration = nativeTakeHapticRequest();
+            if (duration > 0 && duration <= 50) {
+                try {
+                    if (vibrator != null && Boolean.TRUE.equals(hasVibrator)) {
+                        vibrator.vibrate(VibrationEffect.createOneShot(duration, VibrationEffect.DEFAULT_AMPLITUDE));
+                        hapticIssuedCount++;
+                        hapticLastDurationMs = duration;
+                        Log.i("DTHAPTIC", "status=issued duration_ms=" + duration);
+                    } else {
+                        Log.i("DTHAPTIC", "status=unavailable");
+                    }
+                } catch (RuntimeException unavailable) {
+                    Log.i("DTHAPTIC", "status=unavailable reason=" + unavailable.getClass().getSimpleName());
+                }
+            }
+            getWindow().getDecorView().postOnAnimation(this);
+        }
+    };
+
+    private void syncHapticPump() {
+        View view = getWindow().getDecorView();
+        view.removeCallbacks(hapticPump);
+        if (!destroyed && resumed && focused) {
+            view.postOnAnimation(hapticPump);
+        } else {
+            nativeClearHapticRequest();
+            if (vibrator != null) {
+                try {
+                    vibrator.cancel();
+                } catch (RuntimeException ignored) {
+                    // Unsupported vendor haptics cannot block pause or teardown.
+                }
+            }
+        }
+    }
 
     private final Runnable monitor = new Runnable() {
         @Override
@@ -101,6 +155,13 @@ public class MainActivity extends GameActivity {
         powerManager = getSystemService(PowerManager.class);
         activityManager = getSystemService(ActivityManager.class);
         audioManager = getSystemService(AudioManager.class);
+        try {
+            VibratorManager manager = getSystemService(VibratorManager.class);
+            vibrator = manager == null ? null : manager.getDefaultVibrator();
+            hasVibrator = vibrator != null && vibrator.hasVibrator();
+        } catch (RuntimeException unavailable) {
+            hasVibrator = null;
+        }
         diagnosticsThread = new HandlerThread("DefendTaipei-device");
         diagnosticsThread.start();
         diagnosticsHandler = new Handler(diagnosticsThread.getLooper());
@@ -121,6 +182,7 @@ public class MainActivity extends GameActivity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        syncHapticPump();
         if (diagnosticsHandler != null) {
             diagnosticsHandler.removeCallbacks(monitor);
             diagnosticsHandler.post(monitor);
@@ -130,6 +192,7 @@ public class MainActivity extends GameActivity {
     @Override
     protected void onPause() {
         resumed = false;
+        syncHapticPump();
         if (diagnosticsHandler != null) {
             diagnosticsHandler.removeCallbacks(monitor);
         }
@@ -142,6 +205,7 @@ public class MainActivity extends GameActivity {
     protected void onDestroy() {
         destroyed = true;
         resumed = false;
+        syncHapticPump();
         if (thermalListenerRegistered && powerManager != null) {
             try {
                 powerManager.removeThermalStatusListener(thermalListener);
@@ -163,6 +227,7 @@ public class MainActivity extends GameActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         focused = hasFocus;
+        syncHapticPump();
         publishSoon(false);
         if (hasFocus) {
             hideSystemUi();
@@ -241,6 +306,9 @@ public class MainActivity extends GameActivity {
             data.put("sdk_int", Build.VERSION.SDK_INT);
             data.put("sampled_at_elapsed_ms", now);
             data.put("foreground", resumed && focused);
+            put(data, "has_vibrator", hasVibrator);
+            data.put("haptic_issued_count", hapticIssuedCount);
+            put(data, "haptic_last_duration_ms", hapticLastDurationMs);
             put(data, "thermal_status", thermalStatus);
             put(data, "thermal_headroom", thermalHeadroom);
             Long heavyAge = lastHeavySampleMs < 0 ? null : now - lastHeavySampleMs;

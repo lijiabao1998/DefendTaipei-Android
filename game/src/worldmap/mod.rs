@@ -311,8 +311,39 @@ pub(crate) fn toggle_rect(viewport: Vec2) -> ScreenRect {
     }
 }
 
-pub(crate) fn captures_pointer(viewport: Vec2, p: Vec2, open: bool) -> bool {
-    open || toggle_rect(viewport).contains(p)
+pub(crate) fn toggle_rect_for_controls(
+    viewport: Vec2,
+    button_percent: u8,
+    driving: bool,
+) -> ScreenRect {
+    let mut toggle = toggle_rect(viewport);
+    let pads = HudLayout::for_controls(viewport, button_percent, driving);
+    if driving && pads.orientation == crate::input::Orientation::Landscape {
+        let act = pads.act.expect("landscape driver has a primary button");
+        toggle = ScreenRect::new(
+            act.min.x - toggle.width() - 8.0,
+            act.max.y - toggle.height(),
+            toggle.width(),
+            toggle.height(),
+        );
+    } else if let Some(secondary) = pads.sec
+        && toggle.intersects(secondary)
+    {
+        let height = toggle.height();
+        toggle.max.y = secondary.min.y - 8.0;
+        toggle.min.y = toggle.max.y - height;
+    }
+    toggle
+}
+
+pub(crate) fn captures_pointer(
+    viewport: Vec2,
+    p: Vec2,
+    open: bool,
+    button_percent: u8,
+    driving: bool,
+) -> bool {
+    open || toggle_rect_for_controls(viewport, button_percent, driving).contains(p)
 }
 
 #[derive(Clone)]
@@ -491,7 +522,7 @@ impl MapGesture {
 fn pointer_start(
     id: u64,
     point: Vec2,
-    viewport: Vec2,
+    toggle: ScreenRect,
     player: Vec2,
     layout: &MapLayout,
     open: &mut MapOpen,
@@ -503,7 +534,7 @@ fn pointer_start(
         return;
     }
     if !open.0 {
-        if !modal.open && toggle_rect(viewport).contains(point) {
+        if !modal.open && toggle.contains(point) {
             open.0 = true;
             modal.open = true;
             modal.pointer_captured = true;
@@ -547,6 +578,10 @@ fn input(
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     player: Query<&Transform, With<Player>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
+    control_state: (
+        Option<Res<crate::input::ControlPreferences>>,
+        Option<Res<crate::vehicles::VehicleFleet>>,
+    ),
     pointer_inputs: (
         Res<ButtonInput<MouseButton>>,
         Res<Touches>,
@@ -562,6 +597,7 @@ fn input(
     mut modal: ResMut<UiModal>,
     mut saves: MessageWriter<SaveGame>,
 ) {
+    let (controls, fleet) = control_state;
     let (mouse, touches, mut touch_events) = pointer_inputs;
     // Read the ordered event stream even when closed, including complete taps
     // between two slow frames and multiple gestures reusing Android pointer 0.
@@ -593,10 +629,18 @@ fn input(
     if !window.focused {
         return;
     }
-    let map_key = keys.just_pressed(KeyCode::KeyM);
+    let controls = controls
+        .as_deref()
+        .unwrap_or_else(|| crate::input::ControlPreferences::default_ref());
+    let toggle = toggle_rect_for_controls(
+        viewport,
+        controls.button_percent,
+        fleet.as_ref().is_some_and(|fleet| fleet.current.is_some()),
+    );
+    let map_key = controls.just_pressed(&keys, crate::input::ControlAction::Map);
     let close_key = open.0 && keys.just_pressed(KeyCode::Escape);
     if map_key {
-        keys.clear_just_pressed(KeyCode::KeyM);
+        controls.clear_just_pressed(&mut keys, crate::input::ControlAction::Map);
     }
     if close_key {
         keys.clear_just_pressed(KeyCode::Escape);
@@ -633,7 +677,7 @@ fn input(
             TouchPhase::Started => pointer_start(
                 event.id,
                 event.position,
-                viewport,
+                toggle,
                 pos,
                 &layout,
                 &mut open,
@@ -674,7 +718,7 @@ fn input(
         pointer_start(
             u64::MAX,
             point,
-            viewport,
+            toggle,
             pos,
             &layout,
             &mut open,
@@ -809,6 +853,51 @@ mod tests {
             assert!(!button.intersects(pads.joy));
             assert!(pads.act.is_none_or(|r| !button.intersects(r)));
             assert!(pads.sec.is_none_or(|r| !button.intersects(r)));
+        }
+    }
+
+    #[test]
+    fn scaled_driving_map_targets_do_not_overlap_any_thumb_or_toolbar_target() {
+        for viewport in [
+            Vec2::new(320.0, 568.0),
+            Vec2::new(360.0, 640.0),
+            Vec2::new(390.0, 844.0),
+            Vec2::new(800.0, 360.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(1280.0, 720.0),
+        ] {
+            assert_eq!(
+                toggle_rect_for_controls(viewport, 100, false),
+                toggle_rect(viewport)
+            );
+            for percent in [85, 100, 110] {
+                for driving in [false, true] {
+                    let pads = HudLayout::for_controls(viewport, percent, driving);
+                    let map = toggle_rect_for_controls(viewport, percent, driving);
+                    assert!(map.min.cmpge(Vec2::ZERO).all() && map.max.cmple(viewport).all());
+                    for control in [Some(pads.joy), pads.act, pads.sec].into_iter().flatten() {
+                        assert!(
+                            !map.intersects(control),
+                            "{viewport:?}/{percent}/{driving}: {map:?} overlaps {control:?}"
+                        );
+                    }
+                    assert!(map.max.y <= viewport.y - pads.insets.bottom - 46.0);
+                    assert!(captures_pointer(
+                        viewport,
+                        map.center(),
+                        false,
+                        percent,
+                        driving
+                    ));
+                    assert!(pads.act.is_none_or(|act| !captures_pointer(
+                        viewport,
+                        act.center(),
+                        false,
+                        percent,
+                        driving
+                    )));
+                }
+            }
         }
     }
 }

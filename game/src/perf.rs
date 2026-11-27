@@ -1,6 +1,6 @@
 //! Opt-in overlay over real app-loop measurements. No per-frame sorting.
 use crate::{
-    input::safe_insets,
+    input::{Orientation, ScreenRect, orientation, safe_insets},
     performance::{
         EffectivePerformance, PerformanceMetrics, PerformancePreferences, render::RenderDimensions,
     },
@@ -14,6 +14,65 @@ struct PerfText;
 struct PerfTimers {
     display: f32,
     log: f32,
+}
+
+/// Reserve the full survival HUD and radio card, even when the current run has
+/// fewer condition rows. A very small viewport uses the full diagnostics page
+/// instead of painting telemetry across survival information or controls.
+pub(crate) fn overlay_layout(viewport: Vec2) -> Option<ScreenRect> {
+    overlay_layout_for_controls(viewport, false, 100)
+}
+
+fn overlay_layout_for_controls(
+    viewport: Vec2,
+    driving: bool,
+    button_percent: u8,
+) -> Option<ScreenRect> {
+    let safe = safe_insets(viewport);
+    let mut hud = crate::hud::survival_hud_layout(viewport, true);
+    let pad = crate::input::HudLayout::for_controls(viewport, button_percent, driving);
+    let controls_top = pad
+        .sec
+        .map_or(pad.joy.min.y, |sec| sec.min.y.min(pad.joy.min.y));
+    hud.hint.min.y = controls_top - 48.0;
+    hud.hint.max.y = controls_top - 8.0;
+    let portrait = orientation(viewport) == Orientation::Portrait;
+    let x = if portrait {
+        safe.left
+    } else {
+        hud.card.max.x + 8.0
+    };
+    let y = hud
+        .banner
+        .max
+        .y
+        .max(if portrait { 0.0 } else { hud.hint.max.y })
+        + 6.0
+        + if portrait && driving { 84.0 } else { 0.0 };
+    let right = if !portrait {
+        let controls = crate::input::HudLayout::for_controls(viewport, button_percent, driving);
+        controls
+            .act
+            .into_iter()
+            .chain(controls.sec)
+            .chain(Some(crate::worldmap::toggle_rect_for_controls(
+                viewport,
+                button_percent,
+                driving,
+            )))
+            .map(|rect| rect.min.x - 8.0)
+            .fold(viewport.x - safe.right, f32::min)
+    } else {
+        viewport.x - safe.right
+    };
+    let width = right - x;
+    let bottom = if portrait {
+        hud.hint.min.y - 6.0
+    } else {
+        viewport.y - safe.bottom - 54.0
+    };
+    let height = (bottom - y).min(84.0);
+    (width >= 180.0 && height >= 42.0).then(|| ScreenRect::new(x, y, width, height))
 }
 pub struct PerfPlugin;
 impl Plugin for PerfPlugin {
@@ -44,11 +103,11 @@ fn spawn_overlay(mut commands: Commands) {
             PerfRoot,
             Node {
                 position_type: PositionType::Absolute,
-                right: px(10),
+                left: px(10),
                 top: px(10),
                 padding: UiRect::axes(px(8), px(6)),
                 border_radius: BorderRadius::all(px(6)),
-                max_width: percent(42),
+                overflow: Overflow::clip(),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.65)),
@@ -89,6 +148,8 @@ fn display(
     effective: Res<EffectivePerformance>,
     dimensions: Res<RenderDimensions>,
     window: Option<Single<&Window, With<PrimaryWindow>>>,
+    fleet: Option<Res<crate::vehicles::VehicleFleet>>,
+    controls: Option<Res<crate::input::ControlPreferences>>,
     mut roots: Query<(&mut Node, &mut Visibility), With<PerfRoot>>,
     mut texts: Query<&mut Text, With<PerfText>>,
 ) {
@@ -96,19 +157,28 @@ fn display(
     timers.log += time.delta_secs();
     let enabled = environment_override().unwrap_or(preferences.overlay);
     for (mut node, mut visibility) in &mut roots {
-        visibility.set_if_neq(if enabled {
+        let driving = fleet.as_ref().is_some_and(|fleet| fleet.current.is_some());
+        let layout = window.as_ref().and_then(|window| {
+            if driving {
+                overlay_layout_for_controls(
+                    window.size(),
+                    true,
+                    controls.as_ref().map_or(100, |prefs| prefs.button_percent),
+                )
+            } else {
+                overlay_layout(window.size())
+            }
+        });
+        visibility.set_if_neq(if enabled && layout.is_some() {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         });
-        if let Some(window) = window.as_ref() {
-            let size = window.size();
-            let safe = safe_insets(size);
-            node.top = px(safe.top + 10.0);
-            node.right = px(safe.right + 10.0);
-            node.max_width = px((size.x * 0.42)
-                .min(size.x - safe.left - safe.right - 24.0)
-                .max(96.0));
+        if let Some(rect) = layout {
+            node.top = px(rect.min.y);
+            node.left = px(rect.min.x);
+            node.width = px(rect.width());
+            node.height = px(rect.height());
         }
     }
     let summary = &metrics.summary;
@@ -116,7 +186,7 @@ fn display(
         timers.display = 0.0;
         if enabled && let Ok(mut text) = texts.single_mut() {
             text.0 = format!(
-                "FPS {:.1} / {}{}\nP95 {:.1}  P99 {:.1} ms\n3D {}×{} · {}%\nentities {}\n{}",
+                "FPS {:.1} / {}{} · P95 {:.1} · P99 {:.1} ms\n3D {}×{} · {}% · entities {}\n{}",
                 summary.fps,
                 effective.target_fps,
                 if metrics.paused { " (paused)" } else { "" },
@@ -144,5 +214,85 @@ fn display(
             effective.render_scale,
             metrics.paused as u8
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_leave_the_map_and_actual_vehicle_panel_accessible() {
+        for size in [
+            Vec2::new(320.0, 568.0),
+            Vec2::new(360.0, 640.0),
+            Vec2::new(390.0, 844.0),
+            Vec2::new(800.0, 360.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(1280.0, 720.0),
+        ] {
+            for percent in [85, 100, 110] {
+                for driving in [false, true] {
+                    let Some(overlay) = overlay_layout_for_controls(size, driving, percent) else {
+                        continue;
+                    };
+                    let map = crate::worldmap::toggle_rect_for_controls(size, percent, driving);
+                    assert!(
+                        !overlay.intersects(map),
+                        "{size:?}/{percent}/{driving}: map overlaps diagnostics"
+                    );
+                    if driving {
+                        for conditions in [false, true] {
+                            for radio in [false, true] {
+                                let hud = crate::hud::survival_hud_layout_for_controls(
+                                    size, conditions, percent, true,
+                                );
+                                let geometry = crate::hud::HudGeometry {
+                                    viewport: size,
+                                    button_percent: percent,
+                                    card: Some(hud.card),
+                                    banner: radio.then_some(hud.banner),
+                                };
+                                for armored in [false, true] {
+                                    let panel = crate::vehicles::ui::panel_layout(
+                                        size,
+                                        Some(&geometry),
+                                        armored,
+                                    );
+                                    assert!(
+                                        !overlay.intersects(panel),
+                                        "{size:?}/{percent}/{conditions}/{radio}/{armored}: status overlaps diagnostics"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn portrait_and_landscape_diagnostics_never_cover_survival_instruments() {
+        for size in [
+            Vec2::new(390.0, 844.0),
+            Vec2::new(844.0, 390.0),
+            Vec2::new(1280.0, 720.0),
+            Vec2::new(720.0, 1280.0),
+        ] {
+            let overlay = overlay_layout(size).expect("normal viewport can show diagnostics");
+            let hud = crate::hud::survival_hud_layout(size, true);
+            for reserved in [hud.card, hud.banner, hud.hint] {
+                assert!(
+                    !overlay.intersects(reserved),
+                    "{size:?}: {overlay:?} intersects {reserved:?}"
+                );
+            }
+            let controls = crate::input::HudLayout::from_viewport(size);
+            assert!(!overlay.intersects(controls.joy));
+            assert!(controls.act.is_none_or(|rect| !overlay.intersects(rect)));
+            assert!(controls.sec.is_none_or(|rect| !overlay.intersects(rect)));
+            assert!(overlay.max.x <= size.x && overlay.max.y <= size.y);
+        }
     }
 }

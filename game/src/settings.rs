@@ -1,7 +1,10 @@
 //! Device preferences are independent of the permadeath game slot.
 //! Web reference: `src/ui/settings.ts`; day duration applies only to a new run.
 
-use crate::{audio::AudioSettings, i18n::Language, performance::PerformancePreferences};
+use crate::{
+    audio::AudioSettings, i18n::Language, input::ControlPreferences,
+    performance::PerformancePreferences,
+};
 use bevy::{
     prelude::*,
     window::{AppLifecycle, WindowFocused},
@@ -41,6 +44,7 @@ struct StoredSettings {
     day_hours: u8,
     language: String,
     performance: PerformancePreferences,
+    controls: ControlPreferences,
 }
 impl Default for StoredSettings {
     fn default() -> Self {
@@ -50,6 +54,7 @@ impl Default for StoredSettings {
             day_hours: 1,
             language: "zh-TW".into(),
             performance: PerformancePreferences::default(),
+            controls: ControlPreferences::default(),
         }
     }
 }
@@ -59,10 +64,12 @@ impl StoredSettings {
         preferences: &GamePreferences,
         language: Language,
         performance: &PerformancePreferences,
+        controls: &ControlPreferences,
     ) -> Self {
         Self {
             audio: (*audio).sanitize(),
             performance: (*performance).sanitize(),
+            controls: controls.clone().sanitize(),
             day_hours: if matches!(preferences.day_hours, 1 | 2 | 4) {
                 preferences.day_hours
             } else {
@@ -80,6 +87,7 @@ impl StoredSettings {
     fn normalize(mut self) -> Self {
         self.audio = self.audio.sanitize();
         self.performance = self.performance.sanitize();
+        self.controls = self.controls.sanitize();
         if !matches!(self.day_hours, 1 | 2 | 4) {
             self.day_hours = 1;
         }
@@ -105,6 +113,7 @@ impl Plugin for SettingsPlugin {
         app.init_resource::<AudioSettings>()
             .init_resource::<GamePreferences>()
             .init_resource::<PerformancePreferences>()
+            .init_resource::<ControlPreferences>()
             .init_resource::<Language>()
             .init_resource::<SettingsStatus>()
             .init_resource::<SaveState>()
@@ -122,6 +131,7 @@ fn load_settings(
     mut audio: ResMut<AudioSettings>,
     mut preferences: ResMut<GamePreferences>,
     mut performance: ResMut<PerformancePreferences>,
+    mut controls: ResMut<ControlPreferences>,
     mut language: ResMut<Language>,
     mut status: ResMut<SettingsStatus>,
     mut state: ResMut<SaveState>,
@@ -131,6 +141,7 @@ fn load_settings(
             *audio = value.audio;
             preferences.day_hours = value.day_hours;
             *performance = value.performance;
+            *controls = value.controls;
             *language = if value.language == "en" {
                 Language::En
             } else {
@@ -141,7 +152,7 @@ fn load_settings(
         Some(Err(error)) => status.error = Some(format!("Settings could not be read: {error}")),
         None => status.error = Some("Settings directory is unavailable".into()),
     }
-    let value = StoredSettings::current(&audio, &preferences, *language, &performance);
+    let value = StoredSettings::current(&audio, &preferences, *language, &performance, &controls);
     state.observed = Some(value.clone());
     state.written = Some(value);
 }
@@ -152,6 +163,7 @@ fn persist_settings(
     audio: Res<AudioSettings>,
     preferences: Res<GamePreferences>,
     performance: Res<PerformancePreferences>,
+    controls: Res<ControlPreferences>,
     language: Res<Language>,
     mut status: ResMut<SettingsStatus>,
     mut state: ResMut<SaveState>,
@@ -170,7 +182,7 @@ fn persist_settings(
     focus.clear();
     exits.clear();
     lifecycle.clear();
-    let current = StoredSettings::current(&audio, &preferences, *language, &performance);
+    let current = StoredSettings::current(&audio, &preferences, *language, &performance, &controls);
     if state.observed.as_ref() != Some(&current) {
         state.observed = Some(current.clone());
         state.settled = 0.0;
@@ -336,6 +348,16 @@ mod tests {
             render_scale: 85,
             overlay: true,
         };
+        app.world_mut()
+            .resource_mut::<ControlPreferences>()
+            .vibration = false;
+        app.world_mut()
+            .resource_mut::<ControlPreferences>()
+            .button_percent = 110;
+        app.world_mut()
+            .resource_mut::<ControlPreferences>()
+            .rebind(crate::input::ControlAction::Interact, KeyCode::KeyR)
+            .unwrap();
         app.world_mut().write_message(AppLifecycle::WillSuspend);
         app.update();
         let stored = read_settings(&dir.path()).unwrap().unwrap();
@@ -344,6 +366,12 @@ mod tests {
         assert_eq!(stored.performance.frame_cap, 90);
         assert_eq!(stored.performance.render_scale, 85);
         assert!(stored.performance.overlay);
+        assert!(!stored.controls.vibration);
+        assert_eq!(stored.controls.button_percent, 110);
+        assert_eq!(
+            stored.controls.key(crate::input::ControlAction::Interact),
+            KeyCode::KeyR
+        );
         drop(app);
         let mut restored = App::new();
         restored
@@ -355,6 +383,10 @@ mod tests {
         assert!(restored.world().resource::<AudioSettings>().muted);
         assert_eq!(restored.world().resource::<GamePreferences>().day_hours, 4);
         assert_eq!(*restored.world().resource::<Language>(), Language::En);
+        assert_eq!(
+            *restored.world().resource::<ControlPreferences>(),
+            stored.controls
+        );
         assert_eq!(
             *restored.world().resource::<PerformancePreferences>(),
             stored.performance
@@ -438,6 +470,7 @@ mod tests {
             &GamePreferences::default(),
             Language::ZhTw,
             &raw,
+            &ControlPreferences::default(),
         );
         write_settings(&dir.path(), &value).unwrap();
         let restored = read_settings(&dir.path()).unwrap().unwrap();

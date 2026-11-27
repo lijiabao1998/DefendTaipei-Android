@@ -1007,8 +1007,8 @@ fn render_information(root: &mut ChildSpawnerCommands, key: &RenderKey, font: &U
         match key.menu.help_page {
             0 => tr(
                 lang,
-                "移動\n拖曳左側搖桿；推到底可奔跑。\n\n戰鬥\n按住「打」攻擊；槍械需要對應彈藥。\n點「蹲」降低姿態，善用牆角與掩蔽物。\n\n視角\n雙指縮放；可隨時旋轉手機。\n鍵盤：WASD 移動，滑鼠左鍵攻擊。",
-                "MOVE\nDrag the left pad. Full deflection runs.\n\nFIGHT\nHold Attack. Guns need matching ammunition.\nTap Crouch and use corners and cover.\n\nCAMERA\nPinch to zoom; rotate your phone freely.\nWASD to move; left mouse to attack.\nM / Map: explore, pan, zoom and mark supplies.",
+                "移動\n拖曳左側搖桿；推到底可奔跑。\n\n戰鬥\n按住「打」攻擊；槍械需要對應彈藥。\n點「蹲」降低姿態，善用牆角與掩蔽物。\n\n視角\n雙指縮放；可隨時旋轉手機。\n預設：WASD 移動、C 蹲低、左鍵攻擊。\n設定 → 遊戲 → 操作可改按鍵與按鈕大小。",
+                "MOVE\nDrag the left pad. Full deflection runs.\n\nFIGHT\nHold Attack. Guns need matching ammunition.\nTap Crouch and use corners and cover.\n\nCAMERA\nPinch to zoom; rotate your phone freely.\nDefaults: WASD move, C crouch, left mouse fire.\nSettings → Game → Controls: keys and button size.",
             ),
             1 => tr(
                 lang,

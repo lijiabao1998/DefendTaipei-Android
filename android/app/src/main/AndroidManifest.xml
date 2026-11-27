@@ -5,6 +5,7 @@
     <!-- Bevy renders with wgpu on Vulkan. -->
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x400003" android:required="true" />
 
+    <uses-permission android:name="android.permission.VIBRATE" />
     <application
         android:icon="@mipmap/ic_launcher"
         android:label="Defend Taipei"

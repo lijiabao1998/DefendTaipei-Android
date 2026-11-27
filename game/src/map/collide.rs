@@ -3,8 +3,8 @@
 //! segments on an 8 m grid; a circle is pushed out of every segment near it.
 
 use bevy::prelude::*;
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 use super::data::{CELL, Seg, WorldData, seg_dist};
 use crate::combat::squad::Footprint;
@@ -12,7 +12,52 @@ use crate::combat::world::CombatWorld;
 
 /// The map's collision world. Cheap to clone (shared).
 #[derive(Resource, Clone)]
-pub struct Obstacles(pub Arc<WorldData>, crate::doors::DoorRuntime);
+pub struct Obstacles(
+    pub Arc<WorldData>,
+    crate::doors::DoorRuntime,
+    Arc<RwLock<BTreeMap<u8, Vec<DynamicCollider>>>>,
+);
+
+/// A live vehicle hull. Groups let civilian and hostile-armor systems replace
+/// their own colliders without dropping the other system's cover. Clones of
+/// `Obstacles` (including the combat world) observe the same published shapes.
+#[derive(Clone, Debug)]
+pub struct DynamicCollider {
+    pub id: u64,
+    pub corners: [Vec2; 4],
+    pub height: f32,
+}
+
+impl DynamicCollider {
+    fn segments(&self) -> impl Iterator<Item = Seg> + '_ {
+        (0..4).map(|i| Seg {
+            a: self.corners[i],
+            b: self.corners[(i + 1) % 4],
+            h: Some(self.height),
+            bld: None,
+        })
+    }
+    fn contains(&self, p: Vec2) -> bool {
+        convex_contains(self.corners, p)
+    }
+}
+
+fn convex_contains(corners: [Vec2; 4], p: Vec2) -> bool {
+    let mut sign = 0.0_f32;
+    for i in 0..4 {
+        let a = corners[i];
+        let d = corners[(i + 1) % 4] - a;
+        let cross = d.perp_dot(p - a);
+        if cross.abs() < 1e-5 {
+            continue;
+        }
+        if sign != 0.0 && sign.signum() != cross.signum() {
+            return false;
+        }
+        sign = cross;
+    }
+    true
+}
 
 /// A wall / cover hit along a segment query.
 #[derive(Clone, Copy, Debug)]
@@ -42,7 +87,58 @@ fn seg_inter(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> Option<(f32, f32)> {
 impl Obstacles {
     pub fn new(world: Arc<WorldData>) -> Self {
         let doors = crate::doors::DoorRuntime::new(&world);
-        Self(world, doors)
+        Self(world, doors, Arc::default())
+    }
+
+    pub fn replace_dynamic(&self, group: u8, colliders: Vec<DynamicCollider>) {
+        if let Ok(mut shared) = self.2.write() {
+            shared.insert(group, colliders);
+        }
+    }
+
+    fn dynamic(&self, ignore: Option<u64>, mut f: impl FnMut(&DynamicCollider)) {
+        if let Ok(shared) = self.2.read() {
+            for collider in shared.values().flatten() {
+                if ignore != Some(collider.id) {
+                    f(collider);
+                }
+            }
+        }
+    }
+
+    /// Test an oriented rectangular hull, including edges and contained cover.
+    /// A point-only test would let a long vehicle straddle a thin wall.
+    pub fn footprint_blocked(&self, corners: [Vec2; 4], ignore: Option<u64>) -> bool {
+        self.footprint_blocked_ignoring(corners, ignore.as_slice())
+    }
+
+    /// A contact response may move one hull out of another. Those two hulls
+    /// must not block that separating motion, but walls and every other hull do.
+    pub fn footprint_blocked_ignoring(&self, corners: [Vec2; 4], ignore: &[u64]) -> bool {
+        let mut blocked = corners.iter().any(|&p| self.static_blocked(p, 0.04));
+        let centre = corners.into_iter().sum::<Vec2>() * 0.25;
+        blocked |= self.static_blocked(centre, 0.04);
+        for i in 0..4 {
+            let a = corners[i];
+            let b = corners[(i + 1) % 4];
+            self.static_segs_along(a, b, |seg, _| {
+                blocked |=
+                    seg_inter(a, b, seg.a, seg.b).is_some() || convex_contains(corners, seg.a);
+            });
+        }
+        self.dynamic(None, |hull| {
+            if ignore.contains(&hull.id) {
+                return;
+            }
+            blocked |= hull.corners.iter().any(|&p| convex_contains(corners, p))
+                || corners.iter().any(|&p| hull.contains(p));
+            for i in 0..4 {
+                for seg in hull.segments() {
+                    blocked |= seg_inter(corners[i], corners[(i + 1) % 4], seg.a, seg.b).is_some();
+                }
+            }
+        });
+        blocked
     }
 
     pub fn doors(&self) -> &crate::doors::DoorRuntime {
@@ -54,7 +150,7 @@ impl Obstacles {
     }
 
     /// Segments whose grid cells the line p→q passes (los / shotRay walk).
-    fn segs_along(&self, p: Vec2, q: Vec2, mut f: impl FnMut(&Seg, bool)) {
+    fn static_segs_along(&self, p: Vec2, q: Vec2, mut f: impl FnMut(&Seg, bool)) {
         let d = q - p;
         let n = (d.length() / (CELL * 0.5)).ceil() as i32 + 1;
         let mut seen: HashSet<u32> = HashSet::new();
@@ -71,6 +167,19 @@ impl Obstacles {
             }
         }
         self.1.along(p, q, |seg| f(seg, true));
+    }
+
+    fn segs_along(&self, p: Vec2, q: Vec2, mut f: impl FnMut(&Seg, bool)) {
+        self.static_segs_along(p, q, &mut f);
+        self.dynamic(None, |hull| {
+            // A weapon's muzzle may start inside the vehicle carrying it.
+            // The target hull still blocks incoming fire from outside.
+            if !hull.contains(p) {
+                for seg in hull.segments() {
+                    f(&seg, true);
+                }
+            }
+        });
     }
 
     /// collide(): push a circle of radius r out of every wall / cover segment and keep it
@@ -102,6 +211,29 @@ impl Obstacles {
                     p = c + normal * r;
                 }
             });
+            self.dynamic(None, |hull| {
+                let inside = hull.contains(p);
+                let mut nearest = (f32::MAX, p, Vec2::X);
+                for seg in hull.segments() {
+                    let d = seg.b - seg.a;
+                    let t = ((p - seg.a).dot(d) / d.length_squared().max(1e-12)).clamp(0.0, 1.0);
+                    let c = seg.a + d * t;
+                    let distance = c.distance(p);
+                    if distance < nearest.0 {
+                        let centre = hull.corners.into_iter().sum::<Vec2>() * 0.25;
+                        let mut normal = Vec2::new(-d.y, d.x).normalize_or_zero();
+                        if normal.dot(c - centre) < 0.0 {
+                            normal = -normal;
+                        }
+                        nearest = (distance, c, normal);
+                    }
+                }
+                if inside {
+                    p = nearest.1 + nearest.2 * (r + 0.002);
+                } else if nearest.0 < r {
+                    p = nearest.1 + (p - nearest.1).normalize_or_zero() * (r + 0.002);
+                }
+            });
         }
         p.clamp(self.0.min, self.0.max)
     }
@@ -121,6 +253,18 @@ impl Obstacles {
 
     /// Would a circle at p overlap a wall, a building or the map edge?
     pub fn blocked(&self, p: Vec2, r: f32) -> bool {
+        self.blocked_except(p, r, None)
+    }
+
+    pub fn blocked_except(&self, p: Vec2, r: f32, ignore: Option<u64>) -> bool {
+        let mut blocked = self.static_blocked(p, r);
+        self.dynamic(ignore, |hull| {
+            blocked |= hull.contains(p) || hull.segments().any(|s| seg_dist(p, s.a, s.b) < r);
+        });
+        blocked
+    }
+
+    fn static_blocked(&self, p: Vec2, r: f32) -> bool {
         let mut door = false;
         self.1.near(p, r, |s| door |= seg_dist(p, s.a, s.b) < r);
         p.x < self.0.min.x + r
@@ -146,8 +290,19 @@ impl Obstacles {
     /// First wall / cover crossing p→q, for a ray at height y0 at p rising/falling to y1
     /// at q. Cover lower than the ray is skipped.
     pub fn segment_hit(&self, p: Vec2, q: Vec2, y0: f32, y1: f32) -> Option<SegmentHit> {
+        self.segment_hit_except(p, q, y0, y1, None)
+    }
+
+    pub fn segment_hit_except(
+        &self,
+        p: Vec2,
+        q: Vec2,
+        y0: f32,
+        y1: f32,
+        ignore: Option<u64>,
+    ) -> Option<SegmentHit> {
         let mut best: Option<SegmentHit> = None;
-        self.segs_along(p, q, |s, _| {
+        let mut test = |s: &Seg, _: bool| {
             if let Some((t, _)) = seg_inter(p, q, s.a, s.b) {
                 if best.is_some_and(|b| b.t <= t) {
                     return;
@@ -161,6 +316,14 @@ impl Obstacles {
                     h: s.h,
                     bld: s.bld,
                 });
+            }
+        };
+        self.static_segs_along(p, q, &mut test);
+        self.dynamic(ignore, |hull| {
+            if !hull.contains(p) {
+                for seg in hull.segments() {
+                    test(&seg, true);
+                }
             }
         });
         best
@@ -176,7 +339,7 @@ impl Obstacles {
         let d = q - p;
         let len = d.length().max(1e-6);
         let mut best = 1.0f32;
-        self.segs_along(p, q, |s, solid_near_origin| {
+        let mut test = |s: &Seg, solid_near_origin: bool| {
             let e = s.b - s.a;
             let den = d.x * e.y - d.y * e.x;
             if den.abs() < 1e-9 {
@@ -195,6 +358,16 @@ impl Obstacles {
                 return;
             }
             best = t;
+        };
+        self.static_segs_along(p, q, &mut test);
+        self.dynamic(None, |hull| {
+            // Combat applies an occupied vehicle's damage protection. Its own
+            // hull must not make the carried actor invisible and invulnerable.
+            if !hull.contains(p) && !hull.contains(q) {
+                for seg in hull.segments() {
+                    test(&seg, true);
+                }
+            }
         });
         best
     }
@@ -204,7 +377,9 @@ impl Obstacles {
         let mut best = None;
         let mut bd = 8.0;
         let dt = from.distance(tg);
-        for g in self.0.near_segs(from) {
+        let mut candidates: Vec<Seg> = self.0.near_segs(from).copied().collect();
+        self.dynamic(None, |hull| candidates.extend(hull.segments()));
+        for g in &candidates {
             if g.h.is_none() {
                 continue;
             }
@@ -237,6 +412,14 @@ impl Obstacles {
             let d = seg_dist(p, s.a, s.b);
             if d < r && best.is_none_or(|b| d < b.0) {
                 best = Some((d, s.h));
+            }
+        });
+        self.dynamic(None, |hull| {
+            for s in hull.segments() {
+                let d = seg_dist(p, s.a, s.b);
+                if d < r && best.is_none_or(|b| d < b.0) {
+                    best = Some((d, s.h));
+                }
             }
         });
         best.map(|b| b.1.unwrap_or(99.0) <= 1.6)

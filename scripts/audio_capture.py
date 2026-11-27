@@ -290,6 +290,9 @@ SCENARIOS = {
     'ambience': True, 'ambience_zero': False, 'paused': False,
     'resume': True, 'title_preview': True, 'radio': True, 'radio_zero': False,
     'live_muted': True, 'live_paused': True, 'live_background': True,
+    'armor_engine': True, 'armor_engine_zero': False,
+    'armor_engine_live_muted': True, 'armor_engine_live_paused': True,
+    'armor_engine_live_background': True,
 }
 
 
@@ -316,7 +319,7 @@ def main() -> None:
                 runtime = json.loads((scene / 'audio-scene.json').read_text())
                 if not runtime['success']:
                     raise AssertionError(runtime)
-                timing = runtime if name.startswith('live_') or name == 'resume' else None
+                timing = runtime if name.startswith(('live_', 'armor_engine_live_')) or name == 'resume' else None
                 stats = capture.stop(expect_audible=audible, scene_timing=timing)
                 report['scenarios'].append({'name': name, 'expect_audible': audible,
                                              'pcm': stats, 'runtime': runtime})
