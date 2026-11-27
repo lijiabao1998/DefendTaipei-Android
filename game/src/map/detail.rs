@@ -235,7 +235,7 @@ pub fn windows(b: &Bld, kit: &WindowKit, out: &mut Parts) {
         if lit {
             // lit rooms read warm through the glass (unlit-looking bright vertex colour)
             let c = if r.f() < 0.16 { 0xffb060 } else { r.pick(&LIT) };
-            out.add(Mat::Lamp, &kit.pane, base, hex(c));
+            out.add(Mat::WindowGlow, &kit.pane, base, hex(c));
         } else {
             let c = r.pick(&[0x3a4048u32, 0x48443c, 0x40404a]);
             out.add(Mat::VCol, &kit.pane, base, hex(c));
@@ -1435,7 +1435,7 @@ mod tests {
             building.id = id;
             let mut parts = Parts::default();
             windows(&building, &kit, &mut parts);
-            if parts.0.contains_key(&Mat::Lamp) {
+            if parts.0.contains_key(&Mat::WindowGlow) {
                 occupied += 1;
                 assert!(
                     !parts.0.contains_key(&Mat::Glass),

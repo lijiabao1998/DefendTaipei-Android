@@ -52,6 +52,7 @@ enum Action {
     Exterior(ExteriorScene),
     Commercial(CommercialScene),
     Streets(StreetScene),
+    Lighting(LightingScene),
     ChooseSurvivor,
     ReviewDeparture,
     Depart,
@@ -113,6 +114,36 @@ enum StreetScene {
     Scooters,
     Taxi,
     Truck,
+}
+
+/// Same real arcade/street camera across normal lighting states and one explicitly
+/// diagnostic direct-light-off control. The control is not a gameplay blackout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LightingScene {
+    Day,
+    Dusk,
+    Night,
+    NoSpillControl,
+    Blackout,
+    Restored,
+}
+
+impl LightingScene {
+    fn minute(self) -> f32 {
+        match self {
+            Self::Day => 720.0,
+            Self::Dusk => 1110.0,
+            _ => 1320.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LightingFixture {
+    building: u32,
+    position: Vec2,
+    zoom: f32,
+    scene: LightingScene,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -435,6 +466,42 @@ const STAGES: &[Stage] = &[
         flow: ExpectedFlow::Playing,
     },
     Stage {
+        name: "04d27-lighting-day-landscape",
+        size: [1280, 720],
+        action: Action::Lighting(LightingScene::Day),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d28-lighting-dusk-landscape",
+        size: [1280, 720],
+        action: Action::Lighting(LightingScene::Dusk),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d29-lighting-night-landscape",
+        size: [1280, 720],
+        action: Action::Lighting(LightingScene::Night),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d30-lighting-no-spill-control-landscape",
+        size: [1280, 720],
+        action: Action::Lighting(LightingScene::NoSpillControl),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d31-lighting-blackout-landscape",
+        size: [1280, 720],
+        action: Action::Lighting(LightingScene::Blackout),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "04d32-lighting-restored-landscape",
+        size: [1280, 720],
+        action: Action::Lighting(LightingScene::Restored),
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
         name: "04e-survivor-map-portrait",
         size: [390, 844],
         action: Action::Map,
@@ -545,6 +612,8 @@ struct Capture {
     commercial: Option<CommercialEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     streets: Option<StreetEvidence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lighting: Option<LightingEvidence>,
     #[serde(skip_serializing_if = "Option::is_none")]
     map_workload: Option<MapWorkload>,
 }
@@ -672,6 +741,135 @@ struct StreetEvidence {
     streaming: crate::map::MapRenderStats,
 }
 
+#[derive(Clone, Serialize)]
+struct LightingSlotEvidence {
+    slot: usize,
+    source_id: Option<u64>,
+    kind: String,
+    source: String,
+    source_position: [f32; 3],
+    source_direction: [f32; 3],
+    receiver: [f32; 3],
+    source_geometry_bounds: [[f32; 3]; 2],
+    source_geometry_verified: bool,
+    actual_position: [f32; 3],
+    actual_direction: [f32; 3],
+    intensity: f32,
+    range: f32,
+    radius: f32,
+    inner_angle: f32,
+    outer_angle: f32,
+    color: [f32; 3],
+    gain: f32,
+    shadow_maps: bool,
+    contact_shadows: bool,
+    inherited_visible: bool,
+    view_visible: bool,
+    in_main_view_cluster: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct LightingProbeRejection {
+    reason: &'static str,
+    building_id: Option<u32>,
+    world: [f32; 3],
+    point: Option<[u32; 2]>,
+}
+
+#[derive(Clone, Serialize)]
+struct LightingProbeScreening {
+    source_id: u64,
+    kind: String,
+    attempted: usize,
+    accepted_before_cap: usize,
+    rejected: std::collections::BTreeMap<&'static str, usize>,
+    examples: Vec<LightingProbeRejection>,
+}
+
+#[derive(Clone, Serialize, PartialEq)]
+struct LightingPixelProbe {
+    role: String,
+    source_id: Option<u64>,
+    /// Geometric coverage, including overlapping cones. The diagnostic tests
+    /// the whole city pool, not an individual emitter's isolated contribution.
+    geometric_cone_sources: Vec<u64>,
+    world: [f32; 3],
+    point: [u32; 2],
+}
+
+#[derive(Clone, Serialize)]
+struct LightingPixelEvidence {
+    probe: LightingPixelProbe,
+    rgb: [u8; 3],
+    luma: u8,
+}
+
+#[derive(Clone, Serialize)]
+struct LightingPixelComparison {
+    role: String,
+    source_id: Option<u64>,
+    point: [u32; 2],
+    reference_rgb: [u8; 3],
+    current_rgb: [u8; 3],
+    reference_luma: u8,
+    current_luma: u8,
+    difference: i16,
+    matched: bool,
+}
+
+#[derive(Clone, Serialize, PartialEq)]
+struct LightingMaterialEvidence {
+    role: &'static str,
+    base_color: [f32; 4],
+    emissive: [f32; 3],
+    roughness: f32,
+    metallic: f32,
+}
+
+#[derive(Clone, Serialize)]
+struct LightingEvidence {
+    measurement: &'static str,
+    scene: String,
+    diagnostic_direct_light_override: bool,
+    building_id: u32,
+    player: [f32; 3],
+    camera: [f32; 3],
+    zoom: f32,
+    minute: f32,
+    night: f32,
+    power: bool,
+    wetness: f32,
+    ambient: f32,
+    ambient_color: [f32; 3],
+    sun_illuminance: Vec<f32>,
+    sun_color: Vec<[f32; 3]>,
+    material_state: Vec<LightingMaterialEvidence>,
+    material_emissive: Vec<(&'static str, [f32; 3])>,
+    actual_pool_entities: usize,
+    actual_active_lights: usize,
+    city_point_lights: usize,
+    unrelated_point_lights: usize,
+    total_spot_lights: usize,
+    total_point_lights: usize,
+    stable_observation_frames: usize,
+    stable_source_slots: bool,
+    slots: Vec<LightingSlotEvidence>,
+    source_catalog_counts: [usize; 3],
+    probes: Vec<LightingPixelEvidence>,
+    probe_screening: Vec<LightingProbeScreening>,
+    comparison_reference: Option<&'static str>,
+    comparisons: Vec<LightingPixelComparison>,
+    ground_response_hits: usize,
+    ground_response_samples: usize,
+    unchanged_control_hits: usize,
+    unchanged_control_samples: usize,
+    window_response_hits: usize,
+    sign_response_hits: usize,
+    restoration_hits: usize,
+    restoration_samples: usize,
+    streaming: crate::map::MapRenderStats,
+}
+
 #[derive(Clone, Copy)]
 struct ExteriorFixture {
     building: u32,
@@ -721,6 +919,9 @@ struct QaRun {
     exterior: Option<ExteriorFixture>,
     commercial: Option<CommercialFixture>,
     streets: Option<StreetFixture>,
+    lighting: Option<LightingFixture>,
+    lighting_reference_probes: Vec<LightingPixelProbe>,
+    lighting_observations: Vec<Vec<Option<u64>>>,
     door_test_id: Option<u32>,
     barricade_planks: Option<u32>,
     loot_fixture: Option<String>,
@@ -745,6 +946,8 @@ struct CaptureTicket {
     commercial: Option<CommercialEvidence>,
     streets: Option<StreetEvidence>,
     street_pixels: Vec<StreetPixelProbe>,
+    lighting: Option<LightingEvidence>,
+    lighting_pixels: Vec<LightingPixelProbe>,
     map_workload: Option<MapWorkload>,
 }
 
@@ -766,11 +969,13 @@ impl Plugin for QaPlugin {
             std::env::var_os("DEFEND_TAIPEI_QA_COMMERCIAL_ONLY").is_some_and(|value| value == "1");
         let streets_only =
             std::env::var_os("DEFEND_TAIPEI_QA_STREETS_ONLY").is_some_and(|value| value == "1");
+        let lighting_only =
+            std::env::var_os("DEFEND_TAIPEI_QA_LIGHTING_ONLY").is_some_and(|value| value == "1");
         let stages: Vec<_> = STAGES
             .iter()
             .enumerate()
             .filter_map(|(index, stage)| {
-                ((!exterior_only && !commercial_only && !streets_only)
+                ((!exterior_only && !commercial_only && !streets_only && !lighting_only)
                     || index == 0
                     || matches!(
                         stage.action,
@@ -779,18 +984,25 @@ impl Plugin for QaPlugin {
                             | Action::Depart
                             | Action::Skip
                     )
-                    || (streets_only && matches!(stage.action, Action::Streets(_)))
-                    || (!streets_only
+                    || (lighting_only && matches!(stage.action, Action::Lighting(_)))
+                    || (!lighting_only
+                        && streets_only
+                        && matches!(stage.action, Action::Streets(_)))
+                    || (!lighting_only
+                        && !streets_only
                         && commercial_only
                         && matches!(stage.action, Action::Commercial(_)))
-                    || (!streets_only
+                    || (!lighting_only
+                        && !streets_only
                         && !commercial_only
                         && exterior_only
                         && matches!(stage.action, Action::Exterior(_))))
                 .then_some(index)
             })
             .collect();
-        let scope = if streets_only {
+        let scope = if lighting_only {
+            "lighting_subset"
+        } else if streets_only {
             "streets_subset"
         } else if commercial_only {
             "commercial_subset"
@@ -819,6 +1031,9 @@ impl Plugin for QaPlugin {
             exterior: None,
             commercial: None,
             streets: None,
+            lighting: None,
+            lighting_reference_probes: Vec::new(),
+            lighting_observations: Vec::new(),
             door_test_id: None,
             barricade_planks: None,
             loot_fixture: None,
@@ -929,6 +1144,8 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
     run.exterior = None;
     run.commercial = None;
     run.streets = None;
+    run.lighting = None;
+    run.lighting_observations.clear();
     println!("DTQA entering {}", stage.name);
     if run.stage > 0
         && matches!(
@@ -1069,6 +1286,33 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
             world
                 .resource_mut::<crate::survival::ShelterEnvironment>()
                 .power = true;
+            let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
+            progress.weather.next = 5000.0;
+            progress.weather.until = 0.0;
+            progress.weather.amount = 0.0;
+            progress.weather.intensity = 0.0;
+            progress.weather.wet = 0.0;
+        }
+        Action::Lighting(scene) => {
+            let fixture = lighting_fixture(crate::map::world(), scene, stage.size)?;
+            println!(
+                "DTQA lighting fixture scene={scene:?} building={} player={:?} zoom={}",
+                fixture.building, fixture.position, fixture.zoom
+            );
+            move_view(world, fixture.position, fixture.zoom)?;
+            run.scene_chunk = Some(crate::map::ChunkKey::of(
+                crate::map::world().blds[fixture.building as usize].c,
+            ));
+            run.lighting = Some(fixture);
+            if scene == LightingScene::Day {
+                run.lighting_reference_probes.clear();
+            }
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.resource_mut::<crate::ui::PauseOpen>().0 = false;
+            world.resource_mut::<Campaign>().game_min = scene.minute();
+            world
+                .resource_mut::<crate::survival::ShelterEnvironment>()
+                .power = scene != LightingScene::Blackout;
             let mut progress = world.resource_mut::<crate::worldplay::ScavengeState>();
             progress.weather.next = 5000.0;
             progress.weather.until = 0.0;
@@ -1322,13 +1566,13 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
         }
         Action::Map => {
             // Resume the pre-existing route at its exterior-cutaway camera,
-            // time, power and weather after the commercial/street sequences.
+            // time, power and weather after the commercial/street/lighting sequences.
             // Exploration from the extra real-world fixture positions remains;
             // these stages are retained, not claimed to have identical pixels.
             if run.stage > 0
                 && matches!(
                     STAGES[run.stages[run.stage - 1]].action,
-                    Action::Commercial(_) | Action::Streets(_)
+                    Action::Commercial(_) | Action::Streets(_) | Action::Lighting(_)
                 )
             {
                 let previous =
@@ -2537,6 +2781,1099 @@ fn commercial_evidence(
     })
 }
 
+fn lighting_fixture(
+    data: &crate::map::WorldData,
+    scene: LightingScene,
+    size: [u32; 2],
+) -> Result<LightingFixture, String> {
+    use crate::map::atmosphere::{CITY_LIGHT_COUNT, LightKind, LightSiteIndex, plan_city_lights};
+    use crate::map::commercial::{geometry, plan};
+    let kit = crate::map::detail::WindowKit::new();
+    let sites = plan_city_lights(data);
+    let index = LightSiteIndex::new(&sites);
+    let mut candidates = Vec::new();
+    let mut rejected = [0_usize; 5];
+    // The old compact-shop showcase has only two admissible arcades: one has
+    // no originally occupied windows and the other has no nearby street lamp.
+    // Lighting uses its own real-world selector, without changing either shop.
+    for building in &data.blds {
+        if building.arcade.is_none() || building.sign.is_none() {
+            continue;
+        }
+        let Some(layout) = plan(building, data) else {
+            continue;
+        };
+        let front = layout.frontage;
+        if front.n.dot(Vec2::ONE.normalize()) < 0.6
+            || front.width > 24.0
+            || !exterior_camera_clear(
+                data,
+                building.id,
+                Vec3::new(front.centre().x, 2.4, front.centre().y),
+            )
+        {
+            rejected[0] += 1;
+            continue;
+        }
+        let mut windows = crate::map::build::Parts::default();
+        crate::map::detail::windows(building, &kit, &mut windows);
+        let glow = windows.0.get(&crate::map::build::Mat::WindowGlow);
+        let window_points = glow.map_or_else(Vec::new, |mesh| {
+            mesh.pos
+                .iter()
+                .zip(&mesh.nrm)
+                .filter(|(_, normal)| {
+                    Vec3::from(**normal).dot(crate::camera::CAM_OFFSET.normalize()) > 0.2
+                })
+                .map(|(point, _)| Vec3::from(*point))
+                .collect::<Vec<_>>()
+        });
+        if window_points.is_empty() {
+            rejected[1] += 1;
+            continue;
+        }
+        let lowest = window_points
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::MAX, f32::min);
+        let generated = geometry(building, &layout, crate::map::Lod::Near);
+        let mut bounds: Vec<Vec3> = generated
+            .base
+            .0
+            .values()
+            .chain(generated.shell.0.values())
+            .flat_map(|mesh| mesh.pos.iter().copied().map(Vec3::from))
+            .collect();
+        // Frame the existing lower occupied room together with the shop and
+        // ground receivers; the tall roof need not dictate the lighting camera.
+        bounds.extend(
+            window_points
+                .into_iter()
+                .filter(|point| point.y <= lowest + 1.5),
+        );
+        'positions: for distance in [2.0, 3.0, 4.5, 6.0, 7.5, 9.0] {
+            for lateral in [0.0, -1.5, 1.5, -3.0, 3.0] {
+                let position = front.centre() + front.n * distance + front.u * lateral;
+                if !position.cmpge(data.min + 1.0).all()
+                    || !position.cmple(data.max - 1.0).all()
+                    || !street_player_position_clear(data, position)
+                    || building.c.distance(position) >= 65.0
+                    || crate::map::exterior_blocks_camera(building, position)
+                {
+                    rejected[2] += 1;
+                    continue;
+                }
+                let selection = index.select(&sites, position, &[None; CITY_LIGHT_COUNT]);
+                let selected: Vec<_> = selection
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|id| sites.iter().find(|site| site.id == id))
+                    .collect();
+                if ![LightKind::Street, LightKind::Sign, LightKind::Arcade]
+                    .iter()
+                    .all(|kind| selected.iter().any(|site| site.kind == *kind))
+                {
+                    rejected[3] += 1;
+                    continue;
+                }
+                let mut framed = bounds.clone();
+                for site in selected
+                    .iter()
+                    .filter(|site| site.kind != LightKind::Street)
+                    .chain(
+                        selected
+                            .iter()
+                            .filter(|site| site.kind == LightKind::Street)
+                            .take(1),
+                    )
+                {
+                    framed.push(site.receiver - Vec3::new(1.2, 0.0, 1.2));
+                    framed.push(site.receiver + Vec3::new(1.2, 0.0, 1.2));
+                }
+                let Some(zoom) = commercial_zoom(&framed, position, size) else {
+                    rejected[4] += 1;
+                    continue;
+                };
+                candidates.push(LightingFixture {
+                    building: building.id,
+                    position,
+                    zoom,
+                    scene,
+                });
+                break 'positions;
+            }
+        }
+    }
+    candidates.into_iter().max_by(|a, b| a.zoom.total_cmp(&b.zoom)
+        .then_with(|| b.position.distance_squared(data.spawn).total_cmp(&a.position.distance_squared(data.spawn)))
+        .then(b.building.cmp(&a.building)))
+        .ok_or_else(|| format!("No original lighting fixture; rejection counts frontage/window/vehicle/source/framing={rejected:?}"))
+}
+
+fn lighting_ready(world: &mut World, fixture: LightingFixture) -> bool {
+    use crate::map::{BldDetail, BldRoof, MapMeshMaterial, build::Mat};
+    if !commercial_ready(
+        world,
+        CommercialFixture {
+            building: fixture.building,
+            position: fixture.position,
+            zoom: fixture.zoom,
+            scene: CommercialScene::Arcade,
+        },
+    ) {
+        return false;
+    }
+    let Some(main_view) = main_camera_meshes(world) else {
+        return false;
+    };
+    let mut window = false;
+    let mut arcade = false;
+    for (entity, detail, roof, material, inherited, visibility) in world
+        .query::<(
+            Entity,
+            Option<&BldDetail>,
+            Option<&BldRoof>,
+            &MapMeshMaterial,
+            &InheritedVisibility,
+            &ViewVisibility,
+        )>()
+        .iter(world)
+    {
+        if inherited.get() && visibility.get() && main_view.contains(&entity) {
+            window |= detail.is_some_and(|owner| owner.0 == fixture.building)
+                && material.0 == Mat::WindowGlow;
+            arcade |= roof.is_some_and(|owner| owner.0 == fixture.building)
+                && material.0 == Mat::ArcadeGlow;
+        }
+    }
+    window && arcade
+}
+
+fn lighting_color(color: Color) -> [f32; 3] {
+    let color = color.to_srgba();
+    [color.red, color.green, color.blue]
+}
+
+/// Check the emitter against independently generated original fixture geometry.
+/// An emissive material is evidence of the fixture, never evidence of spill.
+fn lighting_source_bounds(
+    site: &crate::map::atmosphere::LightSite,
+) -> Result<[[f32; 3]; 2], String> {
+    use crate::map::{atmosphere::LightSource, build::Mat, street::PropKind};
+    let data = crate::map::world();
+    let (parts, material, allowance) = match site.source {
+        LightSource::Street { prop_index } => {
+            let prop = data
+                .props
+                .get(prop_index)
+                .ok_or("City light references missing prop")?;
+            if prop.kind != PropKind::Lamp {
+                return Err("City street source is not a street lamp".into());
+            }
+            (crate::map::street::prop_geometry(prop), Mat::Lamp, 0.22)
+        }
+        LightSource::Sign { building_id } => {
+            let building = data
+                .blds
+                .get(building_id as usize)
+                .ok_or("City light references missing sign building")?;
+            if building.sign.is_none() {
+                return Err("City sign source has no original sign".into());
+            }
+            let mut meshes = crate::map::build::building(building, crate::map::Lod::Near);
+            meshes.roof.merge(meshes.base);
+            meshes.roof.merge(meshes.structure);
+            (meshes.roof, Mat::Sign, 0.65)
+        }
+        LightSource::Arcade {
+            building_id,
+            bay_index,
+        } => {
+            let building = data
+                .blds
+                .get(building_id as usize)
+                .ok_or("City light references missing arcade building")?;
+            let fixture = crate::map::atmosphere::arcade_lamp_position(building, bay_index)
+                .ok_or("City arcade source references missing original bay")?;
+            if site.position.distance(fixture) > 0.075 {
+                return Err("City arcade emitter moved away from original bay fixture".into());
+            }
+            (
+                crate::map::build::building(building, crate::map::Lod::Near).roof,
+                Mat::ArcadeGlow,
+                0.10,
+            )
+        }
+    };
+    let mesh = parts
+        .0
+        .get(&material)
+        .ok_or_else(|| format!("City source has no original {material:?} geometry"))?;
+    let (lo, hi) = mesh.pos.iter().fold(
+        (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)),
+        |(lo, hi), point| (lo.min(Vec3::from(*point)), hi.max(Vec3::from(*point))),
+    );
+    if mesh.is_empty()
+        || !site.position.cmpge(lo - allowance).all()
+        || !site.position.cmple(hi + allowance).all()
+        || site.id != site.source.id()
+        || site.kind != site.source.kind()
+        || site.direction.y >= -0.7
+        || (site.direction.length() - 1.0).abs() > 0.0001
+        || site.position.distance(site.receiver) >= site.range
+    {
+        return Err(format!(
+            "City source {} fails original geometry/direction/receiver bounds",
+            site.id
+        ));
+    }
+    Ok([lo.to_array(), hi.to_array()])
+}
+
+fn lighting_evidence(
+    world: &mut World,
+    fixture: LightingFixture,
+    observations: &[Vec<Option<u64>>],
+) -> Result<LightingEvidence, String> {
+    use crate::map::atmosphere::{
+        AtmosphereState, CITY_LIGHT_COUNT, CityLightSites, CitySpill, LightKind, lighting_profile,
+    };
+    let sites = world.resource::<CityLightSites>().sites.clone();
+    let mut catalog_counts = [0; 3];
+    for site in &sites {
+        catalog_counts[match site.kind {
+            LightKind::Street => 0,
+            LightKind::Sign => 1,
+            LightKind::Arcade => 2,
+        }] += 1;
+    }
+    let power = fixture.scene != LightingScene::Blackout;
+    let diagnostic = fixture.scene == LightingScene::NoSpillControl;
+    let profile = lighting_profile(fixture.scene.minute(), power, 0.0, 0.0);
+    let player = player_position(world)?;
+    if player.xz().distance(fixture.position) > 0.001
+        || !street_player_position_clear(crate::map::world(), player.xz())
+    {
+        return Err("Lighting player is moved or inside a parked vehicle/wall".into());
+    }
+    let camera = world
+        .query_filtered::<&GlobalTransform, With<GameCamera>>()
+        .iter(world)
+        .next()
+        .ok_or("Lighting camera is missing")?
+        .translation()
+        .to_array();
+    let city_points = world
+        .query_filtered::<&PointLight, With<CitySpill>>()
+        .iter(world)
+        .count();
+    let unrelated_points = world
+        .query_filtered::<&PointLight, Without<CitySpill>>()
+        .iter(world)
+        .count();
+    let pool_entities = world.query::<&CitySpill>().iter(world).count();
+    let total_spots = world.query::<&SpotLight>().iter(world).count();
+    let total_points = world.query::<&PointLight>().iter(world).count();
+    let main_view_lights: HashSet<Entity> = world
+        .query_filtered::<&bevy::camera::visibility::VisibleEntities, With<GameCamera>>()
+        .iter(world)
+        .next()
+        .map(|visible| {
+            visible
+                .iter(TypeId::of::<bevy::light::cluster::ClusterVisibilityClass>())
+                .copied()
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut slots = Vec::new();
+    let mut identities = HashSet::new();
+    for (entity, slot, light, transform, global, inherited, view) in world
+        .query::<(
+            Entity,
+            &CitySpill,
+            &SpotLight,
+            &Transform,
+            &GlobalTransform,
+            &InheritedVisibility,
+            &ViewVisibility,
+        )>()
+        .iter(world)
+    {
+        let actual_position = global.translation();
+        let direction = transform.rotation * -Vec3::Z;
+        let site = slot
+            .site
+            .map(|id| {
+                sites.iter().find(|site| site.id == id).ok_or_else(|| {
+                    format!("City slot {} references missing source {id}", slot.slot)
+                })
+            })
+            .transpose()?;
+        let mut bounds = [[0.0; 3]; 2];
+        if let Some(site) = site {
+            bounds = lighting_source_bounds(site)?;
+            let expected = if diagnostic {
+                0.0
+            } else {
+                site.intensity * profile.lamp_strength * slot.gain
+            };
+            if !identities.insert(site.id)
+                || (site.kind == LightKind::Street) != (slot.slot < 4)
+                || actual_position.distance(site.position) > 0.001
+                || direction.distance(site.direction) > 0.0001
+                || (light.range - site.range).abs() > 0.0001
+                || (light.inner_angle - site.inner_angle).abs() > 0.0001
+                || (light.outer_angle - site.outer_angle).abs() > 0.0001
+                || lighting_color(light.color) != lighting_color(site.color)
+                || (light.intensity - expected).abs() > site.intensity * 0.002 + 0.01
+                || (profile.lamp_strength > 0.0
+                    && site.position.xz().distance(player.xz()) > 36.001)
+            {
+                return Err(format!(
+                    "City spotlight {} differs from its original source, slot class or real light parameters",
+                    slot.slot
+                ));
+            }
+        } else if light.intensity != 0.0 {
+            return Err("Unassigned city spotlight is emitting".into());
+        }
+        if light.shadow_maps_enabled
+            || light.contact_shadows_enabled
+            || !light.intensity.is_finite()
+            || light.intensity < 0.0
+            || !(0.0..=1.0).contains(&slot.gain)
+        {
+            return Err("City spotlight exceeds the shadowless pool contract".into());
+        }
+        slots.push(LightingSlotEvidence {
+            slot: slot.slot,
+            source_id: slot.site,
+            kind: site.map_or_else(|| "None".into(), |site| format!("{:?}", site.kind)),
+            source: site.map_or_else(|| "None".into(), |site| format!("{:?}", site.source)),
+            source_position: site.map_or([0.0; 3], |site| site.position.to_array()),
+            source_direction: site.map_or([0.0; 3], |site| site.direction.to_array()),
+            receiver: site.map_or([0.0; 3], |site| site.receiver.to_array()),
+            source_geometry_bounds: bounds,
+            source_geometry_verified: site.is_some(),
+            actual_position: actual_position.to_array(),
+            actual_direction: direction.to_array(),
+            intensity: light.intensity,
+            range: light.range,
+            radius: light.radius,
+            inner_angle: light.inner_angle,
+            outer_angle: light.outer_angle,
+            color: lighting_color(light.color),
+            gain: slot.gain,
+            shadow_maps: light.shadow_maps_enabled,
+            contact_shadows: light.contact_shadows_enabled,
+            inherited_visible: inherited.get(),
+            view_visible: view.get(),
+            in_main_view_cluster: main_view_lights.contains(&entity),
+        });
+    }
+    slots.sort_by_key(|slot| slot.slot);
+    let active = slots.iter().filter(|slot| slot.intensity > 0.0).count();
+    let stable = observations.len() == 30 && observations.windows(2).all(|pair| pair[0] == pair[1]);
+    if pool_entities != CITY_LIGHT_COUNT
+        || total_spots != CITY_LIGHT_COUNT
+        || total_points != 1
+        || slots.len() != CITY_LIGHT_COUNT
+        || city_points != 0
+        || slots
+            .iter()
+            .enumerate()
+            .any(|(index, slot)| slot.slot != index)
+        || !stable
+    {
+        return Err(format!(
+            "Lighting pool/stability mismatch: entities={pool_entities} spots={} points={city_points} stable={stable}",
+            slots.len()
+        ));
+    }
+    let atmosphere = world.resource::<AtmosphereState>();
+    if atmosphere.power != power
+        || (atmosphere.night - profile.night).abs() > 0.002
+        || atmosphere.wetness != 0.0
+        || atmosphere.active_lights != active
+        || ((diagnostic || profile.lamp_strength == 0.0) && active != 0)
+        || (!diagnostic && profile.lamp_strength > 0.0 && active == 0)
+        || (profile.lamp_strength > 0.0
+            && slots
+                .iter()
+                .any(|slot| slot.source_id.is_some() && slot.gain < 0.999))
+    {
+        return Err(format!(
+            "Lighting actual pool disagrees with gameplay/profile: {atmosphere:?}, active={active}"
+        ));
+    }
+    let night = atmosphere.night;
+    let wetness = atmosphere.wetness;
+    let city = world
+        .resource::<crate::map::textures::MapMaterials>()
+        .clone();
+    let mut handles = vec![
+        ("street_lamp", city.lamp),
+        ("occupied_window", city.window_glow),
+        ("arcade_fixture", city.arcade_glow),
+        ("sign", city.signs),
+        ("projecting_sign", city.vsigns),
+        ("road", city.road),
+        ("ground", city.ground),
+        ("walk", city.walk),
+        ("curb", city.curb),
+    ];
+    for handle in city.arcade_floor {
+        handles.push(("arcade_floor", handle));
+    }
+    let material_state = handles
+        .into_iter()
+        .map(|(role, handle)| {
+            let material = world
+                .resource::<Assets<StandardMaterial>>()
+                .get(&handle)
+                .ok_or_else(|| format!("Lighting material {role} is absent"))?;
+            let base = material.base_color.to_srgba();
+            Ok(LightingMaterialEvidence {
+                role,
+                base_color: [base.red, base.green, base.blue, base.alpha],
+                emissive: [
+                    material.emissive.red,
+                    material.emissive.green,
+                    material.emissive.blue,
+                ],
+                roughness: material.perceptual_roughness,
+                metallic: material.metallic,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let material_emissive = material_state
+        .iter()
+        .take(5)
+        .map(|material| (material.role, material.emissive))
+        .collect::<Vec<_>>();
+    if material_emissive.iter().any(|(_, rgb)| {
+        if profile.lamp_strength == 0.0 {
+            rgb.iter().any(|value| *value != 0.0)
+        } else {
+            rgb.iter().any(|value| *value <= 0.0)
+        }
+    }) {
+        return Err("Lighting emission does not follow power/daylight".into());
+    }
+    let sun = world
+        .query::<&DirectionalLight>()
+        .iter(world)
+        .map(|light| (light.illuminance, lighting_color(light.color)))
+        .collect::<Vec<_>>();
+    let ambient = world.resource::<GlobalAmbientLight>();
+    let expected_sun_color = [
+        0.58 + 0.42 * profile.daylight,
+        0.67 + 0.26 * profile.daylight,
+        0.9 - 0.1 * profile.daylight,
+    ];
+    let expected_ambient_color = [
+        0.55 + 0.26 * profile.daylight,
+        0.65 + 0.24 * profile.daylight,
+        0.84 + 0.16 * profile.daylight,
+    ];
+    if (ambient.brightness - profile.ambient).abs() > 1.0
+        || sun.len() != 1
+        || sun.iter().any(|(illuminance, color)| {
+            (illuminance - profile.sun).abs() > 24.0
+                || color
+                    .iter()
+                    .zip(expected_sun_color)
+                    .any(|(actual, expected)| (actual - expected).abs() > 0.002)
+        })
+        || lighting_color(ambient.color)
+            .iter()
+            .zip(expected_ambient_color)
+            .any(|(actual, expected)| (actual - expected).abs() > 0.002)
+    {
+        return Err("Lighting actual ambient/sun does not follow the unchanged curve".into());
+    }
+    Ok(LightingEvidence {
+        measurement: "actual_shadowless_spot_components_source_geometry_and_paired_gpu_pixels_not_full_occlusion",
+        scene: format!("{:?}", fixture.scene),
+        diagnostic_direct_light_override: diagnostic,
+        building_id: fixture.building,
+        player: player.to_array(),
+        camera,
+        zoom: world.resource::<CameraZoom>().0,
+        minute: fixture.scene.minute(),
+        night,
+        power,
+        wetness,
+        ambient: ambient.brightness,
+        ambient_color: lighting_color(ambient.color),
+        sun_illuminance: sun.iter().map(|value| value.0).collect(),
+        sun_color: sun.iter().map(|value| value.1).collect(),
+        material_emissive,
+        material_state,
+        actual_pool_entities: pool_entities,
+        actual_active_lights: active,
+        city_point_lights: city_points,
+        unrelated_point_lights: unrelated_points,
+        total_spot_lights: total_spots,
+        total_point_lights: total_points,
+        stable_observation_frames: observations.len(),
+        stable_source_slots: stable,
+        slots,
+        source_catalog_counts: catalog_counts,
+        probes: Vec::new(),
+        probe_screening: Vec::new(),
+        comparison_reference: None,
+        comparisons: Vec::new(),
+        ground_response_hits: 0,
+        ground_response_samples: 0,
+        unchanged_control_hits: 0,
+        unchanged_control_samples: 0,
+        window_response_hits: 0,
+        sign_response_hits: 0,
+        restoration_hits: 0,
+        restoration_samples: 0,
+        streaming: world.resource::<crate::map::MapRenderStats>().clone(),
+    })
+}
+
+/// The original arcade is open below its ceiling. Treating it as a solid tower
+/// incorrectly removes every floor receiver; other buildings still screen rays.
+fn lighting_camera_obstruction(
+    data: &crate::map::WorldData,
+    target: Vec3,
+    trees: &[Vec2],
+) -> Option<(&'static str, Option<u32>)> {
+    use crate::map::data::{ARC, GF};
+    let direction = Vec2::ONE.normalize();
+    for step in 1..=144 {
+        let distance = step as f32 * 0.25;
+        let p = target.xz() + direction * distance;
+        let height = target.y + distance * crate::camera::CAM_OFFSET.y / 40.0_f32.hypot(40.0);
+        if let Some(building) = data.bld_at(p) {
+            let open = building.h + 3.5 < height
+                || building.arcade.is_some_and(|arcade| {
+                    let delta = p - arcade.a;
+                    (0.0..=arcade.dl).contains(&delta.dot(arcade.u))
+                        && (0.0..=ARC).contains(&-delta.dot(arcade.n))
+                        && height < GF - 0.3
+                });
+            if !open {
+                return Some(("building_envelope", Some(building.id)));
+            }
+        }
+        if height < 8.0 && trees.iter().any(|tree| tree.distance(p) < 2.3) {
+            return Some(("tree_envelope", None));
+        }
+    }
+    None
+}
+
+fn lighting_in_cone(slot: &LightingSlotEvidence, point: Vec3, margin: f32) -> bool {
+    if slot.source_id.is_none() {
+        return false;
+    }
+    let delta = point - Vec3::from(slot.actual_position);
+    let length = delta.length();
+    length > 0.001
+        && length < slot.range + margin
+        && Vec3::from(slot.actual_direction).dot(delta / length)
+            > (slot.outer_angle + margin / length).cos()
+}
+
+fn lighting_pixel_probes(
+    world: &mut World,
+    fixture: LightingFixture,
+    size: [u32; 2],
+    evidence: &mut LightingEvidence,
+) -> Result<Vec<LightingPixelProbe>, String> {
+    use crate::map::build::Mat;
+    let data = crate::map::world();
+    let building = &data.blds[fixture.building as usize];
+    let (camera, camera_transform) = world
+        .query_filtered::<(&Camera, &GlobalTransform), With<GameCamera>>()
+        .iter(world)
+        .next()
+        .ok_or("Lighting camera is absent")?;
+    let project = |point: Vec3| -> Option<[u32; 2]> {
+        let pixel = camera.world_to_viewport(camera_transform, point).ok()?;
+        let (x, y) = (pixel.x / size[0] as f32, pixel.y / size[1] as f32);
+        // Exclude status text, minimap, touch controls and interaction prompts.
+        if !(0.035..=0.965).contains(&x)
+            || !(0.07..=0.82).contains(&y)
+            || (x < 0.32 && y < 0.33)
+            || (x < 0.23 && y > 0.63)
+            || ((0.27..=0.71).contains(&x) && y > 0.65)
+            || (x > 0.80 && y > 0.62)
+        {
+            return None;
+        }
+        Some([pixel.x.round() as u32, pixel.y.round() as u32])
+    };
+    // Use original prop triangles to reject a ground point covered by a parked
+    // car, scooter or lamp body in this actual fixed-camera view.
+    let mut triangles = Vec::new();
+    for prop in data
+        .props
+        .iter()
+        .filter(|prop| prop.p.distance(fixture.position) < 42.0)
+    {
+        for mesh in crate::map::street::prop_geometry(prop).0.values() {
+            for ids in mesh.idx.as_chunks::<3>().0 {
+                triangles.push(ids.map(|id| Vec3::from(mesh.pos[id as usize])));
+            }
+        }
+    }
+    // The arcade opening test alone cannot see columns, soffit beams or shop
+    // panels. Screen their original triangles as well, including the owning
+    // building's occupied-window frames. A receiver above its floor does not
+    // intersect that floor along the positive camera ray.
+    let mut building_triangles = Vec::new();
+    for owner in data
+        .blds
+        .iter()
+        .filter(|owner| owner.c.distance(fixture.position) < 35.0)
+    {
+        let meshes = crate::map::build::building(owner, crate::map::Lod::Near);
+        for parts in [&meshes.base, &meshes.roof, &meshes.structure, &meshes.walls] {
+            for mesh in parts.0.values() {
+                for ids in mesh.idx.as_chunks::<3>().0 {
+                    building_triangles.push(ids.map(|id| Vec3::from(mesh.pos[id as usize])));
+                }
+            }
+        }
+        if owner.id == fixture.building {
+            let detail =
+                crate::map::detail::near_detail(owner, &crate::map::detail::WindowKit::new());
+            for mesh in detail.0.values() {
+                for ids in mesh.idx.as_chunks::<3>().0 {
+                    building_triangles.push(ids.map(|id| Vec3::from(mesh.pos[id as usize])));
+                }
+            }
+        }
+    }
+    // Bound tree screening to this fixture and the entire 36 m camera ray;
+    // avoid rescanning every city prop for every sub-step of every probe.
+    let trees: Vec<_> = data
+        .props
+        .iter()
+        .filter(|prop| {
+            matches!(prop.kind, crate::map::street::PropKind::Tree(_))
+                && prop.p.distance(fixture.position) < 90.0
+        })
+        .map(|prop| prop.p)
+        .collect();
+    let mut screening = Vec::new();
+    let mut probes = Vec::new();
+    let mut seen = HashSet::new();
+    let mut add = |role: &str,
+                   source_id: Option<u64>,
+                   point: Vec3,
+                   screen_props: bool|
+     -> Result<(), (&'static str, Option<u32>)> {
+        let Some(pixel) = project(point) else {
+            return Err(("outside_view_or_hud", None));
+        };
+        if let Some(reason) = lighting_camera_obstruction(data, point, &trees) {
+            return Err(reason);
+        }
+        if street_prop_occludes(point, &building_triangles) {
+            return Err(("building_triangle", None));
+        }
+        if screen_props && street_prop_occludes(point, &triangles) {
+            return Err(("prop_triangle", None));
+        }
+        if !seen.insert(pixel) {
+            return Err(("duplicate_pixel", None));
+        }
+        probes.push(LightingPixelProbe {
+            role: role.into(),
+            source_id,
+            geometric_cone_sources: evidence
+                .slots
+                .iter()
+                .filter(|slot| lighting_in_cone(slot, point, 0.0))
+                .filter_map(|slot| slot.source_id)
+                .collect(),
+            world: point.to_array(),
+            point: pixel,
+        });
+        Ok(())
+    };
+    for slot in &evidence.slots {
+        if slot.source_id.is_none() {
+            continue;
+        }
+        let receiver = Vec3::from(slot.receiver);
+        let mut screened = LightingProbeScreening {
+            source_id: slot.source_id.expect("assigned source"),
+            kind: slot.kind.clone(),
+            attempted: 0,
+            accepted_before_cap: 0,
+            rejected: Default::default(),
+            examples: Vec::new(),
+        };
+        // The street cone is wider than an arcade bay. The original ±1.2 m
+        // core can sit entirely behind an actual foreground building; examine
+        // its wider real pavement footprint without accepting translucent walls.
+        let extent = if slot.kind == "Street" { 6 } else { 2 };
+        for ix in -extent..=extent {
+            for iz in -extent..=extent {
+                let point = receiver + Vec3::new(ix as f32 * 0.6, 0.006, iz as f32 * 0.6);
+                screened.attempted += 1;
+                let ground = match data.bld_at(point.xz()) {
+                    None => slot.kind != "Arcade",
+                    Some(owner) => {
+                        slot.kind == "Arcade"
+                            && owner.arcade.is_some_and(|arcade| {
+                                let d = point.xz() - arcade.a;
+                                (0.0..=arcade.dl).contains(&d.dot(arcade.u))
+                                    && (0.0..=crate::map::data::ARC).contains(&-d.dot(arcade.n))
+                            })
+                    }
+                };
+                let result = if !lighting_in_cone(slot, point, 0.0) {
+                    Err(("outside_source_cone", None))
+                } else if point.xz().distance(fixture.position) < 1.4 {
+                    Err(("near_player", None))
+                } else if !ground {
+                    Err((
+                        "wrong_ground_surface",
+                        data.bld_at(point.xz()).map(|owner| owner.id),
+                    ))
+                } else {
+                    add(&format!("Ground{}", slot.kind), slot.source_id, point, true)
+                };
+                match result {
+                    Ok(()) => screened.accepted_before_cap += 1,
+                    Err((reason, building_id)) => {
+                        let count = screened.rejected.entry(reason).or_default();
+                        *count += 1;
+                        if *count <= 3 {
+                            screened.examples.push(LightingProbeRejection {
+                                reason,
+                                building_id,
+                                world: point.to_array(),
+                                point: project(point),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        screening.push(screened);
+    }
+    for x in -9..=9 {
+        for z in -9..=9 {
+            let point = Vec3::new(
+                fixture.position.x + x as f32 * 1.2,
+                0.07,
+                fixture.position.y + z as f32 * 1.2,
+            );
+            if point.xz().distance(fixture.position) < 1.8
+                || data.bld_at(point.xz()).is_some()
+                || evidence
+                    .slots
+                    .iter()
+                    .any(|slot| lighting_in_cone(slot, point, 0.8))
+            {
+                continue;
+            }
+            let _ = add("GroundControl", None, point, true);
+        }
+    }
+    let detail = crate::map::detail::near_detail(building, &crate::map::detail::WindowKit::new());
+    let mut meshes = crate::map::build::building(building, crate::map::Lod::Near);
+    meshes.roof.merge(meshes.base);
+    meshes.roof.merge(meshes.structure);
+    for (role, mesh) in [
+        ("OccupiedWindow", detail.0.get(&Mat::WindowGlow)),
+        ("Sign", meshes.roof.0.get(&Mat::Sign)),
+    ] {
+        let Some(mesh) = mesh else {
+            return Err(format!("Lighting {role} source geometry is absent"));
+        };
+        for ids in mesh.idx.as_chunks::<3>().0 {
+            let normal = Vec3::from(mesh.nrm[ids[0] as usize]);
+            if normal.dot(crate::camera::CAM_OFFSET.normalize()) < 0.2 {
+                continue;
+            }
+            let p = ids.map(|id| Vec3::from(mesh.pos[id as usize]));
+            for weights in [[0.2, 0.4, 0.4], [0.4, 0.2, 0.4], [0.4, 0.4, 0.2]] {
+                let point =
+                    p[0] * weights[0] + p[1] * weights[1] + p[2] * weights[2] + normal * 0.015;
+                let _ = add(role, None, point, false);
+            }
+        }
+    }
+    // Deterministic caps retain multiple locations from each source family.
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    probes.retain(|probe| {
+        let count = counts.entry(probe.role.clone()).or_default();
+        *count += 1;
+        *count
+            <= if probe.role == "GroundControl" {
+                24
+            } else {
+                48
+            }
+    });
+    evidence.probe_screening = screening;
+    Ok(probes)
+}
+
+fn verify_lighting_sequence(run: &QaRun, current: &LightingEvidence) -> Result<(), String> {
+    let previous = |scene: &str| {
+        run.report
+            .captures
+            .iter()
+            .filter_map(|capture| capture.lighting.as_ref())
+            .find(|evidence| evidence.scene == scene)
+    };
+    if current.scene != "Day" {
+        let day = previous("Day").ok_or("Lighting sequence has no day capture")?;
+        if (
+            day.building_id,
+            day.player,
+            day.camera,
+            day.zoom,
+            day.wetness,
+        ) != (
+            current.building_id,
+            current.player,
+            current.camera,
+            current.zoom,
+            current.wetness,
+        ) {
+            return Err(
+                "Lighting sequence changed the actual camera/player/geometry fixture".into(),
+            );
+        }
+    }
+    if matches!(
+        current.scene.as_str(),
+        "NoSpillControl" | "Blackout" | "Restored"
+    ) {
+        let night = previous("Night").ok_or("Lighting sequence has no powered night capture")?;
+        for (old, new) in night.slots.iter().zip(&current.slots) {
+            if (
+                old.slot,
+                old.source_id,
+                old.actual_position,
+                old.actual_direction,
+                old.range,
+                old.inner_angle,
+                old.outer_angle,
+                old.color,
+            ) != (
+                new.slot,
+                new.source_id,
+                new.actual_position,
+                new.actual_direction,
+                new.range,
+                new.inner_angle,
+                new.outer_angle,
+                new.color,
+            ) {
+                return Err("Lighting sequence replaced/moved a selected source during control/blackout/restoration".into());
+            }
+        }
+        if current.scene != "Blackout"
+            && (
+                night.minute,
+                night.power,
+                night.night,
+                night.ambient,
+                night.ambient_color,
+                &night.sun_illuminance,
+                &night.sun_color,
+                &night.material_state,
+            ) != (
+                current.minute,
+                current.power,
+                current.night,
+                current.ambient,
+                current.ambient_color,
+                &current.sun_illuminance,
+                &current.sun_color,
+                &current.material_state,
+            )
+        {
+            return Err(
+                "Direct-light control/restoration changed ambient, sun or actual material state"
+                    .into(),
+            );
+        }
+        if current.scene == "Restored"
+            && night.slots.iter().zip(&current.slots).any(|(old, new)| {
+                (old.intensity - new.intensity).abs() > 0.1 || old.gain != new.gain
+            })
+        {
+            return Err(
+                "Power restoration did not restore original source intensities/gains".into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn lighting_pixel_comparison(
+    captures: &[Capture],
+    current: &mut LightingEvidence,
+) -> Result<(), String> {
+    // Validate after readback so a blocked receiver leaves its real PNG and
+    // pixel-failure JSON for inspection rather than failing before capture.
+    if !["OccupiedWindow", "Sign"]
+        .iter()
+        .all(|role| current.probes.iter().any(|pixel| pixel.probe.role == *role))
+    {
+        return Err("Lighting camera has no visible original occupied-window/sign probes".into());
+    }
+    if !matches!(
+        current.scene.as_str(),
+        "NoSpillControl" | "Blackout" | "Restored"
+    ) {
+        return Ok(());
+    }
+    let night = captures
+        .iter()
+        .filter_map(|capture| capture.lighting.as_ref())
+        .find(|evidence| evidence.scene == "Night")
+        .ok_or("Lighting pixel comparison has no original night readback")?;
+    if night.probes.len() != current.probes.len()
+        || night
+            .probes
+            .iter()
+            .zip(&current.probes)
+            .any(|(old, new)| old.probe != new.probe)
+    {
+        return Err(
+            "Lighting comparison did not use exactly the original night world/pixel coordinates"
+                .into(),
+        );
+    }
+    current.comparison_reference = Some("Night");
+    for (reference, pixel) in night.probes.iter().zip(&current.probes) {
+        let difference = i16::from(reference.luma) - i16::from(pixel.luma);
+        let max_channel_delta = reference
+            .rgb
+            .iter()
+            .zip(pixel.rgb)
+            .map(|(old, new)| old.abs_diff(new))
+            .max()
+            .unwrap_or(0);
+        let ground = pixel.probe.role.starts_with("Ground") && pixel.probe.role != "GroundControl";
+        let matched = match current.scene.as_str() {
+            "NoSpillControl" if ground => difference >= 8,
+            "NoSpillControl" => max_channel_delta <= 3,
+            "Blackout" => difference >= 15,
+            "Restored" => max_channel_delta <= 4,
+            _ => false,
+        };
+        if current.scene == "NoSpillControl" {
+            if ground {
+                current.ground_response_samples += 1;
+                current.ground_response_hits += usize::from(matched);
+            }
+            if pixel.probe.role == "GroundControl" {
+                current.unchanged_control_samples += 1;
+                current.unchanged_control_hits += usize::from(matched);
+            }
+        }
+        if current.scene == "Blackout" {
+            if pixel.probe.role == "OccupiedWindow" {
+                current.window_response_hits += usize::from(matched);
+            }
+            if pixel.probe.role == "Sign" {
+                current.sign_response_hits += usize::from(matched);
+            }
+        }
+        if current.scene == "Restored" {
+            current.restoration_samples += 1;
+            current.restoration_hits += usize::from(matched);
+        }
+        current.comparisons.push(LightingPixelComparison {
+            role: pixel.probe.role.clone(),
+            source_id: pixel.probe.source_id,
+            point: pixel.probe.point,
+            reference_rgb: reference.rgb,
+            current_rgb: pixel.rgb,
+            reference_luma: reference.luma,
+            current_luma: pixel.luma,
+            difference,
+            matched,
+        });
+    }
+    if current.scene == "NoSpillControl" {
+        let families = ["GroundStreet", "GroundSign", "GroundArcade"];
+        if current.ground_response_samples < 9
+            || current.ground_response_hits * 4 < current.ground_response_samples
+            || current.unchanged_control_samples < 4
+            || current.unchanged_control_hits * 4 < current.unchanged_control_samples * 3
+            || families.iter().any(|role| {
+                current
+                    .comparisons
+                    .iter()
+                    .filter(|sample| sample.role == *role)
+                    .count()
+                    < 3
+                    || !current
+                        .comparisons
+                        .iter()
+                        .any(|sample| sample.role == *role && sample.matched)
+            })
+            || night
+                .probes
+                .iter()
+                .filter_map(|pixel| pixel.probe.source_id)
+                .any(|id| {
+                    night
+                        .slots
+                        .iter()
+                        .find(|slot| slot.source_id == Some(id))
+                        .is_none_or(|slot| {
+                            !slot.inherited_visible
+                                || !slot.view_visible
+                                || !slot.in_main_view_cluster
+                        })
+                })
+        {
+            return Err(format!(
+                "Actual spotlights lack local ground response at unchanged ambient/emission: {}/{} lit samples, {}/{} unchanged controls; per-family hits {:?}",
+                current.ground_response_hits,
+                current.ground_response_samples,
+                current.unchanged_control_hits,
+                current.unchanged_control_samples,
+                families.map(|role| (
+                    role,
+                    current
+                        .comparisons
+                        .iter()
+                        .filter(|sample| sample.role == role && sample.matched)
+                        .count()
+                ))
+            ));
+        }
+    }
+    if current.scene == "Blackout"
+        && (current.window_response_hits == 0 || current.sign_response_hits == 0)
+    {
+        return Err(format!(
+            "Power loss does not visibly extinguish original occupied windows/signs: window={} sign={}",
+            current.window_response_hits, current.sign_response_hits
+        ));
+    }
+    if current.scene == "Restored"
+        && (current.restoration_samples == 0
+            || current.restoration_hits * 10 < current.restoration_samples * 9)
+    {
+        return Err(format!(
+            "Restored scene fails the same-camera night RGB comparison: {}/{}",
+            current.restoration_hits, current.restoration_samples
+        ));
+    }
+    Ok(())
+}
+
 /// The catalog is render-derived and is built once per fixture selection, not
 /// once per candidate. Source world/prop records never change during QA.
 struct StreetCatalog {
@@ -3341,7 +4678,7 @@ fn finish(world: &mut World, run: &mut QaRun) {
         && run.report.captures.len() == run.stages.len()
         && (matches!(
             run.report.scope,
-            "exterior_subset" | "commercial_subset" | "streets_subset"
+            "exterior_subset" | "commercial_subset" | "streets_subset" | "lighting_subset"
         ) || run.continuation_checked);
     let report_path = run.output.join("qa-report.json");
     let result = serde_json::to_vec_pretty(&run.report)
@@ -3389,9 +4726,9 @@ fn drive(world: &mut World) {
 }
 
 fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
-    // CI77 needed nearly 24 minutes for the 58-scene Wave 2 suite. Four real
-    // street scenes now extend that same full route to 62 captures; retain every
-    // per-stage readiness, pixel and save assertion within a 30-minute run limit.
+    // CI79's full 62-scene suite completed in about 21 minutes. Retain all of
+    // those stages and their gates while adding six real-world lighting states;
+    // the complete 68-capture route keeps the existing 30-minute deadline.
     if run.started.elapsed() > Duration::from_secs(1800) {
         return Err("Visual QA exceeded its 30-minute deadline".into());
     }
@@ -3422,6 +4759,36 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         enter_stage(world, run, stage)?;
     }
     run.frame += 1;
+    if let Some(fixture) = run.lighting {
+        // This is the only direct-light override. It lives in the native QA
+        // plugin, runs after production lighting, and never changes power,
+        // ambient, material emission, source selection or any saved field.
+        world.resource_mut::<Campaign>().game_min = fixture.scene.minute();
+        if fixture.scene == LightingScene::NoSpillControl {
+            for mut light in world
+                .query_filtered::<&mut SpotLight, With<crate::map::atmosphere::CitySpill>>()
+                .iter_mut(world)
+            {
+                light.intensity = 0.0;
+            }
+            world
+                .resource_mut::<crate::map::atmosphere::AtmosphereState>()
+                .active_lights = 0;
+        }
+        let mut slots: Vec<_> = world
+            .query::<&crate::map::atmosphere::CitySpill>()
+            .iter(world)
+            .map(|slot| (slot.slot, slot.site))
+            .collect();
+        slots.sort_by_key(|slot| slot.0);
+        if run.frame > SETTLE_FRAMES / 2 {
+            run.lighting_observations
+                .push(slots.into_iter().map(|slot| slot.1).collect());
+            if run.lighting_observations.len() > 30 {
+                run.lighting_observations.remove(0);
+            }
+        }
+    }
     if run.frame == SETTLE_FRAMES / 2 && matches!(stage.action, Action::PerformanceStreet) {
         let settings = world.resource::<crate::ui::settings::SettingsUi>();
         let preferences = world.resource::<crate::performance::PerformancePreferences>();
@@ -3481,6 +4848,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 | Action::Exterior(_)
                 | Action::Commercial(_)
                 | Action::Streets(_)
+                | Action::Lighting(_)
         )
     {
         // The explicit clock/weather fixture can dispatch several catch-up
@@ -3533,6 +4901,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             | Action::Exterior(_)
             | Action::Commercial(_)
             | Action::Streets(_)
+            | Action::Lighting(_)
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -3571,12 +4940,16 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         let streets_loaded = run
             .streets
             .is_none_or(|fixture| street_ready(world, fixture));
+        let lighting_loaded = run
+            .lighting
+            .is_none_or(|fixture| lighting_ready(world, fixture));
         if !chunks_ready
             || !detail_ready
             || !interior_ready
             || !exterior_loaded
             || !commercial_loaded
             || !streets_loaded
+            || !lighting_loaded
         {
             if run.wait_logged.elapsed() >= Duration::from_secs(5) {
                 let exterior = run
@@ -3588,7 +4961,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                     .map(|fixture| commercial_wait_status(world, fixture))
                     .unwrap_or_default();
                 println!(
-                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} commercial={} streets={} {} {}",
+                    "DTQA waiting stage={} frame={} chunks={} detail={} interior={} exterior={} commercial={} streets={} lighting={} {} {}",
                     stage.name,
                     run.frame,
                     chunks_ready,
@@ -3597,6 +4970,7 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                     exterior_loaded,
                     commercial_loaded,
                     streets_loaded,
+                    lighting_loaded,
                     exterior,
                     commercial
                 );
@@ -3952,6 +5326,37 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     } else {
         (None, Vec::new())
     };
+    let (lighting, lighting_pixels) = if let Some(fixture) = run.lighting {
+        let mut evidence = lighting_evidence(world, fixture, &run.lighting_observations)?;
+        let pixels = if matches!(
+            fixture.scene,
+            LightingScene::NoSpillControl | LightingScene::Blackout | LightingScene::Restored
+        ) {
+            if run.lighting_reference_probes.is_empty() {
+                return Err("Lighting A/B sequence has no canonical Night probes".into());
+            }
+            if let Some(night) = run
+                .report
+                .captures
+                .iter()
+                .filter_map(|capture| capture.lighting.as_ref())
+                .find(|capture| capture.scene == "Night")
+            {
+                evidence.probe_screening = night.probe_screening.clone();
+            }
+            run.lighting_reference_probes.clone()
+        } else {
+            lighting_pixel_probes(world, fixture, stage.size, &mut evidence)?
+        };
+        if fixture.scene == LightingScene::Night {
+            run.lighting_reference_probes = pixels.clone();
+        }
+        verify_lighting_sequence(run, &evidence)?;
+        run.report.assertions.push(format!("{}: actual {} shadowless city SpotLight entities, {} with nonzero intensity, {} stable selection observations; source geometry, actual transforms/directions and power/material states checked; diagnostic_direct_light_override={}; projected receiver pixels require controlled A/B GPU evidence, not emission alone", stage.name, evidence.actual_pool_entities, evidence.actual_active_lights, evidence.stable_observation_frames, evidence.diagnostic_direct_light_override));
+        (Some(evidence), pixels)
+    } else {
+        (None, Vec::new())
+    };
     let map_workload = matches!(stage.flow, ExpectedFlow::Playing)
         .then(|| map_workload(world))
         .flatten();
@@ -3976,6 +5381,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
                 commercial,
                 streets,
                 street_pixels,
+                lighting,
+                lighting_pixels,
                 map_workload,
             },
         ))
@@ -4152,6 +5559,38 @@ fn capture_finished(
                 ));
             }
         }
+        let mut lighting = ticket.lighting.clone();
+        if let Some(evidence) = lighting.as_mut() {
+            for probe in &ticket.lighting_pixels {
+                let mut samples = Vec::with_capacity(9);
+                for dy in -1_i32..=1 {
+                    for dx in -1_i32..=1 {
+                        let x = probe.point[0]
+                            .saturating_add_signed(dx)
+                            .min(image.width() - 1);
+                        let y = probe.point[1]
+                            .saturating_add_signed(dy)
+                            .min(image.height() - 1);
+                        let p = image.get_pixel(x, y).0;
+                        samples.push([p[0], p[1], p[2]]);
+                    }
+                }
+                samples.sort_by_key(|rgb| street_pixel_luma(*rgb));
+                let rgb = samples[4];
+                evidence.probes.push(LightingPixelEvidence {
+                    probe: probe.clone(),
+                    rgb,
+                    luma: street_pixel_luma(rgb),
+                });
+            }
+            if let Err(error) = lighting_pixel_comparison(&run.report.captures, evidence) {
+                image.save(&ticket.path).map_err(|err| err.to_string())?;
+                let debug = serde_json::to_vec_pretty(evidence).map_err(|err| err.to_string())?;
+                fs::write(ticket.path.with_extension("pixel-failure.json"), debug)
+                    .map_err(|err| err.to_string())?;
+                return Err(format!("{}: {error}", ticket.name));
+            }
+        }
         let colors: HashSet<_> = image
             .pixels()
             .step_by(37)
@@ -4174,6 +5613,7 @@ fn capture_finished(
             exterior: ticket.exterior.clone(),
             commercial: ticket.commercial.clone(),
             streets,
+            lighting,
             map_workload: ticket.map_workload.clone(),
         })
     })();
@@ -4193,6 +5633,55 @@ fn capture_finished(
 #[cfg(test)]
 mod exterior_tests {
     use super::*;
+
+    #[test]
+    fn lighting_sequence_reuses_reachable_original_fixture_and_three_real_source_families() {
+        use crate::map::atmosphere::{
+            CITY_LIGHT_COUNT, LightKind, LightSiteIndex, plan_city_lights,
+        };
+        let data = crate::map::world();
+        let day = lighting_fixture(data, LightingScene::Day, [1280, 720]).unwrap();
+        for scene in [
+            LightingScene::Dusk,
+            LightingScene::Night,
+            LightingScene::NoSpillControl,
+            LightingScene::Blackout,
+            LightingScene::Restored,
+        ] {
+            let fixture = lighting_fixture(data, scene, [1280, 720]).unwrap();
+            assert_eq!(
+                (fixture.building, fixture.position, fixture.zoom),
+                (day.building, day.position, day.zoom)
+            );
+            assert!(street_player_position_clear(data, fixture.position));
+        }
+        let sites = plan_city_lights(data);
+        let slots =
+            LightSiteIndex::new(&sites).select(&sites, day.position, &[None; CITY_LIGHT_COUNT]);
+        let mut kinds = HashSet::new();
+        for id in slots.into_iter().flatten() {
+            let site = sites.iter().find(|site| site.id == id).unwrap();
+            assert!(site.position.xz().distance(day.position) <= 32.0);
+            lighting_source_bounds(site).unwrap();
+            kinds.insert(site.kind);
+        }
+        assert_eq!(
+            kinds,
+            HashSet::from([LightKind::Street, LightKind::Sign, LightKind::Arcade])
+        );
+        assert_eq!(
+            STAGES
+                .iter()
+                .filter(|stage| matches!(stage.action, Action::Lighting(_)))
+                .count(),
+            6
+        );
+        assert_eq!(STAGES.len(), 68);
+        eprintln!(
+            "Lighting fixture lot={} player={:?} zoom={} selected={slots:?}",
+            day.building, day.position, day.zoom
+        );
+    }
 
     #[test]
     fn street_camera_rejects_vehicle_interiors_and_decorative_scooter_overlap() {

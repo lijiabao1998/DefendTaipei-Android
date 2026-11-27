@@ -326,7 +326,7 @@ fn street_features(world: &WorldData) -> Value {
         })
         .count();
     json!({
-        "scope": "Render-only replacements at original road/prop identities. Assembly material counts here are summed before chunk batching and are not resident draw calls. Trees, light entities and collision records are unchanged. Use resident totals for net cost against Wave 2.",
+        "scope": "Inherited Wave 3 street-geometry inventory at original road/prop identities. Assembly material counts are summed before chunk batching, not resident draw calls. Trees and collision records are unchanged. Wave 4 light components, selection and emission are audited separately; resident totals below measure geometry/material-batch cost.",
         "original_props": original_props,
         "planned_road_segments": markings.len(),
         "segments_with_junction_clearance": markings.iter().filter(|plan| plan.clear_start > 0.71 || plan.clear_end > 0.71).count(),
@@ -354,11 +354,12 @@ fn main() {
     let _ = map::street::road_marking_plans(world);
     let street_plan_initialization_ms = street_plan_started.elapsed().as_secs_f64() * 1000.0;
     let mut result = json!({
-        "variant": "wave3_streets",
-        "baseline_commit": "230c82d85b47ea47c9411721bf68f7a7f0528d76",
+        "variant": "wave4_lighting",
+        "baseline_commit": "3418a19b2b1e2a4c0843ba59faead5a00af672a6",
+        "wave2_baseline_commit": "230c82d85b47ea47c9411721bf68f7a7f0528d76",
         "wave1_baseline_commit": "6d0bbd55964d802e2ddaae886baf9ca8dc17dcb0",
         "original_baseline_commit": "c17292889e884f8a13d4e14598a20b64dc490f81",
-        "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Counts are submitted material meshes, not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, materials/textures, actors, dynamic doors, interior runtime meshes, rain and UI. CPU time is one development-build pass, not a benchmark.",
+        "scope": "Planned resident CPU-generated mesh payload after all world chunks settle at current Near<60m/Mid<260m thresholds plus initial lazy exterior detail within70m. Wave 4 requires exact Wave 3 geometry and permits at most 1% more submitted material meshes for shared emission separation. These are not GPU-visible draw calls, GPU memory, frame time or measured phone FPS. Payload excludes allocations, ECS, light components, materials/textures, actors, dynamic doors, interior runtime meshes, rain and UI. See lighting_workload and actual native QA for separate light-selection and runtime evidence. CPU time is one development-build pass, not a benchmark.",
         "world_identity": world_identity(world),
         "world_load_ms": world_load_ms,
         "street_plan_initialization_ms": street_plan_initialization_ms,
@@ -372,38 +373,52 @@ fn main() {
         ],
     });
     let baseline: Value =
-        serde_json::from_str(include_str!("../../docs/streets-wave2-baseline.json"))
-            .expect("checked-in CI77 wave-two audit JSON");
+        serde_json::from_str(include_str!("../../docs/lighting-wave3-baseline.json"))
+            .expect("checked-in digest-verified CI79 wave-three audit JSON");
+    let wave2: Value = serde_json::from_str(include_str!("../../docs/streets-wave2-baseline.json"))
+        .expect("checked-in CI77 wave-two audit JSON");
     let wave1: Value =
         serde_json::from_str(include_str!("../../docs/commercial-wave1-baseline.json"))
             .expect("checked-in CI75 wave-one audit JSON");
     let original: Value = serde_json::from_str(include_str!("../../docs/exterior-baseline.json"))
         .expect("checked-in original exterior audit JSON");
     let identity_matches = result["world_identity"] == baseline["world_identity"]
+        && result["world_identity"] == wave2["world_identity"]
         && result["world_identity"] == wave1["world_identity"];
     let original_identity_matches = result["world_identity"] == original["world_identity"];
-    let architecture_matches =
-        result["features"] == baseline["features"] && result["features"] == wave1["features"];
-    let commerce_matches = result["commercial_features"] == baseline["commercial_features"];
+    let architecture_matches = result["features"] == baseline["features"]
+        && result["features"] == wave2["features"]
+        && result["features"] == wave1["features"];
+    let commerce_matches = result["commercial_features"] == baseline["commercial_features"]
+        && result["commercial_features"] == wave2["commercial_features"];
+    // The only excluded field is explanatory scope prose; every inventory count,
+    // source-kind count and complete assembly-cost record remains exact.
+    let mut street_counts = result["street_features"].clone();
+    let mut baseline_street_counts = baseline["street_features"].clone();
+    street_counts.as_object_mut().unwrap().remove("scope");
+    baseline_street_counts
+        .as_object_mut()
+        .unwrap()
+        .remove("scope");
+    let streets_match = street_counts == baseline_street_counts;
     let mut comparisons = Vec::new();
     let mut original_comparisons = Vec::new();
-    let mut within_geometry_budget = true;
-    for reference in [&baseline, &wave1, &original] {
+    let mut geometry_exact = true;
+    let mut material_budget_passed = true;
+    for reference in [&baseline, &wave2, &wave1, &original] {
         assert_eq!(
             result["positions"].as_array().unwrap().len(),
             reference["positions"].as_array().unwrap().len(),
             "every original audit position must remain represented"
         );
     }
-    for (((current, previous), after_architecture), before_architecture) in result["positions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(baseline["positions"].as_array().unwrap())
-        .zip(wave1["positions"].as_array().unwrap())
-        .zip(original["positions"].as_array().unwrap())
-    {
+    for (index, current) in result["positions"].as_array().unwrap().iter().enumerate() {
+        let previous = &baseline["positions"][index];
+        let after_commerce = &wave2["positions"][index];
+        let after_architecture = &wave1["positions"][index];
+        let before_architecture = &original["positions"][index];
         assert_eq!(current["name"], previous["name"]);
+        assert_eq!(current["name"], after_commerce["name"]);
         assert_eq!(current["name"], after_architecture["name"]);
         assert_eq!(current["name"], before_architecture["name"]);
         // The engine's positions are f32. Decimal JSON round-tripping through
@@ -417,7 +432,12 @@ fn main() {
                 .map(|coordinate| (coordinate.as_f64().unwrap() as f32).to_bits())
                 .collect::<Vec<_>>()
         };
-        for reference in [previous, after_architecture, before_architecture] {
+        for reference in [
+            previous,
+            after_commerce,
+            after_architecture,
+            before_architecture,
+        ] {
             assert_eq!(
                 coordinate_bits(&current["position"]),
                 coordinate_bits(&reference["position"])
@@ -432,20 +452,30 @@ fn main() {
         assert_eq!(current["lazy_detail"], previous["lazy_detail"]);
         let mut changes = serde_json::Map::new();
         let mut original_changes = serde_json::Map::new();
-        // Wave 3 is a separately bounded increment over the verified Wave 2
-        // source. Keep both earlier waves and the original comparison visible;
-        // never present the new baseline as a smaller cumulative cost.
+        // Wave 4 changes light presentation/material ownership, not geometry.
+        // Keep all prior waves and the original comparison visible; the new
+        // baseline must not hide the cumulative cost of the completed streets.
         for (metric, maximum_baseline_percent) in [
-            ("vertices", 105),
-            ("triangles", 105),
+            ("vertices", 100),
+            ("indices", 100),
+            ("triangles", 100),
             ("material_meshes", 101),
-            ("attribute_index_payload_bytes", 105),
+            ("attribute_index_payload_bytes", 100),
         ] {
             let before = previous["planned_resident_total"][metric].as_u64().unwrap();
             let after = current["planned_resident_total"][metric].as_u64().unwrap();
             let limit = before * maximum_baseline_percent / 100;
-            let passes = after <= limit;
-            within_geometry_budget &= passes;
+            let exact = metric != "material_meshes";
+            let passes = if exact {
+                after == before
+            } else {
+                after <= limit
+            };
+            if exact {
+                geometry_exact &= passes;
+            } else {
+                material_budget_passed &= passes;
+            }
             changes.insert(
                 metric.to_owned(),
                 json!({
@@ -454,6 +484,7 @@ fn main() {
                     "budget_limit": limit,
                     "budget_passed": passes,
                     "maximum_baseline_percent": maximum_baseline_percent,
+                    "required_relation": if exact { "equal" } else { "at_most" },
                     "change_percent": (after as f64 / before as f64 - 1.0) * 100.0,
                 }),
             );
@@ -465,7 +496,8 @@ fn main() {
                 json!({
                     "original_baseline": original_before,
                     "wave1": after_architecture["planned_resident_total"][metric],
-                    "wave2": before,
+                    "wave2": after_commerce["planned_resident_total"][metric],
+                    "wave3": before,
                     "current": after,
                     "cumulative_change_percent": (after as f64 / original_before as f64 - 1.0) * 100.0,
                 }),
@@ -475,15 +507,19 @@ fn main() {
         original_comparisons.push(json!({"name": current["name"], "metrics": original_changes}));
     }
     result["baseline_comparison"] = json!({
-        "reference": "Verified wave-two CI77 resident geometry at merged main 230c82d; exact artifact digest and source provenance in streets-wave2-baseline.json",
+        "reference": "Verified wave-three CI79 resident geometry at merged main 3418a19; original archive/member digests and source/tested/main provenance in lighting-wave3-baseline.json",
         "world_identity_matches": identity_matches,
         "wave1_feature_and_facade_vertex_counts_match": architecture_matches,
         "wave2_commercial_feature_and_vertex_counts_match": commerce_matches,
-        "geometry_budget_passed": within_geometry_budget,
+        "wave3_street_inventory_and_assembly_counts_match": streets_match,
+        "street_comparison_excludes_only_explanatory_scope_text": true,
+        "geometry_counts_exact": geometry_exact,
+        "material_budget_passed": material_budget_passed,
+        "geometry_budget_passed": geometry_exact && material_budget_passed,
         "positions": comparisons,
     });
     result["original_baseline_comparison"] = json!({
-        "reference": "Pre-architecture main c172928; cumulative costs with Wave 1 and Wave 2 preserved, not the incremental Wave 3 budget",
+        "reference": "Pre-architecture main c172928; cumulative costs retain Wave 1, Wave 2 and Wave 3, separately from the Wave 4 material-only allowance",
         "world_identity_matches": original_identity_matches,
         "positions": original_comparisons,
     });
@@ -495,15 +531,23 @@ fn main() {
         );
         assert!(
             architecture_matches,
-            "street work changed the verified wave-one feature or facade vertex counts"
+            "lighting work changed the verified wave-one feature or facade vertex counts"
         );
         assert!(
             commerce_matches,
-            "street work changed the verified wave-two commercial feature or vertex counts"
+            "lighting work changed the verified wave-two commercial feature or vertex counts"
         );
         assert!(
-            within_geometry_budget,
-            "exterior workload exceeded its aggregate geometry/material budget; inspect the JSON comparison"
+            streets_match,
+            "lighting work changed the verified wave-three street geometry inventory"
+        );
+        assert!(
+            geometry_exact,
+            "lighting work changed resident vertex/index geometry"
+        );
+        assert!(
+            material_budget_passed,
+            "lighting workload exceeded the 1% shared-material-batch allowance; inspect the JSON comparison"
         );
     }
 }

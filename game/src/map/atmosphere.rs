@@ -1,8 +1,16 @@
 //! Bounded native version of the Web alley / lit-window / rain presentation.
 //!
-//! All lamps share the existing city materials; only six shadowless spill lights follow
-//! the player. Rain has one reusable mesh, capped at 240 streaks, and does not fall through
-//! roofs or arcades. Weather, power and the clock remain owned by the gameplay systems.
+//! Street lamps, arcade fixtures and occupied windows use separate shared emission.
+//! Six shadowless spot lights follow original world sources, with indexed selection and
+//! dark handoffs. Rain has one reusable mesh, capped at 240 streaks, and does not fall
+//! through roofs or arcades. Gameplay still owns weather, power and the clock.
+
+pub mod lighting;
+pub use lighting::{
+    CITY_LIGHT_COUNT, FRONTAGE_LIGHT_COUNT, LIGHT_ENTER_RADIUS, LIGHT_EXIT_RADIUS, LIGHT_GRID_CELL,
+    LIGHT_RETAIN_ADVANTAGE, LightKind, LightSelection, LightSite, LightSiteIndex, LightSource,
+    STREET_LIGHT_COUNT, arcade_lamp_count, arcade_lamp_position, plan_city_lights,
+};
 
 use bevy::{
     asset::RenderAssetUsages,
@@ -11,7 +19,7 @@ use bevy::{
     prelude::*,
 };
 
-use super::{street::PropKind, textures::MapMaterials, world};
+use super::{textures::MapMaterials, world};
 use crate::{
     game_flow::{Campaign, GameFlow},
     player::Player,
@@ -20,9 +28,8 @@ use crate::{
     worldplay::{ScavengeState, WorldSet},
 };
 
-const STREET_LIGHTS: usize = 4;
-const SIGN_LIGHTS: usize = 2;
-const LIGHT_COUNT: usize = STREET_LIGHTS + SIGN_LIGHTS;
+const LIGHT_REFRESH_SECONDS: f32 = 0.5;
+const LIGHT_FADE_SECONDS: f32 = 0.18;
 pub const MAX_RAIN_STREAKS: usize = 240;
 const RAIN_RADIUS: f32 = 28.0;
 
@@ -68,18 +75,72 @@ pub fn lighting_profile(minute: f32, power: bool, rain: f32, wet: f32) -> Lighti
     }
 }
 
-#[derive(Clone, Copy)]
-struct LightSite {
-    p: Vec3,
-    sign: bool,
-    color: Color,
+#[derive(Resource)]
+pub(crate) struct CityLightSites {
+    pub sites: Vec<LightSite>,
+    index: LightSiteIndex,
 }
 
-#[derive(Resource)]
-struct CityLightSites(Vec<LightSite>);
+#[derive(Component, Clone, Copy, Debug)]
+pub(crate) struct CitySpill {
+    pub slot: usize,
+    pub site: Option<u64>,
+    /// Handoff gain only. Actual intensity also includes the night/power profile.
+    pub gain: f32,
+    target: Option<u64>,
+}
 
-#[derive(Component)]
-struct CitySpill(usize);
+impl CitySpill {
+    fn new(slot: usize) -> Self {
+        Self {
+            slot,
+            site: None,
+            gain: 0.0,
+            target: None,
+        }
+    }
+
+    fn advance(&mut self, delta: f32) {
+        let step = delta.max(0.0) / LIGHT_FADE_SECONDS;
+        if self.site != self.target {
+            self.gain = (self.gain - step).max(0.0);
+            if self.gain == 0.0 {
+                // Reposition only while dark, including one zero-intensity
+                // submitted frame before the new source begins to fade in.
+                self.site = self.target;
+            }
+        } else if self.site.is_some() {
+            self.gain = (self.gain + step).min(1.0);
+        } else {
+            self.gain = 0.0;
+        }
+    }
+
+    fn extinguish(&mut self, keep_identity: bool) {
+        self.gain = 0.0;
+        if !keep_identity {
+            self.site = None;
+        }
+        self.target = self.site;
+    }
+
+    fn retire_distant(&mut self, sites: &CityLightSites, player: Vec2) -> bool {
+        let nearby = |id| {
+            sites.index.index_of(id).is_some_and(|index| {
+                sites.sites[index].position.xz().distance(player) <= LIGHT_EXIT_RADIUS
+            })
+        };
+        if self.site.is_some_and(|id| !nearby(id)) {
+            self.extinguish(false);
+            return true;
+        }
+        if self.target != self.site && self.target.is_some_and(|id| !nearby(id)) {
+            self.target = self.site;
+            return true;
+        }
+        false
+    }
+}
 
 #[derive(Component)]
 struct RainField;
@@ -118,41 +179,16 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let w = world();
-    let mut sites = Vec::new();
-    for p in &w.props {
-        if p.kind == PropKind::Lamp {
-            let offset = Quat::from_rotation_y(p.ang) * Vec3::new(0.0, 4.72, 1.1);
-            sites.push(LightSite {
-                p: Vec3::new(p.p.x, 0.0, p.p.y) + offset,
-                sign: false,
-                color: Color::srgb(1.0, 0.87, 0.66),
-            });
-        }
-    }
-    for b in &w.blds {
-        if let Some(s) = b.sign {
-            let normal = Vec3::new(s.ry.sin(), 0.0, s.ry.cos());
-            sites.push(LightSite {
-                p: s.p + normal * 0.48 - Vec3::Y * 0.25,
-                sign: true,
-                color: match s.idx % 4 {
-                    0 => Color::srgb(1.0, 0.65, 0.38),
-                    1 => Color::srgb(0.68, 0.86, 0.9),
-                    2 => Color::srgb(0.9, 0.78, 0.52),
-                    _ => Color::srgb(0.65, 0.88, 0.65),
-                },
-            });
-        }
-    }
-    commands.insert_resource(CityLightSites(sites));
-    for index in 0..LIGHT_COUNT {
+    let sites = plan_city_lights(world());
+    let index = LightSiteIndex::new(&sites);
+    commands.insert_resource(CityLightSites { sites, index });
+    for slot in 0..CITY_LIGHT_COUNT {
         commands.spawn((
-            CitySpill(index),
-            PointLight {
+            CitySpill::new(slot),
+            SpotLight {
                 intensity: 0.0,
                 range: 10.0,
-                radius: 0.25,
+                radius: 0.12,
                 shadow_maps_enabled: false,
                 contact_shadows_enabled: false,
                 ..default()
@@ -231,11 +267,19 @@ fn update_materials(
             0.9 - 0.1 * p.daylight,
         );
     }
-    if let Some(mut m) = materials.get_mut(&city.lamp) {
-        let strength = p.lamp_strength;
-        let glass = 0.28 + 0.46 * strength;
-        m.base_color = Color::srgb(glass, glass, glass);
-        m.emissive = LinearRgba::rgb(strength * 2.0, strength * 1.65, strength * 1.2);
+    for (handle, rgb) in [
+        (&city.lamp, [2.4, 1.85, 1.1]),
+        (&city.window_glow, [0.85, 0.58, 0.30]),
+        (&city.arcade_glow, [1.45, 1.6, 1.75]),
+    ] {
+        if let Some(mut m) = materials.get_mut(handle) {
+            let strength = p.lamp_strength;
+            // Keep the previous daylight base. Independent shared emission adds
+            // neither geometry nor a light entity for each occupied window.
+            let glass = 0.28 + 0.46 * strength;
+            m.base_color = Color::srgb(glass, glass, glass);
+            m.emissive = LinearRgba::rgb(strength * rgb[0], strength * rgb[1], strength * rgb[2]);
+        }
     }
     for (handle, gain) in [(&city.signs, 0.95), (&city.vsigns, 1.2)] {
         if let Some(mut m) = materials.get_mut(handle) {
@@ -262,17 +306,15 @@ fn update_materials(
     }
 }
 
-fn nearest_sites(sites: &[LightSite], p: Vec2, sign: bool, limit: usize) -> Vec<usize> {
-    let mut candidates: Vec<(usize, f32)> = sites
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| s.sign == sign)
-        .map(|(i, s)| (i, s.p.xz().distance_squared(p)))
-        .filter(|(_, d)| *d < 32.0 * 32.0)
-        .collect();
-    candidates.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
-    candidates.truncate(limit);
-    candidates.into_iter().map(|(i, _)| i).collect()
+/// A stable up vector also handles the straight-down arcade cones. Using Y as
+/// both direction and up would make that rotation undefined.
+fn source_transform(site: &LightSite) -> Transform {
+    let up = if site.direction.dot(Vec3::Y).abs() > 0.95 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    Transform::from_translation(site.position).looking_to(site.direction, up)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -283,47 +325,70 @@ fn update_lights(
     env: Res<ShelterEnvironment>,
     sites: Res<CityLightSites>,
     player: Query<&Transform, (With<Player>, Without<CitySpill>)>,
-    mut lights: Query<(&CitySpill, &mut PointLight, &mut Transform), Without<Player>>,
+    mut lights: Query<(&mut CitySpill, &mut SpotLight, &mut Transform), Without<Player>>,
     mut timers: ResMut<AtmosphereTimers>,
     mut evidence: ResMut<AtmosphereState>,
 ) {
-    // Power loss is applied immediately, even between the half-second spatial refreshes.
-    let strength = if session(flow.get()) {
+    let live = session(flow.get());
+    let strength = if live {
         lighting_profile(campaign.game_min, env.power, 0.0, 0.0).lamp_strength
     } else {
         0.0
     };
-    if strength <= 0.001 {
-        for (_, mut light, _) in &mut lights {
+    let player = player
+        .single()
+        .ok()
+        .map(|transform| transform.translation.xz())
+        .filter(|position| position.is_finite());
+    // Supply loss is immediate, independently of both the spatial timer and
+    // handoff fade. Existing source identities can restore after a blackout.
+    if strength <= 0.001 || player.is_none() {
+        for (mut slot, mut light, _) in &mut lights {
+            slot.extinguish(live && player.is_some());
             light.intensity = 0.0;
         }
         evidence.active_lights = 0;
         timers.lights = 0.0;
         return;
     }
-    timers.lights -= time.delta_secs();
-    if timers.lights > 0.0 {
-        return;
+    let player = player.expect("active lighting has a player");
+    // Fixed-pool ID lookups also enforce locality between index refreshes. A
+    // teleport must not leave the previous neighborhood lit for another tick.
+    for (mut slot, mut light, _) in &mut lights {
+        if slot.retire_distant(&sites, player) {
+            light.intensity = 0.0;
+            timers.lights = 0.0;
+        }
     }
-    timers.lights = 0.5;
-    let Ok(player) = player.single() else { return };
-    let p = player.translation.xz();
-    let street = nearest_sites(&sites.0, p, false, STREET_LIGHTS);
-    let signs = nearest_sites(&sites.0, p, true, SIGN_LIGHTS);
+    timers.lights -= time.delta_secs();
+    if timers.lights <= 0.0 {
+        timers.lights = LIGHT_REFRESH_SECONDS;
+        let mut current = [None; CITY_LIGHT_COUNT];
+        for (slot, _, _) in &lights {
+            current[slot.slot] = slot.site;
+        }
+        let desired = sites.index.select(&sites.sites, player, &current);
+        for (mut slot, _, _) in &mut lights {
+            slot.target = desired[slot.slot];
+        }
+    }
     evidence.active_lights = 0;
-    for (slot, mut light, mut transform) in &mut lights {
-        let site = if slot.0 < STREET_LIGHTS {
-            street.get(slot.0)
-        } else {
-            signs.get(slot.0 - STREET_LIGHTS)
-        };
-        if let Some(&index) = site {
-            let site = sites.0[index];
-            transform.translation = site.p;
+    for (mut slot, mut light, mut transform) in &mut lights {
+        slot.advance(time.delta_secs());
+        let source = slot.site.and_then(|id| sites.index.index_of(id));
+        if let Some(index) = source {
+            let site = &sites.sites[index];
+            // The assignment only changes at gain zero. In normal operation
+            // these values are stable; only six bounded intensities ramp.
+            *transform = source_transform(site);
             light.color = site.color;
-            light.range = if site.sign { 6.0 } else { 11.5 };
-            light.intensity = strength * if site.sign { 2400.0 } else { 16000.0 };
-            evidence.active_lights += 1;
+            light.range = site.range;
+            light.inner_angle = site.inner_angle;
+            light.outer_angle = site.outer_angle;
+            light.intensity = strength * site.intensity * slot.gain;
+            if light.intensity > 0.0 {
+                evidence.active_lights += 1;
+            }
         } else {
             light.intensity = 0.0;
         }
@@ -457,20 +522,67 @@ mod tests {
     }
 
     #[test]
-    fn lamp_selection_has_bounded_pools_and_no_remote_sources() {
-        let sites: Vec<_> = (0..30)
-            .map(|i| LightSite {
-                p: Vec3::new(i as f32 * 3.0, 4.7, 0.0),
-                sign: i % 3 == 0,
-                color: Color::WHITE,
-            })
-            .collect();
-        let street = nearest_sites(&sites, Vec2::ZERO, false, STREET_LIGHTS);
-        let signs = nearest_sites(&sites, Vec2::ZERO, true, SIGN_LIGHTS);
-        assert_eq!(street, vec![1, 2, 4, 5]);
-        assert_eq!(signs, vec![0, 3]);
-        assert!(nearest_sites(&sites, Vec2::splat(1000.0), false, STREET_LIGHTS).is_empty());
-        assert_eq!(street.len() + signs.len(), LIGHT_COUNT);
+    fn light_handoffs_reposition_only_while_dark_and_power_loss_is_immediate() {
+        let mut slot = CitySpill::new(0);
+        slot.target = Some(11);
+        slot.advance(1.0 / 60.0);
+        assert_eq!(slot.site, Some(11));
+        assert_eq!(slot.gain, 0.0);
+        slot.advance(LIGHT_FADE_SECONDS);
+        assert_eq!(slot.gain, 1.0);
+        slot.target = Some(12);
+        slot.advance(LIGHT_FADE_SECONDS * 0.5);
+        assert_eq!(slot.site, Some(11));
+        assert!((slot.gain - 0.5).abs() < 0.00001);
+        slot.advance(LIGHT_FADE_SECONDS);
+        assert_eq!(slot.site, Some(12));
+        assert_eq!(slot.gain, 0.0);
+        slot.advance(LIGHT_FADE_SECONDS);
+        assert_eq!(slot.gain, 1.0);
+        slot.extinguish(true);
+        assert_eq!(slot.gain, 0.0);
+        assert_eq!(slot.site, Some(12));
+        slot.advance(LIGHT_FADE_SECONDS);
+        assert_eq!(slot.gain, 1.0);
+        slot.extinguish(false);
+        assert_eq!(slot.gain, 0.0);
+        assert_eq!(slot.site, None);
+        assert_eq!(slot.target, None);
+    }
+
+    #[test]
+    fn every_spot_rotation_points_to_its_receiver_including_vertical_arcade_lights() {
+        for site in plan_city_lights(world()) {
+            let transform = source_transform(&site);
+            assert!(transform.rotation.is_finite());
+            assert!((transform.rotation * Vec3::NEG_Z).distance(site.direction) < 0.00001);
+            assert_eq!(transform.translation, site.position);
+        }
+    }
+
+    #[test]
+    fn crossing_the_exit_radius_retires_active_and_pending_sources_immediately() {
+        let planned = plan_city_lights(world());
+        let first = planned[0];
+        let sites = CityLightSites {
+            index: LightSiteIndex::new(&planned),
+            sites: planned,
+        };
+        let mut slot = CitySpill::new(0);
+        slot.site = Some(first.id);
+        slot.target = slot.site;
+        slot.gain = 1.0;
+        let inside = first.position.xz() + Vec2::X * (LIGHT_EXIT_RADIUS - 0.1);
+        assert!(!slot.retire_distant(&sites, inside));
+        assert_eq!(slot.gain, 1.0);
+        let outside = first.position.xz() + Vec2::X * (LIGHT_EXIT_RADIUS + 0.1);
+        assert!(slot.retire_distant(&sites, outside));
+        assert_eq!(slot.gain, 0.0);
+        assert_eq!(slot.site, None);
+        assert_eq!(slot.target, None);
+        slot.target = Some(first.id);
+        assert!(slot.retire_distant(&sites, outside));
+        assert_eq!(slot.target, None);
     }
 
     #[test]
