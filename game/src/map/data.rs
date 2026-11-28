@@ -200,6 +200,14 @@ pub struct WorldData {
     pub interiors: Vec<super::interiors::Fixture>,
     /// Furniture is appended last and never ignored by the own-cover shot rule.
     pub(crate) interior_seg_start: usize,
+    /// v24.3 the four street corners held by ROC remnants (cover registered in `Obstacles` group 3).
+    pub remnants: Vec<super::fortify::RemnantSite>,
+    /// The two 解放軍 checkpoints near the start (`decay.ts` checkpoints).
+    pub checkpoints: Vec<super::fortify::Checkpoint>,
+    /// v24.5 abandoned traffic, scooters, barriers and litter (cover registered in `Obstacles` group 4).
+    pub wrecks: Vec<super::wreckage::Wreck>,
+    /// v23.4 stairwells of multi-storey buildings, sorted by building id.
+    pub stairs: Vec<super::upstairs::Stair>,
 }
 
 const BG: f32 = 16.0;
@@ -269,6 +277,10 @@ impl WorldData {
             props: Vec::new(),
             interiors: Vec::new(),
             interior_seg_start: usize::MAX,
+            remnants: Vec::new(),
+            checkpoints: Vec::new(),
+            wrecks: Vec::new(),
+            stairs: Vec::new(),
         };
         for (ri, r) in w.roads.iter().enumerate() {
             let hw = r.w / 2.0;
@@ -320,8 +332,11 @@ impl WorldData {
         );
         w.plan_buildings(src);
         w.pick_spawn();
+        super::fortify::install(&mut w);
         w.props = w.plan_props();
+        super::wreckage::install(&mut w);
         super::interiors::install(&mut w);
+        super::upstairs::install(&mut w);
         w
     }
 

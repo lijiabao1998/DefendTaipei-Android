@@ -150,6 +150,7 @@ fn display(
     window: Option<Single<&Window, With<PrimaryWindow>>>,
     fleet: Option<Res<crate::vehicles::VehicleFleet>>,
     controls: Option<Res<crate::input::ControlPreferences>>,
+    npu: Option<Res<crate::npu::TacticalField>>,
     mut roots: Query<(&mut Node, &mut Visibility), With<PerfRoot>>,
     mut texts: Query<&mut Text, With<PerfText>>,
 ) {
@@ -185,6 +186,10 @@ fn display(
     if timers.display >= 0.5 {
         timers.display = 0.0;
         if enabled && let Ok(mut text) = texts.single_mut() {
+            let reason_line = match npu.as_deref() {
+                Some(field) => format!("{} · {}", effective.reason, field.summary()),
+                None => effective.reason.clone(),
+            };
             text.0 = format!(
                 "FPS {:.1} / {}{} · P95 {:.1} · P99 {:.1} ms\n3D {}×{} · {}% · entities {}\n{}",
                 summary.fps,
@@ -196,7 +201,7 @@ fn display(
                 dimensions.scene[1],
                 effective.render_scale,
                 metrics.entities,
-                effective.reason
+                reason_line
             );
         }
     }

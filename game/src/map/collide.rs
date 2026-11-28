@@ -87,7 +87,10 @@ fn seg_inter(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> Option<(f32, f32)> {
 impl Obstacles {
     pub fn new(world: Arc<WorldData>) -> Self {
         let doors = crate::doors::DoorRuntime::new(&world);
-        Self(world, doors, Arc::default())
+        let obs = Self(world, doors, Arc::default());
+        obs.replace_dynamic(3, super::fortify::colliders(&obs.0));
+        obs.replace_dynamic(4, super::wreckage::colliders(&obs.0.wrecks));
+        obs
     }
 
     pub fn replace_dynamic(&self, group: u8, colliders: Vec<DynamicCollider>) {
@@ -363,9 +366,12 @@ impl Obstacles {
         self.dynamic(None, |hull| {
             // Combat applies an occupied vehicle's damage protection. Its own
             // hull must not make the carried actor invisible and invulnerable.
+            // Static street cover (groups 3 & 4, id >= 0x2_0000_0000) keeps the
+            // shooter's own-cover firing clearance (`t * len < own`).
+            let solid_near_origin = hull.id < 0x2_0000_0000;
             if !hull.contains(p) && !hull.contains(q) {
                 for seg in hull.segments() {
-                    test(&seg, true);
+                    test(&seg, solid_near_origin);
                 }
             }
         });

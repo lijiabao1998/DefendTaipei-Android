@@ -1,6 +1,7 @@
 //! The world renders to one reusable texture; UI and touch coordinates remain
 //! in the full-resolution window. Resizing never changes the camera's framing.
 use super::EffectivePerformance;
+use super::upscale::SgsrMaterial;
 use crate::camera::GameCamera;
 use bevy::{
     camera::{RenderTarget, ShadowLodOrigin, visibility::RenderLayers},
@@ -14,6 +15,8 @@ use serde::Serialize;
 pub(crate) struct PresentationCamera;
 #[derive(Resource)]
 struct SceneTarget(Handle<Image>);
+#[derive(Resource)]
+struct SceneUpscaler(Handle<SgsrMaterial>);
 #[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct RenderDimensions {
     pub ui: [u32; 2],
@@ -30,6 +33,7 @@ pub(super) fn install(app: &mut App) {
 fn setup(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut upscalers: ResMut<Assets<SgsrMaterial>>,
     cameras: Query<Entity, With<GameCamera>>,
 ) {
     let mut image = Image::new_target_texture(16, 16, TextureFormat::Rgba8UnormSrgb, None);
@@ -61,6 +65,10 @@ fn setup(
         RenderLayers::layer(31),
         Msaa::Off,
     ));
+    let upscaler = upscalers.add(SgsrMaterial {
+        params: Vec4::new(1.0 / 16.0, 1.0 / 16.0, 0.55, 0.0),
+        scene: image.clone(),
+    });
     commands.spawn((
         Node {
             position_type: PositionType::Absolute,
@@ -70,11 +78,12 @@ fn setup(
             height: percent(100),
             ..default()
         },
-        ImageNode::new(image.clone()).with_mode(NodeImageMode::Stretch),
+        MaterialNode(upscaler.clone()),
         GlobalZIndex(-1000),
         Pickable::IGNORE,
     ));
     commands.insert_resource(SceneTarget(image));
+    commands.insert_resource(SceneUpscaler(upscaler));
 }
 
 pub fn scaled_dimensions(ui: UVec2, scale: u8) -> UVec2 {
@@ -88,8 +97,10 @@ pub fn scaled_dimensions(ui: UVec2, scale: u8) -> UVec2 {
 fn resize(
     window: Option<Single<&Window, With<PrimaryWindow>>>,
     target: Option<Res<SceneTarget>>,
+    upscaler: Option<Res<SceneUpscaler>>,
     effective: Res<EffectivePerformance>,
     mut images: ResMut<Assets<Image>>,
+    mut upscalers: ResMut<Assets<SgsrMaterial>>,
     mut dimensions: ResMut<RenderDimensions>,
 ) {
     let (Some(window), Some(target)) = (window, target) else {
@@ -114,6 +125,20 @@ fn resize(
             height: scene.y,
             depth_or_array_layers: 1,
         });
+        if let Some(upscaler) = upscaler
+            && let Some(mut mat) = upscalers.get_mut(&upscaler.0)
+        {
+            mat.params = Vec4::new(
+                1.0 / scene.x.max(1) as f32,
+                1.0 / scene.y.max(1) as f32,
+                0.55,
+                if effective.render_scale < 100 {
+                    1.0
+                } else {
+                    0.0
+                },
+            );
+        }
         *dimensions = next;
         println!(
             "DTRESOLUTION ui={}x{} scene={}x{} scale={}",
@@ -138,7 +163,7 @@ mod tests {
             UVec2::new(2400, 1080),
             UVec2::new(390, 844),
         ] {
-            for scale in [70, 85, 100] {
+            for scale in [60, 70, 85, 100] {
                 let scene = scaled_dimensions(size, scale);
                 let center = scene_pointer(size.as_vec2() * 0.5, size.as_vec2(), scene.as_vec2());
                 assert!(center.distance(scene.as_vec2() * 0.5) < 0.01);

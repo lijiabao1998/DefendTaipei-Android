@@ -88,6 +88,24 @@ enum Action {
     Trade,
     SaveMenu,
     Continue,
+    /// v24.3 a ROC remnant position in the street.
+    Remnant,
+    /// The squad leader's conversation card.
+    RemnantTalk,
+    /// v24.14 an area taken back by actual kills.
+    Reclaim,
+    /// v24.4 a C-2 airdrop called on the JSDF radio, after it lands.
+    Airdrop,
+    /// v23.4 the second floor of the nearest walk-up, reached by its stairs.
+    Upstairs,
+    /// v24.8 the day's call for help answered on its floor.
+    Rescue,
+    /// v24.20 / v24.21 a thrown grenade, a mortar barrage and an incoming rocket.
+    War,
+    /// v22.5 a rooftop sniper locking on in the open.
+    Sniper,
+    /// v24.24 PLA Z-10 patrol helicopter over Wanhua.
+    Heli,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -674,6 +692,60 @@ const STAGES: &[Stage] = &[
         action: Action::Continue,
         flow: ExpectedFlow::Playing,
     },
+    Stage {
+        name: "12w01-remnant-position-landscape",
+        size: [1280, 720],
+        action: Action::Remnant,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w02-remnant-talk-portrait",
+        size: [390, 844],
+        action: Action::RemnantTalk,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w03-reclaim-title-landscape",
+        size: [1280, 720],
+        action: Action::Reclaim,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w04-jsdf-airdrop-landscape",
+        size: [1280, 720],
+        action: Action::Airdrop,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w05-upstairs-portrait",
+        size: [390, 844],
+        action: Action::Upstairs,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w06-rescue-portrait",
+        size: [390, 844],
+        action: Action::Rescue,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w07-war-landscape",
+        size: [1280, 720],
+        action: Action::War,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w08-sniper-landscape",
+        size: [1280, 720],
+        action: Action::Sniper,
+        flow: ExpectedFlow::Playing,
+    },
+    Stage {
+        name: "12w09-heli-patrol-landscape",
+        size: [1280, 720],
+        action: Action::Heli,
+        flow: ExpectedFlow::Playing,
+    },
 ];
 
 #[derive(Serialize)]
@@ -1008,6 +1080,10 @@ struct QaRun {
     loot_fixture: Option<String>,
     loot_expected: Option<Stash>,
     loot_inventory: Option<Inventory>,
+    /// The area the Reclaim stage takes back, and the bag before its gift.
+    reclaim: Option<(usize, Inventory)>,
+    /// Grenades carried before the War stage's throw.
+    war_grenades: Option<u32>,
     waiting_capture: bool,
     captured: bool,
     checkpoint: Option<Checkpoint>,
@@ -1141,6 +1217,8 @@ impl Plugin for QaPlugin {
                 loot_fixture: None,
                 loot_expected: None,
                 loot_inventory: None,
+                reclaim: None,
+                war_grenades: None,
                 waiting_capture: false,
                 captured: false,
                 checkpoint: None,
@@ -1832,6 +1910,167 @@ fn enter_stage(world: &mut World, run: &mut QaRun, stage: &Stage) -> Result<(), 
                 .assertions
                 .push("SaveAndMenu wrote a valid save before resetting the run".into());
             world.write_message(TitleAction::Continue);
+        }
+        Action::Remnant => {
+            world
+                .resource_mut::<crate::vehicles::VehicleFleet>()
+                .current = None;
+            world.write_message(OpenPanel(PanelKind::Close));
+            world.resource_mut::<Campaign>().game_min = 1440.0 + 600.0;
+            world.resource_mut::<Campaign>().notice_t = 0.0;
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            *world.resource_mut::<crate::worldplay::PlayerNeeds>() = default();
+            world.resource_mut::<crate::combat::GameState>().bleed = false;
+            let site = *crate::map::world()
+                .remnants
+                .first()
+                .ok_or("No ROC remnant position")?;
+            move_view(world, site.p - Vec2::from_angle(site.ang) * 0.9, 1.6)?;
+        }
+        Action::RemnantTalk => {
+            world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Remnant(0)));
+        }
+        Action::Reclaim => {
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            world.write_message(OpenPanel(PanelKind::Close));
+            let roster = world.resource::<crate::sectors::PatrolRoster>().clone();
+            let dead = world
+                .resource::<crate::worldplay::ScavengeState>()
+                .dead
+                .clone();
+            let counts = crate::sectors::count_sectors(&roster, &dead);
+            let target = (0..crate::sectors::SECTORS.len())
+                .filter(|&i| !crate::sectors::outer_sector(i) && counts[i].alive > 0)
+                .min_by_key(|&i| counts[i].alive)
+                .ok_or("No occupied core area")?;
+            run.reclaim = Some((target, world.resource::<Inventory>().clone()));
+            let ids: Vec<u32> = roster
+                .0
+                .iter()
+                .filter(|(_, at)| crate::sectors::sector_of(*at) == target)
+                .map(|(id, _)| *id)
+                .collect();
+            let mut killed = Vec::new();
+            let mut query = world.query::<(Entity, &mut crate::combat::Enemy, &Transform)>();
+            for (entity, mut enemy, tf) in query.iter_mut(world) {
+                if ids.contains(&enemy.0.id) && enemy.0.alive() {
+                    enemy.0.hp = 0.0;
+                    enemy.0.state = crate::combat::SolState::Dead;
+                    killed.push((entity, enemy.0.id, enemy.0.kind, tf.translation));
+                }
+            }
+            for (entity, id, kind, pos) in killed {
+                world
+                    .entity_mut(entity)
+                    .insert(crate::combat::Body::new(kind));
+                world.write_message(crate::combat::EnemyDied { id, kind, pos });
+            }
+            let p = player_position(world)?.xz();
+            move_view(world, p, 1.0)?;
+        }
+        Action::Airdrop => {
+            world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Liaison));
+            world.write_message(crate::japan::CallSupport(crate::japan::JpKind::Drop));
+            let p = player_position(world)?.xz();
+            move_view(world, p, 0.8)?;
+        }
+        Action::Upstairs => {
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            world.write_message(OpenPanel(PanelKind::Close));
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            let p = player_position(world)?.xz();
+            let w = crate::map::world();
+            let stair = w
+                .stairs
+                .iter()
+                .filter(|s| {
+                    !crate::map::upstairs::plan_floor(w, &w.blds[s.building as usize], s, 2)
+                        .is_empty()
+                })
+                .min_by(|a, b| {
+                    a.landing
+                        .distance_squared(p)
+                        .total_cmp(&b.landing.distance_squared(p))
+                })
+                .copied()
+                .ok_or("No walk-up with a furnished second floor")?;
+            move_view(world, stair.landing, 1.4)?;
+            world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::StairsUp));
+        }
+        Action::Rescue => {
+            crate::upstairs::force_ground(world);
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            let p = player_position(world)?.xz();
+            let day = (world.resource::<Campaign>().game_min / 1440.0).floor() as u32;
+            let (karma, home) = {
+                let shelter = world.resource::<Shelter>();
+                (shelter.karma, shelter.home.map(Vec2::from_array))
+            };
+            let call = crate::rescue::pick_call(day, karma, p, home).ok_or("No rescue call")?;
+            let stair = *crate::map::upstairs::stair_of(crate::map::world(), call.building)
+                .ok_or("Rescue building has no stairs")?;
+            world.resource_mut::<crate::rescue::RescueState>().call = Some(call.clone());
+            move_view(world, stair.landing, 1.4)?;
+            for _ in 2..=call.floor {
+                world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::StairsUp));
+            }
+        }
+        Action::War => {
+            crate::upstairs::force_ground(world);
+            world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+            world.write_message(OpenPanel(PanelKind::Close));
+            let p = player_position(world)?.xz();
+            world.resource_mut::<Inventory>().add("grenade", 1);
+            run.war_grenades = Some(world.resource::<Inventory>().count("grenade"));
+            world.write_message(crate::worldplay::WorldAction::Use("grenade".into()));
+            world.write_message(crate::war::WarCall::Barrage {
+                n: 3,
+                at: p + Vec2::new(24.0, -10.0),
+            });
+            world.write_message(crate::war::WarCall::Strike {
+                w: crate::war::ROCKET,
+                at: p + Vec2::new(70.0, 40.0),
+            });
+            move_view(world, p, 0.7)?;
+        }
+        Action::Sniper => {
+            crate::war::clear_sky(world);
+            crate::upstairs::force_ground(world);
+            world
+                .resource_mut::<crate::worldplay::WorldNotice>()
+                .text
+                .clear();
+            world.resource_mut::<crate::combat::GameState>().hp = 100.0;
+            let posts = world.resource::<crate::sniper::Posts>().0.clone();
+            let dead = world.resource::<crate::sniper::SniperState>().dead.clone();
+            let obstacles = world.resource::<crate::map::Obstacles>().clone();
+            let spot = posts
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !dead.contains(&(*i as u8)))
+                .flat_map(|(_, p)| {
+                    (0..8)
+                        .map(move |k| {
+                            p.j + Vec2::from_angle(k as f32 * std::f32::consts::FRAC_PI_4) * 6.0
+                        })
+                        .chain(std::iter::once(p.j))
+                        .map(move |q| (p.clone(), q))
+                })
+                .find(|(p, q)| crate::sniper::sees(p, *q, false, &obstacles))
+                .ok_or("No junction in a sniper's sight")?;
+            move_view(world, spot.1, 1.0)?;
+        }
+        Action::Heli => {
+            crate::war::clear_sky(world);
+            let p = player_position(world)?.xz();
+            crate::heli::spawn_qa_heli(world, crate::heli::HeliKind::Z10, p + Vec2::new(6.0, -8.0));
+            move_view(world, p, 0.7)?;
         }
     }
     run.entered = true;
@@ -4893,8 +5132,12 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
     // Retain the complete 68-scene Wave 4 route and its gates. Twelve new
     // Wave 5 scenes share the existing 30-minute deadline, which must be
     // validated by the full run rather than silently relaxed.
-    if run.started.elapsed() > Duration::from_secs(1800) {
-        return Err("Visual QA exceeded its 30-minute deadline".into());
+    let deadline = std::env::var("DEFEND_TAIPEI_QA_DEADLINE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1800);
+    if run.started.elapsed() > Duration::from_secs(deadline) {
+        return Err(format!("Visual QA exceeded its {deadline}-second deadline"));
     }
     if run.report.renderer.is_empty() {
         fs::create_dir_all(&run.output).map_err(|err| err.to_string())?;
@@ -5079,6 +5322,8 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
             | Action::Lighting(_)
             | Action::Wave5(_)
             | Action::StreetDetail(_)
+            | Action::Remnant
+            | Action::Heli
     ) {
         let key = crate::map::ChunkKey::of(player_position(world)?.xz());
         let keys = [Some(key), run.scene_chunk];
@@ -5183,6 +5428,227 @@ fn step(world: &mut World, run: &mut QaRun) -> Result<(), String> {
         }
         run.report.assertions.push(format!(
             "Real Interact set door {id} open={open}; collision and streamed leaf match"
+        ));
+    }
+    if matches!(stage.action, Action::Remnant) {
+        let built = world
+            .query::<(
+                &crate::remnant::RemnantMan,
+                &crate::human::RigParts,
+                &Visibility,
+            )>()
+            .iter(world)
+            .filter(|(man, _, vis)| man.squad == 0 && **vis != Visibility::Hidden)
+            .count();
+        let p = player_position(world)?.xz();
+        let reach = world
+            .resource::<crate::dialogue::NpcSpots>()
+            .nearest(p, |_| true)
+            .map(|s| s.key);
+        if built < 4 || reach != Some(crate::dialogue::NpcKey::Remnant(0)) {
+            run.ready_frames = 0;
+            return Ok(());
+        }
+        let hint = world
+            .resource::<crate::worldplay::InteractionHint>()
+            .detail
+            .clone();
+        run.report.assertions.push(format!(
+            "ROC remnant position 0: four rigged soldiers visible, sandbags in dynamic cover, Interact reaches the leader ({hint})"
+        ));
+    }
+    if matches!(stage.action, Action::RemnantTalk) {
+        let Some(card) = world.resource::<crate::dialogue::Dialogue>().0.clone() else {
+            return Ok(());
+        };
+        let keys: Vec<_> = card.options.iter().map(|o| o.key).collect();
+        if !keys.contains(&crate::dialogue::DialogueKey::RemnantSupply(0))
+            || !keys.contains(&crate::dialogue::DialogueKey::RemnantIntel(0))
+            || card.body.is_empty()
+        {
+            return Err(format!("Remnant card lacks its options: {keys:?}"));
+        }
+        run.report.assertions.push(format!(
+            "Talking to {} opened the leader's card with {} options",
+            card.title,
+            card.options.len()
+        ));
+    }
+    if matches!(stage.action, Action::Reclaim) {
+        let (target, before) = run.reclaim.clone().ok_or("Missing reclaim fixture")?;
+        let name = crate::sectors::SECTORS[target].zh;
+        let taken = world
+            .resource::<Campaign>()
+            .reclaimed
+            .iter()
+            .any(|n| n == name);
+        let title = world.resource::<crate::sectors::ReclaimTitle>().clone();
+        if !taken || title.age.is_none() {
+            return Ok(());
+        }
+        let bag = world.resource::<Inventory>();
+        let gift = crate::sectors::reclaim_gift(target);
+        if gift
+            .iter()
+            .any(|(key, n)| bag.count(key) != before.count(key) + n)
+        {
+            return Err(format!(
+                "Reclaiming {name} did not hand over its gift exactly"
+            ));
+        }
+        run.report.assertions.push(format!(
+            "Killing every soldier assigned to {name} reclaimed it: title '{}', gift {gift:?} added to the bag",
+            title.title
+        ));
+    }
+    if matches!(stage.action, Action::Upstairs) {
+        let up = world.resource::<crate::upstairs::Upstairs>();
+        let Some((building, floor)) = up.floor() else {
+            run.ready_frames = 0;
+            return Ok(());
+        };
+        let fixtures = up.fixtures().len();
+        let height = up.height();
+        let y = player_position(world)?.y;
+        if floor != 2 || fixtures == 0 || (y - height).abs() > 0.01 || height < 2.5 {
+            return Err(format!(
+                "Stairs did not reach a furnished second floor: floor={floor} fixtures={fixtures} y={y} height={height}"
+            ));
+        }
+        if !world.resource::<crate::combat::PlayerStance>().upstairs {
+            return Err("Soldiers still track the player upstairs".into());
+        }
+        run.ready_frames += 1;
+        if run.ready_frames < 20 {
+            return Ok(());
+        }
+        let hint = world
+            .resource::<crate::worldplay::InteractionHint>()
+            .clone();
+        run.report.assertions.push(format!(
+            "Real Interact on the landing climbed building {building} to floor 2 at {height:.1} m with {fixtures} fixtures; hint '{} / {}'",
+            hint.label, hint.detail
+        ));
+    }
+    if matches!(stage.action, Action::Rescue) {
+        let state = world.resource::<crate::rescue::RescueState>().clone();
+        let call = state.call.clone().ok_or("Rescue call vanished")?;
+        if !call.done {
+            run.ready_frames = 0;
+            let on_floor = world.resource::<crate::upstairs::Upstairs>().floor()
+                == Some((call.building, call.floor));
+            let family = world
+                .resource::<crate::dialogue::NpcSpots>()
+                .0
+                .iter()
+                .any(|s| s.key == crate::dialogue::NpcKey::Family);
+            if on_floor && family && world.resource::<crate::dialogue::Dialogue>().0.is_none() {
+                world.write_message(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Family));
+            }
+            return Ok(());
+        }
+        let card = world
+            .resource::<crate::dialogue::Dialogue>()
+            .0
+            .clone()
+            .ok_or("Rescue answered without the family's card")?;
+        run.ready_frames += 1;
+        if run.ready_frames < 10 {
+            return Ok(());
+        }
+        run.report.assertions.push(format!(
+            "Rescue: climbed to floor {} of building {} near {}, found the family and answered ('{}')",
+            call.floor, call.building, call.street, card.title
+        ));
+    }
+    if matches!(stage.action, Action::War) {
+        let stats = *world.resource::<crate::war::WarStats>();
+        let pending = crate::war::shells_pending(world);
+        let before = run.war_grenades.ok_or("Missing grenade fixture")?;
+        if stats.thrown == 0 || run.frame < SETTLE_FRAMES + 170 {
+            return Ok(());
+        }
+        if world.resource::<Inventory>().count("grenade") + 1 != before {
+            return Err("Throwing did not spend the grenade".into());
+        }
+        if pending < 2 || stats.shells < 3 || stats.rockets < 1 {
+            return Err(format!(
+                "War rounds missing: pending={pending} stats={stats:?}"
+            ));
+        }
+        run.report.assertions.push(format!(
+            "War: a real Use threw a grenade from the bag; {} mortar rounds and a rocket fall under red rings ({pending} still in the air), war level {:.2}",
+            stats.shells, stats.level
+        ));
+    }
+    if matches!(stage.action, Action::Sniper) {
+        let Some(i) = world.resource::<crate::sniper::SniperLock>().0 else {
+            return Ok(());
+        };
+        let name = world.resource::<crate::sniper::Posts>().0[i].name.clone();
+        run.report.assertions.push(format!(
+            "Sniper over {name} locked on the player in the open by day (glint and laser before the shot)"
+        ));
+    }
+    if matches!(stage.action, Action::Airdrop) {
+        world.resource_mut::<crate::dialogue::Dialogue>().0 = None;
+        if world.resource::<crate::japan::JapanStats>().landed == 0 {
+            run.ready_frames = 0;
+            return Ok(());
+        }
+        run.ready_frames += 1;
+        if run.ready_frames < 45 {
+            return Ok(());
+        }
+        let progress = world.resource::<crate::worldplay::ScavengeState>();
+        let Some((id, at)) = progress
+            .drops
+            .iter()
+            .find(|(id, _)| id.starts_with("jpdrop"))
+            .cloned()
+        else {
+            return Err("Airdrop landed without a crate".into());
+        };
+        let stock = progress
+            .loot
+            .iter()
+            .find(|(key, _)| *key == id)
+            .map(|(_, s)| s.clone())
+            .ok_or("Airdrop crate has no stock")?;
+        if stock.count("type20") + stock.count("type89") != 1 || stock.count("a556n") != 60 {
+            return Err(format!(
+                "Airdrop crate contents are wrong: {:?}",
+                stock.stacks()
+            ));
+        }
+        let state = world.resource::<crate::japan::JapanState>();
+        if !state.met || state.ready(crate::japan::JpKind::Drop) {
+            return Err("Airdrop did not spend its sortie".into());
+        }
+        let p = player_position(world)?.xz();
+        run.report.assertions.push(format!(
+            "JSDF radio: the C-2 crate landed {:.0} m from the player with {:?}; the call spent a battery and started the 6-minute cooldown",
+            Vec2::from_array(at).distance(p),
+            stock.stacks()
+        ));
+    }
+    if matches!(stage.action, Action::Heli) {
+        let stats = *world.resource::<crate::heli::HeliStats>();
+        if stats.spawned == 0 {
+            run.ready_frames = 0;
+            return Ok(());
+        }
+        let spotlights = world.query::<&SpotLight>().iter(world).count();
+        if spotlights > 6 {
+            return Err(format!("Heli spawned extra spotlights ({spotlights} > 6)"));
+        }
+        run.ready_frames += 1;
+        if run.ready_frames < 20 {
+            return Ok(());
+        }
+        run.report.assertions.push(format!(
+            "PLA Heli v24.24: spawned Z-10 gunship overhead ({} spawned, {spotlights} city spotlights)",
+            stats.spawned
         ));
     }
     if matches!(
@@ -5898,7 +6364,7 @@ mod exterior_tests {
                 .count(),
             6
         );
-        assert_eq!(STAGES.len(), 80);
+        assert_eq!(STAGES.len(), 89);
         eprintln!(
             "Lighting fixture lot={} player={:?} zoom={} selected={slots:?}",
             day.building, day.position, day.zoom

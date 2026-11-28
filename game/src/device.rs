@@ -30,6 +30,9 @@ pub struct DeviceSnapshot {
     pub manufacturer: String,
     pub model: String,
     pub device: String,
+    pub soc_manufacturer: String,
+    pub soc_model: String,
+    pub npu_htp_likely: bool,
     pub sdk_int: Option<u32>,
     pub total_memory_bytes: Option<u64>,
     pub available_memory_bytes: Option<u64>,
@@ -72,6 +75,9 @@ impl Default for DeviceSnapshot {
             manufacturer: String::new(),
             model: String::new(),
             device: String::new(),
+            soc_manufacturer: String::new(),
+            soc_model: String::new(),
+            npu_htp_likely: false,
             sdk_int: None,
             total_memory_bytes: None,
             available_memory_bytes: None,
@@ -240,7 +246,13 @@ fn parse_android_snapshot(json: &str) -> Result<DeviceSnapshot, &'static str> {
     if snapshot.schema_version != 1 || snapshot.platform != "android" {
         return Err("unsupported device schema or platform");
     }
-    for value in [&snapshot.manufacturer, &snapshot.model, &snapshot.device] {
+    for value in [
+        &snapshot.manufacturer,
+        &snapshot.model,
+        &snapshot.device,
+        &snapshot.soc_manufacturer,
+        &snapshot.soc_model,
+    ] {
         if value.chars().count() > MAX_TEXT_CHARS || value.chars().any(char::is_control) {
             return Err("invalid device label");
         }

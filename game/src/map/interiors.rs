@@ -53,7 +53,7 @@ impl FixtureKind {
         }
     }
 
-    fn loot(self) -> Option<&'static str> {
+    pub(crate) fn loot(self) -> Option<&'static str> {
         Some(match self {
             Self::Shelf => "shelf",
             Self::Fridge => "fridge",
@@ -67,7 +67,7 @@ impl FixtureKind {
         })
     }
 
-    fn labels(self) -> (&'static str, &'static str) {
+    pub(crate) fn labels(self) -> (&'static str, &'static str) {
         match self {
             Self::Shelf => ("泡麵零食貨架", "Noodles and snacks shelf"),
             Self::Fridge => ("飲料冷藏櫃", "Drinks refrigerator"),
@@ -116,7 +116,7 @@ impl Fixture {
         ]
     }
 
-    fn contains(&self, p: Vec2, margin: f32) -> bool {
+    pub(crate) fn contains(&self, p: Vec2, margin: f32) -> bool {
         let d = p - self.pos;
         let size = self.kind.size();
         d.dot(self.tangent()).abs() < size.x * 0.5 + margin
@@ -155,7 +155,7 @@ fn circle_inside(b: &Bld, p: Vec2, r: f32) -> bool {
 // Full indexed building/arcade/prop geometry, excluding furniture itself when
 // re-planning an already built world in tests. Ownership also prevents nested
 // or overlapping OSM footprints from furnishing the same strip of floor twice.
-fn usable_floor(world: &WorldData, b: &Bld, p: Vec2, radius: f32) -> bool {
+pub(crate) fn usable_floor(world: &WorldData, b: &Bld, p: Vec2, radius: f32) -> bool {
     if !circle_inside(b, p, radius)
         || world.bld_at(p).is_none_or(|owner| owner.id != b.id)
         || p.x < world.min.x + radius
@@ -182,7 +182,7 @@ fn usable_floor(world: &WorldData, b: &Bld, p: Vec2, radius: f32) -> bool {
     true
 }
 
-fn route_hits(fixture: &Fixture, from: Vec2, to: Vec2, radius: f32) -> bool {
+pub(crate) fn route_hits(fixture: &Fixture, from: Vec2, to: Vec2, radius: f32) -> bool {
     let delta = to - from;
     let size = fixture.kind.size();
     let mut entry = 0.0_f32;
@@ -230,7 +230,7 @@ fn clear_route(
     (0..=steps).all(|i| usable_floor(world, b, from.lerp(to, i as f32 / steps as f32), radius))
 }
 
-fn overlaps(a: &Fixture, b: &Fixture, gap: f32) -> bool {
+pub(crate) fn overlaps(a: &Fixture, b: &Fixture, gap: f32) -> bool {
     let ac = a.corners();
     let bc = b.corners();
     for axis in [a.front, a.tangent(), b.front, b.tangent()] {
@@ -470,7 +470,7 @@ fn cylinder_part(out: &mut MeshBuf, r: f32, height: f32, p: Vec3, color: u32) {
     );
 }
 
-fn body_mesh(kind: FixtureKind) -> MeshBuf {
+pub(crate) fn body_mesh(kind: FixtureKind) -> MeshBuf {
     let mut m = MeshBuf::default();
     let s = kind.size();
     let (w, d, h) = (s.x, s.z, s.y);

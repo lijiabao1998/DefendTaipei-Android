@@ -53,6 +53,8 @@ pub struct SkipPrologue;
 #[serde(default)]
 pub struct Campaign {
     pub reclaimed: Vec<String>,
+    /// v24.14 where the player stood when each area fell (its crowd stands there).
+    pub reclaim_at: Vec<(String, [f32; 2])>,
     pub(crate) prologue_t: f32,
     pub(crate) news_i: usize,
     pub(crate) raid: bool,
@@ -80,6 +82,7 @@ impl Default for Campaign {
     fn default() -> Self {
         Self {
             reclaimed: Vec::new(),
+            reclaim_at: Vec::new(),
             prologue_t: 0.0,
             news_i: 0,
             raid: false,
