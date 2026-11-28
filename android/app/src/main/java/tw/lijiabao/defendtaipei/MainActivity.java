@@ -303,6 +303,21 @@ public class MainActivity extends GameActivity {
             data.put("model", label(Build.MODEL));
             // Build.DEVICE is the product codename, not a unique device identifier.
             data.put("device", label(Build.DEVICE));
+            String socMfg = label(Build.SOC_MANUFACTURER);
+            String socModel = label(Build.SOC_MODEL);
+            data.put("soc_manufacturer", socMfg);
+            data.put("soc_model", socModel);
+            String socUpper = (socMfg + " " + socModel).toUpperCase(java.util.Locale.ROOT);
+            boolean npuLikely = socUpper.contains("QTI")
+                    || socUpper.contains("QUALCOMM")
+                    || socUpper.contains("SM8550")
+                    || socUpper.contains("SM8650")
+                    || socUpper.contains("SM8750")
+                    || socUpper.contains("QCS")
+                    || socUpper.contains("MEDIATEK")
+                    || socUpper.contains("MT69")
+                    || socUpper.contains("TENSOR");
+            data.put("npu_htp_likely", npuLikely);
             data.put("sdk_int", Build.VERSION.SDK_INT);
             data.put("sampled_at_elapsed_ms", now);
             data.put("foreground", resumed && focused);

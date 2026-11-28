@@ -18,10 +18,13 @@ pub mod data;
 pub mod detail;
 pub mod evac;
 pub mod exterior;
+pub mod fortify;
 pub mod interiors;
 pub mod roofs;
 pub mod street;
 pub mod textures;
+pub mod upstairs;
+pub mod wreckage;
 
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, futures::check_ready};
@@ -877,6 +880,7 @@ fn cutaway(
     >,
     mut roofs: Query<(&BldRoof, &mut Visibility), Without<BldDetail>>,
     mut details: Query<(&BldDetail, &mut Visibility), Without<BldRoof>>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
 ) {
     let (Some(player), Some(mats)) = (player, mats) else {
         return;
@@ -901,7 +905,18 @@ fn cutaway(
                 mats.walls[bw.mat].clone()
             };
         }
-        let sy = if inside == Some(bw.id) { 0.12 } else { 1.0 };
+        // v23.4 upstairs: the walls rise to the floor and stop in a low ring
+        let up = upstairs
+            .as_deref()
+            .and_then(|u| u.floor().map(|(b, _)| (b, u.height())));
+        let sy = match up {
+            Some((b, h)) if b == bw.id => {
+                let full = w.blds[bw.id as usize].h.max(1.0);
+                ((h + 1.1) / full).min(1.0)
+            }
+            _ if inside == Some(bw.id) => 0.12,
+            _ => 1.0,
+        };
         if tf.scale.y != sy {
             tf.scale.y = sy;
         }

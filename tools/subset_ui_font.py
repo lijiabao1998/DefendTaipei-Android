@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import json
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -34,11 +35,12 @@ def main() -> None:
     world = json.loads((root / "assets/data/wanhua.json").read_text(encoding="utf-8"))
     for road in world["roads"]:
         chars.update(road.get("n", ""))
-    text_path = Path("/tmp/fonts/chars.txt")
+    tmp_fonts = Path(tempfile.gettempdir()) / "defendtaipei-fonts"
+    text_path = tmp_fonts / "chars.txt"
     text_path.parent.mkdir(parents=True, exist_ok=True)
     text_path.write_text("".join(sorted(chars)), encoding="utf-8")
 
-    source = Path(os.environ.get("NOTO_SANS_TC", "/tmp/fonts/NotoSansCJKtc-Regular.otf"))
+    source = Path(os.environ.get("NOTO_SANS_TC", str(tmp_fonts / "NotoSansCJKtc-Regular.otf")))
     if not source.exists():
         print(f"downloading {SOURCE_URL}")
         urllib.request.urlretrieve(SOURCE_URL, source)
@@ -46,7 +48,7 @@ def main() -> None:
     from fontTools.subset import main as subset_main
     from fontTools.ttLib import TTFont
 
-    out = Path("/tmp/fonts/DefendTaipeiUI.otf")
+    out = tmp_fonts / "DefendTaipeiUI.otf"
     subset_main(
         [
             str(source),

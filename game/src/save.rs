@@ -96,6 +96,18 @@ struct SaveFile {
     vehicles: crate::vehicles::VehicleFleet,
     #[serde(default)]
     armor: crate::combat::armor::ArmorFleet,
+    /// v24.3 the ROC remnant positions (absent in older native saves).
+    #[serde(default)]
+    remnants: crate::remnant::RemnantState,
+    /// v24.4 the JSDF liaison, radio cooldowns and airdrops.
+    #[serde(default)]
+    japan: crate::japan::JapanState,
+    /// v24.8 the day's call for help from upstairs.
+    #[serde(default)]
+    rescue: crate::rescue::RescueState,
+    /// v22.5 cleared sniper posts.
+    #[serde(default)]
+    snipers: crate::sniper::SniperState,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -199,6 +211,11 @@ impl SaveFile {
             || !finite_range(campaign.notice_t, 0.0, 3600.0)
             || campaign.notice.len() > 16_384
             || campaign.reclaimed.len() > WANHUA_DISTRICTS.len()
+            || campaign.reclaim_at.len() > WANHUA_DISTRICTS.len()
+            || campaign.reclaim_at.iter().any(|(name, p)| {
+                !WANHUA_DISTRICTS.contains(&name.as_str())
+                    || p.iter().any(|n| !n.is_finite() || n.abs() > 1_000_000.0)
+            })
             || !unique_strings(&campaign.reclaimed, 128)
             || campaign
                 .reclaimed
@@ -214,6 +231,18 @@ impl SaveFile {
         }
         if !self.map.validate() {
             return Err(SaveError::Invalid("Invalid map exploration or notes"));
+        }
+        if !self.remnants.is_valid() {
+            return Err(SaveError::Invalid("Invalid ROC remnant state"));
+        }
+        if !self.japan.is_valid() {
+            return Err(SaveError::Invalid("Invalid JSDF support state"));
+        }
+        if !self.rescue.is_valid() {
+            return Err(SaveError::Invalid("Invalid rescue state"));
+        }
+        if !self.snipers.is_valid() {
+            return Err(SaveError::Invalid("Invalid sniper state"));
         }
         if [self.needs.hunger, self.needs.thirst, self.needs.fatigue]
             .iter()
@@ -543,6 +572,12 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
         position: transform.translation.to_array(),
         rotation: transform.rotation.to_array(),
     };
+    // v23.4 a save made upstairs records the ground-floor landing
+    let position = world
+        .get_resource::<crate::upstairs::Upstairs>()
+        .and_then(|u| u.landing())
+        .map_or(player.position, |p| [p.x, 0.0, p.y]);
+    let player = PlayerSnapshot { position, ..player };
     let selected = world.resource::<SelectedRole>();
     let save = SaveFile {
         version: SAVE_VERSION,
@@ -565,6 +600,22 @@ fn snapshot(world: &mut World) -> Result<SaveFile, SaveError> {
             .unwrap_or_default(),
         armor: world
             .get_resource::<crate::combat::armor::ArmorFleet>()
+            .cloned()
+            .unwrap_or_default(),
+        remnants: world
+            .get_resource::<crate::remnant::RemnantState>()
+            .cloned()
+            .unwrap_or_default(),
+        japan: world
+            .get_resource::<crate::japan::JapanState>()
+            .cloned()
+            .unwrap_or_default(),
+        rescue: world
+            .get_resource::<crate::rescue::RescueState>()
+            .cloned()
+            .unwrap_or_default(),
+        snipers: world
+            .get_resource::<crate::sniper::SniperState>()
             .cloned()
             .unwrap_or_default(),
     };
@@ -654,6 +705,10 @@ fn restore(world: &mut World, mut save: SaveFile) -> Result<(), SaveError> {
     }
     world.insert_resource(save.vehicles);
     world.insert_resource(save.armor);
+    world.insert_resource(save.remnants);
+    world.insert_resource(save.japan);
+    world.insert_resource(save.rescue);
+    world.insert_resource(save.snipers);
     if let Some(mut input) = world.get_resource_mut::<MoveInput>() {
         *input = MoveInput::default();
     }
@@ -783,6 +838,10 @@ mod tests {
             map: MapProgress::default(),
             vehicles: crate::vehicles::VehicleFleet::default(),
             armor: crate::combat::armor::ArmorFleet::default(),
+            remnants: crate::remnant::RemnantState::default(),
+            japan: crate::japan::JapanState::default(),
+            rescue: crate::rescue::RescueState::default(),
+            snipers: crate::sniper::SniperState::default(),
         }
     }
 

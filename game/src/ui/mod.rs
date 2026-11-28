@@ -53,6 +53,8 @@ impl Plugin for FlowUiPlugin {
             .init_resource::<title::TitleAssets>()
             .init_resource::<title::TitleCache>()
             .init_resource::<ConsumedPresses>()
+            .init_resource::<crate::dialogue::Dialogue>()
+            .add_message::<crate::dialogue::DialogueChosen>()
             .init_resource::<PauseOpen>()
             .init_resource::<settings::SettingsUi>()
             .init_resource::<settings::SettingsCache>()
@@ -136,6 +138,7 @@ fn consume_ui_clicks(
     geometry: Option<Res<crate::hud::HudGeometry>>,
     fleet: Option<Res<crate::vehicles::VehicleFleet>>,
     controls: Option<Res<crate::input::ControlPreferences>>,
+    inventory: Option<Res<crate::inventory::Inventory>>,
     mut modal: ResMut<UiModal>,
 ) {
     consumed.points.clear();
@@ -149,6 +152,7 @@ fn consume_ui_clicks(
             || (flow.get() == &GameFlow::Playing
                 && (modal.open
                     || shelter::toolbar_hit(viewport, point)
+                    || shelter::quick_action_hit(viewport, point, inventory.as_deref())
                     || geometry
                         .as_ref()
                         .and_then(|g| g.banner)

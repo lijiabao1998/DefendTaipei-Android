@@ -107,7 +107,7 @@ jobs:
           import json
           report = json.load(open("native-qa/qa-report.json"))
           assert report["success"] and report["scope"] == "full", report
-          assert report["expected_captures"] == 80 and len(report["captures"]) == 80, report
+          assert report["expected_captures"] == 89 and len(report["captures"]) == 89, report
           exterior = [capture["exterior"] for capture in report["captures"] if "exterior" in capture]
           assert len(exterior) == 6, report
           assert {capture["scene"] for capture in exterior} == {"Townhouse", "Walkup", "Shophouse", "ServiceStair", "Rooftop", "Cutaway"}, report
@@ -229,7 +229,7 @@ jobs:
           09-barter-portrait
           10-title-with-save
           11-continued""".splitlines()
-          assert [capture["stage"] for capture in report["captures"] if "lighting" not in capture and not capture["stage"].startswith("09w")] == original_stages, report
+          assert [capture["stage"] for capture in report["captures"] if "lighting" not in capture and not capture["stage"].startswith(("09w", "12w"))] == original_stages, report
           # Six captures retain the original camera and world fixture. NoSpillControl is
           # explicitly diagnostic: only the actual six SpotLight intensities are zeroed.
           from pathlib import Path
@@ -248,7 +248,7 @@ jobs:
           assert [capture["stage"] for capture in lighting_captures] == expected_lighting_names, lighting_captures
           lighting_insert = original_stages.index("04e-survivor-map-portrait")
           previous_stages = original_stages[:lighting_insert] + expected_lighting_names + original_stages[lighting_insert:]
-          assert [capture["stage"] for capture in report["captures"] if not capture["stage"].startswith("09w")] == previous_stages, report
+          assert [capture["stage"] for capture in report["captures"] if not capture["stage"].startswith(("09w", "12w"))] == previous_stages, report
           workload = json.load(open("native-qa/lighting-workload.json"))
           assert workload["success"] and workload["world_identity_matches_verified_wave3"] and workload["catalogue_deterministic"], workload
           catalog = {int(site["id"]): site for site in workload["light_sites"]}

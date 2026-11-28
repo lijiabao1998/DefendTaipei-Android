@@ -3,6 +3,7 @@
 mod policy;
 pub(crate) mod render;
 mod report;
+pub(crate) mod upscale;
 pub use policy::EffectivePerformance;
 pub use report::{FrameSample, FrameSummary};
 
@@ -65,7 +66,7 @@ impl PerformancePreferences {
         if !matches!(self.frame_cap, 30 | 60 | 90 | 120) {
             self.frame_cap = 60;
         }
-        if !matches!(self.render_scale, 0 | 70 | 85 | 100) {
+        if !matches!(self.render_scale, 0 | 60 | 70 | 85 | 100) {
             self.render_scale = 0;
         }
         self
@@ -171,6 +172,7 @@ impl Plugin for PerformancePlugin {
                     .in_set(PerformanceSet)
                     .after(crate::ui::settings::SettingsSet),
             );
+        upscale::install(app);
         render::install(app);
     }
 }

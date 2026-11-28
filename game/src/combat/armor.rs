@@ -708,6 +708,23 @@ fn shield_end(mut state: ResMut<super::GameState>, shield: Res<ArmorShield>) {
     }
 }
 
+/// Apply armored-vehicle damage reduction (10% damage, no bleeding) for damage
+/// systems that run outside [`super::CombatSet`] (war shells, snipers, choppers).
+pub fn shield_damage(
+    vehicles: Option<&crate::vehicles::VehicleFleet>,
+    dmg: f32,
+    bleed: bool,
+) -> (f32, bool) {
+    if vehicles
+        .and_then(|fleet| fleet.current())
+        .is_some_and(|v| v.gun.is_some())
+    {
+        (dmg * 0.1, false)
+    } else {
+        (dmg, bleed)
+    }
+}
+
 fn handle_armor_requests(
     mut requests: MessageReader<super::SpawnEnemy>,
     mut fleet: ResMut<ArmorFleet>,

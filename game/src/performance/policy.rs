@@ -98,7 +98,13 @@ pub fn resolve(
                         85
                     }
                 }
-                _ => 70,
+                _ => {
+                    if android {
+                        60
+                    } else {
+                        70
+                    }
+                }
             };
         }
         if step >= 3 {

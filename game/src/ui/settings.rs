@@ -123,7 +123,7 @@ pub(crate) struct SettingsLayout {
     pub performance_sections: [ScreenRect; 2],
     pub profiles: [ScreenRect; 4],
     pub frame_caps: [ScreenRect; 4],
-    pub render_scales: [ScreenRect; 4],
+    pub render_scales: [ScreenRect; 5],
     pub performance_overlay: ScreenRect,
     pub capture: ScreenRect,
     pub export: ScreenRect,
@@ -252,7 +252,16 @@ pub(crate) fn settings_layout(viewport: Vec2) -> SettingsLayout {
     };
     let profiles = option_group(0);
     let frame_caps = option_group(1);
-    let render_scales = option_group(2);
+    let render_scales: [ScreenRect; 5] = std::array::from_fn(|i| {
+        let option = performance_labels[2];
+        let width = (option.width() - 24.0) / 5.0;
+        ScreenRect::new(
+            option.min.x + i as f32 * (width + 6.0),
+            option.min.y + label_h + 2.0,
+            width,
+            button_h,
+        )
+    });
     let performance_help = if short {
         ScreenRect::new(
             x + option_w + 14.0,
@@ -729,7 +738,7 @@ fn hit(
             }
             for (i, rect) in layout.render_scales.iter().enumerate() {
                 if rect.contains(point) {
-                    return Some(SettingsAction::RenderScale([0, 70, 85, 100][i]));
+                    return Some(SettingsAction::RenderScale([0, 60, 70, 85, 100][i]));
                 }
             }
         } else {
@@ -1084,7 +1093,7 @@ pub(super) fn apply_actions(
                 performance.frame_cap = value;
                 println!("DTSETTINGS action=frame_cap value={value}");
             }
-            SettingsAction::RenderScale(value) if matches!(value, 0 | 70 | 85 | 100) => {
+            SettingsAction::RenderScale(value) if matches!(value, 0 | 60 | 70 | 85 | 100) => {
                 performance.render_scale = value;
                 println!("DTSETTINGS action=render_scale value={value}");
             }
@@ -1340,7 +1349,7 @@ fn render_performance(
                 font,
             );
         }
-        for (i, scale) in [0, 70, 85, 100].iter().enumerate() {
+        for (i, scale) in [0, 60, 70, 85, 100].iter().enumerate() {
             let text = if *scale == 0 {
                 tr(lang, "自動", "Auto").to_owned()
             } else {
@@ -1969,7 +1978,7 @@ mod tests {
             layout.tabs[2].center(),
             layout.profiles[3].center(),
             layout.frame_caps[2].center(),
-            layout.render_scales[2].center(),
+            layout.render_scales[3].center(),
         ] {
             touch(&mut app, window, 0, TouchPhase::Started, point);
             touch(&mut app, window, 0, TouchPhase::Ended, point);

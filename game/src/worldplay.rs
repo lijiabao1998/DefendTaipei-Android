@@ -190,6 +190,8 @@ fn cabinet_owner(id: &str) -> String {
 struct Patrol {
     id: u32,
     route: Vec<Vec2>,
+    /// Sentry at a checkpoint: holds `route[0]` instead of walking it.
+    post: bool,
 }
 
 #[derive(Resource)]
@@ -238,6 +240,9 @@ impl Plugin for WorldPlayPlugin {
             .init_resource::<ScavengeSession>()
             .init_resource::<DoorPrompt>()
             .init_resource::<FrameProgress>()
+            .init_resource::<crate::dialogue::NpcSpots>()
+            .add_message::<crate::dialogue::TalkTo>()
+            .add_message::<crate::war::ThrowGrenade>()
             .add_message::<WorldAction>()
             .configure_sets(Update, WorldSet.after(ShelterSet).after(combat::CombatSet))
             .add_systems(Startup, (plan_world, setup_loot_art))
@@ -367,7 +372,7 @@ fn plan_world(mut commands: Commands) {
         .filter(|r| r.p.len() >= 3 && r.t != "footway")
         .collect();
     let mut seed = 20_261_024_u32;
-    let patrols = (0..64)
+    let mut patrols: Vec<Patrol> = (0..64)
         .filter_map(|id| {
             if roads.is_empty() {
                 return None;
@@ -376,9 +381,23 @@ fn plan_world(mut commands: Commands) {
             let start = (next(&mut seed) * (road.p.len() - 1) as f64) as usize;
             let route: Vec<_> =
                 road.p[start.saturating_sub(3)..(start + 4).min(road.p.len())].to_vec();
-            Some(Patrol { id, route })
+            Some(Patrol {
+                id,
+                route,
+                post: false,
+            })
         })
         .collect();
+    // main.ts boot: the first soldiers man the two checkpoints, two at each.
+    for (k, patrol) in patrols.iter_mut().take(4).enumerate() {
+        if let Some(cp) = map.checkpoints.get(k / 2) {
+            patrol.route = vec![cp.post(k % 2)];
+            patrol.post = true;
+        }
+    }
+    commands.insert_resource(crate::sectors::PatrolRoster(
+        patrols.iter().map(|p| (p.id, p.route[0])).collect(),
+    ));
     commands.insert_resource(WorldCatalog {
         containers,
         patrols,
@@ -408,7 +427,9 @@ fn spawn_patrols(commands: &mut Commands, catalog: &WorldCatalog, dead: &[u32]) 
         if dead.contains(&patrol.id) {
             continue;
         }
-        let kind = if patrol.id >= 48 {
+        let kind = if patrol.post {
+            EnemyKind::Garrison
+        } else if patrol.id >= 48 {
             EnemyKind::NightPatrol
         } else {
             EnemyKind::Patrol
@@ -632,12 +653,45 @@ fn danger_speed(
     }
 }
 
+/// The upper floor the player is on, if any (`None` on the street).
+type Floor<'a> = Option<&'a crate::upstairs::Upstairs>;
+
+fn floor_active(up: Floor) -> bool {
+    up.is_some_and(|u| u.active())
+}
+
+fn floor_container(f: &crate::map::interiors::Fixture) -> Option<Container> {
+    Some(Container {
+        id: f.id.clone(),
+        pos: f.approach,
+        kind: f.loot?,
+        // (the occupied-home choice belongs to street-level homes)
+        cabinet: false,
+        furnished: true,
+        label_zh: f.label_zh,
+        label_en: f.label_en,
+    })
+}
+
 fn nearest_container(
     pos: Vec2,
     catalog: &WorldCatalog,
     progress: &ScavengeState,
     obstacles: Option<&Obstacles>,
+    up: Floor,
 ) -> Option<Container> {
+    if let Some(up) = up.filter(|u| u.active()) {
+        return up
+            .fixtures()
+            .iter()
+            .filter(|f| f.loot.is_some() && up.reaches(pos, f))
+            .min_by(|a, b| {
+                a.approach
+                    .distance_squared(pos)
+                    .total_cmp(&b.approach.distance_squared(pos))
+            })
+            .and_then(floor_container);
+    }
     let building = world().bld_at(pos).map(|b| b.id);
     let mut best = catalog
         .containers
@@ -662,25 +716,47 @@ fn nearest_container(
                 .as_ref()
                 .is_none_or(|b| q.distance_squared(pos) < b.pos.distance_squared(pos))
         {
+            let (label_zh, label_en) = drop_label(id);
             best = Some(Container {
                 id: id.clone(),
                 pos: q,
                 kind: "crate",
                 cabinet: false,
                 furnished: false,
-                label_zh: "遺留物資",
-                label_en: "Dropped supplies",
+                label_zh,
+                label_en,
             });
         }
     }
     best
 }
 
+/// Names of the crates left in the street, by the id scheme of their owner.
+fn drop_label(id: &str) -> (&'static str, &'static str) {
+    if id.starts_with("remgear") {
+        ("國軍殘部遺留裝備", "ROC remnant gear")
+    } else if id.starts_with("jpdrop") {
+        ("日本空投物資箱", "Japanese airdrop crate")
+    } else if id.starts_with("helidrop") {
+        ("墜機空投物資", "Wrecked chopper supplies")
+    } else {
+        ("遺留物資", "Dropped supplies")
+    }
+}
+
 fn container_by_id(
     id: &str,
     catalog: &WorldCatalog,
     progress: &ScavengeState,
+    up: Floor,
 ) -> Option<Container> {
+    if id.starts_with('u') {
+        return up?
+            .fixtures()
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(floor_container);
+    }
     catalog
         .containers
         .iter()
@@ -691,19 +767,32 @@ fn container_by_id(
                 .drops
                 .iter()
                 .find(|(key, _)| key == id)
-                .map(|(_, pos)| Container {
-                    id: id.into(),
-                    pos: Vec2::from_array(*pos),
-                    kind: "crate",
-                    cabinet: false,
-                    furnished: false,
-                    label_zh: "遺留物資",
-                    label_en: "Dropped supplies",
+                .map(|(_, pos)| {
+                    let (label_zh, label_en) = drop_label(id);
+                    Container {
+                        id: id.into(),
+                        pos: Vec2::from_array(*pos),
+                        kind: "crate",
+                        cabinet: false,
+                        furnished: false,
+                        label_zh,
+                        label_en,
+                    }
                 })
         })
 }
 
-fn container_reachable(pos: Vec2, container: &Container, obstacles: &Obstacles) -> bool {
+fn container_reachable(pos: Vec2, container: &Container, obstacles: &Obstacles, up: Floor) -> bool {
+    if floor_active(up) || container.id.starts_with('u') {
+        // upper-floor furniture: only on its own floor, within reach
+        return floor_active(up)
+            && container.id.starts_with('u')
+            && up.is_some_and(|u| {
+                u.fixtures()
+                    .iter()
+                    .any(|f| f.id == container.id && u.reaches(pos, f))
+            });
+    }
     pos.distance(container.pos) < 2.2
         && world().bld_at(pos).map(|b| b.id) == world().bld_at(container.pos).map(|b| b.id)
         && obstacles.los(pos, container.pos)
@@ -716,16 +805,18 @@ fn update_scavenge_reach(
     progress: Res<ScavengeState>,
     obstacles: Res<Obstacles>,
     mut session: ResMut<ScavengeSession>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
 ) {
     if flow.get() != &GameFlow::Playing {
         *session = ScavengeSession::default();
         return;
     }
+    let up = upstairs.as_deref();
     session.reachable = session.target.as_ref().is_some_and(|target| {
-        container_by_id(&target.id, &catalog, &progress).is_some_and(|container| {
+        container_by_id(&target.id, &catalog, &progress, up).is_some_and(|container| {
             player
                 .single()
-                .is_ok_and(|p| container_reachable(p.translation.xz(), &container, &obstacles))
+                .is_ok_and(|p| container_reachable(p.translation.xz(), &container, &obstacles, up))
         })
     });
 }
@@ -759,6 +850,8 @@ fn migrate_fixture_loot(progress: &mut ScavengeState) {
 
 #[derive(Clone)]
 enum InteractionTarget {
+    /// Someone to talk to (ROC remnants, the JSDF liaison, a family upstairs).
+    Npc(crate::dialogue::NpcSpot),
     Door(DoorTarget),
     Container(Container),
     Trade,
@@ -772,12 +865,29 @@ fn interaction_target(
     progress: &ScavengeState,
     shelter: &Shelter,
     obstacles: &Obstacles,
+    npcs: &crate::dialogue::NpcSpots,
+    up: Floor,
 ) -> InteractionTarget {
+    if floor_active(up) {
+        // upstairs: only this floor's people, stairs and furniture
+        if let Some(npc) = npcs.nearest(pos, |_| false) {
+            return InteractionTarget::Npc(npc.clone());
+        }
+        return nearest_container(pos, catalog, progress, None, up)
+            .map_or(InteractionTarget::None, InteractionTarget::Container);
+    }
     if trade_at(pos.to_array()).is_some() {
         return InteractionTarget::Trade;
     }
     let door = crate::doors::nearest_door(pos, obstacles);
-    let container = nearest_container(pos, catalog, progress, Some(obstacles));
+    let container = nearest_container(pos, catalog, progress, Some(obstacles), None);
+    // A person within reach answers before the door or a crate beside them,
+    // unless that crate is right under the player's hand.
+    if let Some(npc) = npcs.nearest(pos, |p| obstacles.los(pos, p))
+        && container.as_ref().is_none_or(|c| c.pos.distance(pos) > 1.2)
+    {
+        return InteractionTarget::Npc(npc.clone());
+    }
     if let Some(door) = door
         && container
             .as_ref()
@@ -809,6 +919,8 @@ fn update_interaction_hint(
     mut door_prompt: ResMut<DoorPrompt>,
     vehicles: Option<Res<crate::vehicles::VehicleFleet>>,
     controls: Option<Res<crate::input::ControlPreferences>>,
+    npcs: Res<crate::dialogue::NpcSpots>,
+    upstairs: Option<Res<crate::upstairs::Upstairs>>,
 ) {
     door_prompt.0 = None;
     let mut next = InteractionHint::default();
@@ -823,6 +935,8 @@ fn update_interaction_hint(
             &progress,
             &shelter,
             &obstacles,
+            &npcs,
+            upstairs.as_deref(),
         );
         if let Some(fleet) = vehicles.as_deref()
             && (fleet.current.is_some()
@@ -842,6 +956,12 @@ fn update_interaction_hint(
         }
         let (label, detail) =
             match target {
+                InteractionTarget::Npc(npc) => {
+                    next.label = npc.label;
+                    next.detail = npc.detail;
+                    hint.set_if_neq(next);
+                    return;
+                }
                 InteractionTarget::Door(door) => {
                     door_prompt.0 = Some(door);
                     if obstacles.doors().is_barricaded(door.id) {
@@ -1022,7 +1142,7 @@ fn fill_water(
     water: bool,
     obstacles: Option<&Obstacles>,
 ) -> Result<(), TapError> {
-    let fixture = nearest_container(pos, catalog, progress, obstacles)
+    let fixture = nearest_container(pos, catalog, progress, obstacles, None)
         .filter(|container| container.id == HOME_TAP_ID)
         .ok_or(TapError::TooFar)?;
     if !water {
@@ -1194,9 +1314,21 @@ fn apply_actions(
         Query<&Transform, With<crate::human::Civilian>>,
         Option<Res<crate::vehicles::VehicleFleet>>,
         Option<ResMut<Messages<crate::vehicles::VehicleAction>>>,
+        Res<crate::dialogue::NpcSpots>,
+        MessageWriter<crate::dialogue::TalkTo>,
+        Option<Res<crate::upstairs::Upstairs>>,
+        MessageWriter<crate::war::ThrowGrenade>,
     ),
 ) {
-    let (civilians, vehicle_state, mut vehicle_actions) = nearby;
+    let (
+        civilians,
+        vehicle_state,
+        mut vehicle_actions,
+        npc_spots,
+        mut talk_to,
+        upstairs,
+        mut grenades,
+    ) = nearby;
     let (mut campaign, mut progress, mut inventory, mut shelter, mut needs, mut game, mut session) =
         states;
     if flow.get() != &GameFlow::Playing || pause.0 || game.hp <= 0.0 || game.over {
@@ -1221,10 +1353,11 @@ fn apply_actions(
                 {
                     continue;
                 }
-                let Some(c) = container_by_id(container, &catalog, &progress) else {
+                let up = upstairs.as_deref();
+                let Some(c) = container_by_id(container, &catalog, &progress, up) else {
                     continue;
                 };
-                if c.id == HOME_TAP_ID || !container_reachable(pos, &c, &obstacles) {
+                if c.id == HOME_TAP_ID || !container_reachable(pos, &c, &obstacles, up) {
                     session.reachable = false;
                     notice.text = tr(
                         *lang,
@@ -1288,9 +1421,24 @@ fn apply_actions(
                 if prompt.0.is_some() {
                     continue;
                 }
-                let target = interaction_target(pos, &catalog, &progress, &shelter, &obstacles);
+                let driving = vehicle_state
+                    .as_deref()
+                    .is_some_and(|fleet| fleet.current.is_some());
+                let target = if driving {
+                    InteractionTarget::None
+                } else {
+                    interaction_target(
+                        pos,
+                        &catalog,
+                        &progress,
+                        &shelter,
+                        &obstacles,
+                        &npc_spots,
+                        upstairs.as_deref(),
+                    )
+                };
                 if let Some(fleet) = vehicle_state.as_deref()
-                    && (fleet.current.is_some()
+                    && (driving
                         || (matches!(target, InteractionTarget::None | InteractionTarget::Shelter)
                             && fleet.nearest(pos, 2.6).is_some_and(|vehicle| {
                                 fleet.reachable(vehicle.id, pos, &obstacles)
@@ -1298,6 +1446,10 @@ fn apply_actions(
                     && let Some(actions) = vehicle_actions.as_deref_mut()
                 {
                     actions.write(crate::vehicles::VehicleAction::Interact);
+                    continue;
+                }
+                if let InteractionTarget::Npc(spot) = &target {
+                    talk_to.write(crate::dialogue::TalkTo(spot.key));
                     continue;
                 }
                 if let InteractionTarget::Trade = target {
@@ -1410,7 +1562,7 @@ fn apply_actions(
                     prompt.0 = None;
                     continue;
                 };
-                if !container_reachable(pos, c, &obstacles) {
+                if !container_reachable(pos, c, &obstacles, None) {
                     prompt.0 = None;
                     continue;
                 }
@@ -1439,6 +1591,28 @@ fn apply_actions(
                         prompt.0 = None;
                     }
                     Err(error) => notice.text = error.message(*lang).into(),
+                }
+            }
+            WorldAction::Use(id) if id == "grenade" || id == "oldgrenade" => {
+                if vehicle_state
+                    .as_deref()
+                    .is_some_and(|fleet| fleet.current.is_some())
+                {
+                    notice.text = tr(
+                        *lang,
+                        "駕駛載具中無法投擲手榴彈。",
+                        "Cannot throw grenades while driving.",
+                    )
+                    .into();
+                    continue;
+                }
+                // v24.20 thrown the way the player faces
+                grenades.write(crate::war::ThrowGrenade(id.clone()));
+            }
+            WorldAction::Use(id) if id == "jpradio" => {
+                // v24.4 the field radio opens its own card (three kinds of support)
+                if inventory.count("jpradio") > 0 {
+                    talk_to.write(crate::dialogue::TalkTo(crate::dialogue::NpcKey::Radio));
                 }
             }
             WorldAction::Use(id) => {
@@ -1862,7 +2036,7 @@ mod tests {
         let shelter = Shelter::default();
         obstacles.doors().set_open(id, false);
         assert!(
-            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles), InteractionTarget::Door(d) if d.id == id && !d.open)
+            matches!(interaction_target(pos, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default(), None), InteractionTarget::Door(d) if d.id == id && !d.open)
         );
         assert_eq!(
             fill_water(
@@ -1880,7 +2054,7 @@ mod tests {
         obstacles.doors().set_open(id, true);
         let inside = door.p - door.n * 1.1;
         assert!(
-            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
+            matches!(interaction_target(inside, &catalog, &progress, &shelter, &obstacles, &crate::dialogue::NpcSpots::default(), None), InteractionTarget::Container(c) if c.id == HOME_TAP_ID)
         );
         fill_water(
             inside,
@@ -2390,6 +2564,9 @@ mod tests {
             .add_message::<WorldAction>()
             .add_message::<OpenPanel>()
             .add_message::<SfxEvent>()
+            .init_resource::<crate::dialogue::NpcSpots>()
+            .add_message::<crate::dialogue::TalkTo>()
+            .add_message::<crate::war::ThrowGrenade>()
             .add_systems(Update, apply_actions);
         let player = app
             .world_mut()
@@ -2516,6 +2693,9 @@ mod tests {
             .add_message::<WorldAction>()
             .add_message::<OpenPanel>()
             .add_message::<SfxEvent>()
+            .init_resource::<crate::dialogue::NpcSpots>()
+            .add_message::<crate::dialogue::TalkTo>()
+            .add_message::<crate::war::ThrowGrenade>()
             .add_systems(Update, apply_actions);
         app.world_mut().spawn((Player, Transform::default()));
         {

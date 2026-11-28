@@ -112,6 +112,8 @@ pub struct PlayerStance {
     pub light: bool,
     /// Inside a building (seen at ×0.6 range).
     pub inside: bool,
+    /// v23.4 on an upper floor: soldiers cannot follow and lose the player.
+    pub upstairs: bool,
 }
 
 /// A 解放軍 soldier. The AI state is the ported `Sol`.
@@ -123,6 +125,13 @@ pub struct Enemy(pub Soldier);
 pub struct Body {
     pub kind: EnemyKind,
     t: f32,
+}
+
+impl Body {
+    /// A body that lies for the usual time (for kills by allies and air support).
+    pub fn new(kind: EnemyKind) -> Self {
+        Self { kind, t: BODY_SECS }
+    }
 }
 
 // ── Messages ────────────────────────────────────────────────────────────
@@ -613,7 +622,7 @@ fn assign_squads(
 fn player_mark(pos: Vec2, alive: bool, st: &PlayerStance, firing: bool) -> PlayerMark {
     PlayerMark {
         pos,
-        alive,
+        alive: alive && !st.upstairs,
         sneak: st.sneak,
         cover: st.cover,
         light: st.light,

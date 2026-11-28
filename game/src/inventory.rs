@@ -108,6 +108,9 @@ impl ItemDef {
                 && (self.anti_armor == 0.0 || matches!(self.id, "at4" | "kestrel" | "jav")))
             || self.mag > 0
             || self.id == "cstove"
+            || self.id == "jpradio"
+            || self.id == "grenade"
+            || self.id == "oldgrenade"
             || matches!(self.id, "gas" | "patch" | "carbat" | "hose")
     }
 }
